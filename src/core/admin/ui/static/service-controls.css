@@ -1,0 +1,105 @@
+.asset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-action-form { margin: 0; }
+.asset-action-form .btn { padding: 5px 10px; font-size: 11px; }
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.two-column-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field-group { min-width: 0; }
+.full-field { grid-column: 1 / -1; }
+.field-hint { display: block; margin-top: 5px; }
+
+.setting-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.inline-settings-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.compact-input { width: 160px; }
+
+.rule-create-form textarea { resize: vertical; }
+.rule-create-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.rule-create-controls .field-group { flex: 0 1 240px; }
+.rule-create-controls .input { width: 100%; min-width: 0; }
+.rule-create-controls .btn { align-self: flex-end; margin-left: auto; }
+
+.rule-card { padding: 16px; }
+.rule-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.rule-author { margin-left: auto; font-size: 11px; }
+.rule-actions { margin: 10px 0 0; }
+.rule-actions .btn { padding: 5px 10px; font-size: 11px; }
+
+.service-controls-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.service-controls h3,
+.service-controls h4 {
+  margin: 20px 0 8px;
+  color: var(--fg-1);
+  letter-spacing: -0.01em;
+}
+
+.service-controls h3 { font-size: 15px; }
+.service-controls h4 { font-size: 13px; }
+.service-controls-scroll > h3:first-child { margin-top: 0; }
+.service-controls-scroll > .card { background: var(--pro-surface2); }
+
+.service-controls table {
+  min-width: 680px;
+}
+
+.service-controls .row { flex-wrap: wrap; }
+.service-controls form { max-width: 100%; }
+.service-controls form[style*="grid-template-columns"] {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+}
+
+.service-controls input:not([type="hidden"]):not([type="checkbox"]),
+.service-controls select,
+.service-controls textarea {
+  max-width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  color: var(--fg-1);
+  background: var(--pro-bg);
+  border: 1px solid var(--pro-border);
+  border-radius: 7px;
+}
+
+.service-controls input:focus,
+.service-controls select:focus,
+.service-controls textarea:focus {
+  outline: none;
+  border-color: var(--mint-500);
+}
+
+@media (max-width: 760px) {
+  .settings-form,
+  .two-column-form { grid-template-columns: 1fr; }
+  .rule-create-controls .btn { margin-left: 0; }
+}

@@ -1,0 +1,88 @@
+name: security-release
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-bookworm@sha256:da788743d2060767375896de4d646f7576f5911461444b372616f19ea61db2ec
+        env:
+          POSTGRES_USER: daski
+          POSTGRES_PASSWORD: daski
+          POSTGRES_DB: daski
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U daski -d daski"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      BASE_URL: http://127.0.0.1:4000
+      GATEWAY_BASE_URL: https://gateway.example.invalid
+      PROVIDER_NAME: CI Provider
+      MARKETPLACE_TERMS_URL: https://marketplace.example.invalid/terms
+      MARKETPLACE_PRIVACY_URL: https://marketplace.example.invalid/privacy
+      PROVIDER_TERMS_URL: https://provider.example.invalid/terms
+      PROVIDER_PRIVACY_URL: https://provider.example.invalid/privacy
+      DATABASE_URL: postgres://daski:daski@127.0.0.1:5432/daski
+      DATABASE_URL_TEST: postgres://daski:daski@127.0.0.1:5432/daski
+      DATABASE_SSL_MODE: disable
+      BASE_RPC_URL: https://sepolia.base.org
+      CHAIN_ID: "84532"
+      CHAIN_MODE: mock
+      PROVIDER_WALLET_PRIVATE_KEY: "0x1111111111111111111111111111111111111111111111111111111111111111"
+      IDENTITY_REGISTRY_ADDRESS: "0x1111111111111111111111111111111111111111"
+      SERVICE_REGISTRY_ADDRESS: "0x2222222222222222222222222222222222222222"
+      PROVIDER_AGENT_ID: "1"
+      MOCK_BUYER_WALLET_ADDRESS: "0x9999999999999999999999999999999999999999"
+      USDC_ADDRESS: "0x7777777777777777777777777777777777777777"
+      OPENAI_API_KEY: test-only
+      ADMIN_TOKEN: test-only-admin-token-0123456789abcdef
+      PROVIDER_DATA_ENCRYPTION_KEY: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      PROVIDER_DATA_ENCRYPTION_KEY_ID: ci
+      SUPPORT_EMAIL: support@example.invalid
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run security:audit
+      - run: npm run typecheck
+      - run: npm run typecheck:test
+      - run: npm run lint
+      - run: npm run lint:architecture
+      - run: npm run test:coverage
+      - run: npm run test:critical-coverage
+      - run: npm run test:mainnet-readiness
+      - run: npm run build
+      - run: node scripts/security/migration-smoke.mjs
+      - run: npm run security:postgres
+      - run: npm run security:migration-concurrency
+      - run: npm run security:pii-scan -- dist
+      - name: Secret scan
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro"
+          zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854
+          detect --source=/repo --no-git --redact
+          --config=/repo/.gitleaks.toml --exit-code=1
+      - name: Build production image
+        run: docker build -t daski-provider:ci .
+      - name: Verify production image boundary
+        run: |
+          test "$(docker image inspect -f '{{.Config.User}}' daski-provider:ci)" = "node"
+          docker run --rm --entrypoint sh daski-provider:ci -c \
+            'test ! -e /app/test && test ! -e /app/docs && test ! -e /app/scripts && test ! -e /app/.env'
+          docker run --rm --entrypoint sh daski-provider:ci -c \
+            '! grep -R -E "PaymentRouter|PAYMENT_ROUTER_ADDRESS|daski-exact" /app/dist | grep -v "^/app/dist/core/db/migrations/"'

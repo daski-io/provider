@@ -1,0 +1,68 @@
+{
+  "name": "daski-provider",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starter repository for building a service provider on Daski",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daski-io/provider.git"
+  },
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env --import=tsx src/index.ts",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc && npm run copy-assets",
+    "copy-assets": "node scripts/copy-assets.mjs",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "standard-rail:sign-offer": "node --env-file-if-exists=.env dist/core/standardRail/offerCli.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:critical-coverage": "vitest run --config vitest.critical.config.ts --coverage",
+    "test:mainnet-readiness": "vitest run test/configProductionSecurity.test.ts test/providerComposition.test.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "lint": "eslint src",
+    "lint:architecture": "node scripts/security/static-gates.mjs",
+    "security:audit": "npm audit --audit-level=moderate && npm audit --omit=dev --audit-level=moderate",
+    "security:pii-scan": "node scripts/security/pii-scan.mjs",
+    "security:postgres": "node scripts/security/postgres-security-integration.mjs",
+    "security:migration-concurrency": "node scripts/security/concurrent-migration-smoke.mjs",
+    "security:rotate": "node dist/rotateProtectedData.js"
+  },
+  "dependencies": {
+    "@signinwithethereum/siwe": "^4.2.0",
+    "ajv": "8.20.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "openai": "^4.73.0",
+    "pg": "^8.22.0",
+    "viem": "^2.55.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^9.39.5",
+    "eslint-import-resolver-typescript": "^3.10.1",
+    "eslint-plugin-import": "^2.32.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.8",
+    "js-yaml": "4.3.1",
+    "nanoid": "3.3.18",
+    "postcss": "^8.5.23",
+    "minimatch": "^10.2.5"
+  }
+}

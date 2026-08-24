@@ -1,0 +1,6 @@
+export const BASE_MAINNET_CHAIN_ID = 8453;
+
+export const BASE_MAINNET_EXTERNAL_CONTRACTS = {
+  identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+  usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+} as const;

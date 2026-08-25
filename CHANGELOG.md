@@ -23,6 +23,10 @@ All notable changes to this project will be documented here.
 
 ### Changed
 
+- Made the skill validator and doctor tooling portable across LF and CRLF
+  checkouts, and added a focused Windows tooling CI gate.
+- Clarified Provider versus upstream Supplier terminology and linked the
+  official Base Sepolia faucet directory from Testnet wallet setup.
 - Made optional LLM configuration truly optional and added concise,
   value-redacted startup configuration errors.
 - Made dummy input limits Unicode-aware and its provisioned asset identifiers

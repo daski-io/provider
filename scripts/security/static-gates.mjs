@@ -15,6 +15,10 @@ function files(path) {
 }
 
 const packageJson = JSON.parse(read("package.json"));
+const gitAttributes = read(".gitattributes");
+if (!/^\* text=auto eol=lf\s*$/m.test(gitAttributes)) {
+  failures.push("Git text files must use LF for cross-platform checksums");
+}
 if (packageJson.private !== true) {
   failures.push("package.json must prevent accidental npm publication");
 }
@@ -149,6 +153,9 @@ for (const required of [
   'tags: ["v*"]',
   "npm run docs:check",
   "npm run skill:validate",
+  "runs-on: windows-latest",
+  "Verify CRLF skill validation",
+  "needs: [verify, windows-tooling]",
   "docker compose config --quiet",
   "daski-provider-agent-skill.zip",
   "SHA256SUMS",

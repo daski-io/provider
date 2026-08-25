@@ -1,6 +1,6 @@
 ---
 name: daski-provider
-description: Adapt an existing API or MCP product into a Daski provider starter or fork, diagnose provider setup, and prepare supplier Testnet or Mainnet onboarding. Use for provider-side ServiceModule, skill, readiness, and onboarding work; do not use for Daski buyer integrations or unrelated marketplace applications.
+description: Adapt an existing API or MCP product into a Daski provider starter or fork, diagnose provider setup, and prepare provider Testnet or Mainnet onboarding. Use for provider-side ServiceModule, skill, readiness, and onboarding work; do not use for Daski buyer integrations or unrelated marketplace applications.
 license: MIT
 metadata:
   version: "1.0.0"
@@ -8,7 +8,7 @@ metadata:
 
 # Daski provider
 
-Help a supplier expose an existing product through the Daski provider without
+Help a provider expose an existing product through the Daski provider without
 weakening the provider's protocol, payment, ownership, or operational
 boundaries. Repository documentation is authoritative; this skill routes the
 work and preserves the non-obvious stopping rules.
@@ -115,7 +115,7 @@ Daski admission.
   mutations, database migrations, or releases without authorization for that
   exact environment and action.
 - Testnet is mandatory before Mainnet. Mainnet is not self-service: stop until
-  the supplier has explicit Daski whitelisting requested through the Daski
+  the provider has explicit Daski whitelisting requested through the Daski
   Discord and the coordinated release review is complete. No local flag,
   signed artifact, test result, or code change grants whitelisting.
 - Do not make readiness permissive to unblock a fixture or deployment.

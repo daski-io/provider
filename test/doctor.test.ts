@@ -19,10 +19,13 @@ function runDoctor(args: string[], env: NodeJS.ProcessEnv = {}) {
 }
 
 function runDoctorThroughNpm(args: string[], env: NodeJS.ProcessEnv = {}) {
-  const executable = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npmCli = process.env.npm_execpath;
+  if (!npmCli) {
+    throw new Error("doctor npm-path test must be launched through npm");
+  }
   return spawnSync(
-    executable,
-    ["run", "--silent", "doctor", "--", ...args],
+    process.execPath,
+    [npmCli, "run", "--silent", "doctor", "--", ...args],
     {
       cwd: root,
       encoding: "utf8",

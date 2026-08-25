@@ -12,6 +12,7 @@ the [Daski Discord](https://discord.gg/uyeMp7Q2HW).
 | Term | Meaning |
 | --- | --- |
 | Provider | Your organization and one ERC-8004 identity/wallet binding |
+| Supplier | The upstream API, MCP server, or product vendor used by the provider, even when your organization owns it |
 | Service | One coherent product boundary published by the provider |
 | Skill | One buyer-visible operation within a service |
 | Outcome | Reviewed paid listing/payment coordinate for a skill |
@@ -109,7 +110,9 @@ from separate revisions.
 
 Use a dedicated Base Sepolia wallet, separate from Mainnet and from the data
 encryption key. Fund only the bounded Testnet ETH/USDC needed for registration
-and exercises. Retain the wallet in an approved secret manager.
+and exercises. The official Base documentation maintains a current list of
+[Base Sepolia network faucets](https://docs.base.org/base-chain/network-information/network-faucets)
+for Testnet funds. Retain the wallet in an approved secret manager.
 
 ### 7. Run staged doctor
 

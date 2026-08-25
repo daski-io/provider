@@ -6,7 +6,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skillDirectory = join(ROOT, ".agents/skills/daski-provider");
 const skillPath = join(skillDirectory, "SKILL.md");
 const failures = [];
-const source = await readFile(skillPath, "utf8");
+const source = (await readFile(skillPath, "utf8")).replace(/\r\n?/g, "\n");
 
 const frontmatterMatch = /^---\n([\s\S]*?)\n---\n([\s\S]+)$/.exec(source);
 if (!frontmatterMatch) {

@@ -28,7 +28,9 @@ Required for local development:
 
 Required later for Testnet:
 
-- a dedicated Base Sepolia provider wallet with Testnet ETH;
+- a dedicated Base Sepolia provider wallet with Testnet ETH from a current
+  option in Base's official
+  [network faucet directory](https://docs.base.org/base-chain/network-information/network-faucets);
 - a stable public HTTPS origin for this provider;
 - supplier sandbox credentials or an explicit fake that cannot reach Mainnet;
   and

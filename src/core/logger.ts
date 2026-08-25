@@ -1,5 +1,5 @@
 // Single source of structured logging. Every line is one JSON object on
-// stdout (stderr for error level) so log aggregators (Railway, fluentd)
+// stdout (stderr for error level) so JSON-aware log aggregators
 // can parse without a custom transformer. Keep this module dependency-
 // free — it is imported from db/pool.ts which itself runs before config
 // resolution.

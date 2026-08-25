@@ -109,7 +109,7 @@ describe("global HTTP security boundary", () => {
   });
 
   it("strips forwarding headers instead of rejecting when no proxy topology is declared", async () => {
-    // A managed edge (e.g. Railway) unconditionally stamps X-Forwarded-*
+    // A managed edge may unconditionally stamp X-Forwarded-*
     // on every request. With zero declared hops the boundary must neither
     // trust nor 400 those headers — it strips them so downstream readers
     // see only socket-derived attribution.

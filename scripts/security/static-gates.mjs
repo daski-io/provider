@@ -67,10 +67,6 @@ if (
   failures.push("critical coverage thresholds must remain 90/85/90/90 per file");
 }
 
-const railway = JSON.parse(read("railway.json"));
-if (railway.deploy?.healthcheckPath !== "/health/ready") {
-  failures.push("deployments must gate activation on /health/ready");
-}
 const healthSource = read("src/core/health.ts");
 if (!/healthRouter\.get\(\s*["']\/ready["']/.test(healthSource)) {
   failures.push("health router must expose /health/ready");
@@ -95,6 +91,9 @@ if (!/node:24-bookworm-slim@sha256:[0-9a-f]{64}/.test(dockerfile)) {
 }
 if (!/^USER\s+(?!root\b|0\b)\S+/m.test(dockerfile)) {
   failures.push("Dockerfile runtime must use a non-root user");
+}
+if (!/^CMD\s+\["node",\s*"dist\/bootstrap\.js"\]\s*$/m.test(dockerfile)) {
+  failures.push("Dockerfile runtime must use the sanitized bootstrap");
 }
 if (/npm\s+ci[^\n]*--no-audit/.test(dockerfile)) {
   failures.push("Dockerfile must not suppress dependency audit");

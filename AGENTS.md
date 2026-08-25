@@ -108,6 +108,11 @@ adding another large branch to an already-large module.
 standard-rail artifacts and valid contract/signer bindings; placeholders are
 expected to fail.
 
+The upstream starter is hosting-neutral. The Dockerfile is the canonical
+production artifact; provider forks may add their own deployment descriptors.
+Every hosting platform must use `/health/ready` for traffic activation and
+keep at least one provider process running while services are active.
+
 Service-specific environment variables belong in
 `src/services/<slug>/config.ts` and must be parsed strictly. Keep credentials
 out of manifests, documentation, errors, and tests. Testnet services should use

@@ -1,5 +1,5 @@
 {
-  "name": "daski-provider",
+  "name": "@daski-io/provider",
   "version": "0.1.0",
   "private": true,
   "description": "Starter repository for building a service provider on Daski",

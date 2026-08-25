@@ -24,6 +24,11 @@ All notable changes to this project will be documented here.
   operator/CI script by risk.
 - Collapsed the unpublished inherited migration history into a clean starter
   baseline for new provider databases.
+- Made the Dockerfile the canonical deployment artifact and removed the
+  upstream hosting-vendor descriptor.
+- Renamed the private package metadata to match the public provider
+  repository.
+- Clarified standard-rail release accounting as an interval-based invariant.
 
 ### Removed
 

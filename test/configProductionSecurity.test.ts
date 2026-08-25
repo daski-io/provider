@@ -106,6 +106,20 @@ describe("production database security", () => {
   });
 });
 
+describe("deployment metadata", () => {
+  it("accepts a bounded platform-neutral revision", () => {
+    const parsed = parseConfig({
+      ...productionTestnetEnv(),
+      DEPLOYMENT_REVISION: "release-0.1.0",
+    });
+    expect(parsed.DEPLOYMENT_REVISION).toBe("release-0.1.0");
+    expect(() => parseConfig({
+      ...productionTestnetEnv(),
+      DEPLOYMENT_REVISION: "x".repeat(129),
+    })).toThrow(/DEPLOYMENT_REVISION/);
+  });
+});
+
 describe("Base Mainnet configuration contract", () => {
   it("accepts the standard-rail mainnet core contract", () => {
     expect(() => parseConfig(mainnetEnv())).not.toThrow();

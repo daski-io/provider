@@ -342,13 +342,28 @@ facet.
 
 ## Deployment
 
-The included Dockerfile builds a non-root Node 24 runtime. `railway.json`
-uses `/health/ready` as the activation gate, but the image works on any
-container platform that supplies PostgreSQL, HTTPS ingress, and the required
-environment. The static architecture gate intentionally verifies that
-`railway.json` keeps readiness as its health check. If you replace Railway,
-change the deployment descriptor and that assertion together only after the
-new platform has an equivalent readiness-based activation gate.
+The included Dockerfile is the canonical production artifact. It builds a
+non-root Node 24 runtime that can run on any OCI-compatible container
+platform.
+
+The upstream starter intentionally ships no hosting-vendor descriptor.
+Provider forks may add deployment configuration maintained for their chosen
+platform.
+
+Every deployment must:
+
+- run at least one continuously available provider process while services are
+  active;
+- inject configuration and secrets at runtime rather than baking them in;
+- provide stable HTTPS ingress at `BASE_URL` and durable PostgreSQL 16 or
+  newer, with verified database TLS in production;
+- expose `PORT` and route traffic only when `/health/ready` succeeds; and
+- allow the outbound HTTPS and Base RPC connections required by the gateway,
+  contracts, and installed suppliers.
+
+Set optional `DEPLOYMENT_REVISION` to a public commit, tag, or build
+identifier when you want it included in the health summary. Provider-specific
+deployment descriptors belong in the provider fork, not in this starter.
 
 Testnet is the first deployment target. Keep `CHAIN_ID=84532`, use a
 dedicated Testnet wallet and supplier sandbox, and run end-to-end purchases

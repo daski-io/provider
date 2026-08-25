@@ -94,10 +94,9 @@ export function jsonRpcInternalError(
     error: err instanceof Error ? err.message : String(err),
     stack: err instanceof Error ? err.stack : undefined,
   });
-  // Mirror into the events table so internal errors are visible in the
-  // admin Platform Log (not only in the process/Railway logs) and can be
-  // correlated back via the same ref id. Fire-and-forget: emitEvent never
-  // throws, and observability must not change the error response path.
+  // Mirror internal errors into the admin Platform Log as well as process or
+  // hosting-platform logs. emitEvent is fire-and-forget: observability must
+  // not change the response path.
   void emitEvent({
     transactionId:
       typeof logContext?.transactionId === "string"

@@ -30,7 +30,7 @@ describe("database TLS configuration", () => {
     for (const url of [
       "postgresql://user:pass@db.example.com/provider",
       "postgresql://user:pass@localhost.attacker.example/provider",
-      "postgresql://user:pass@railway.internal.attacker.example/provider",
+      "postgresql://user:pass@platform.internal.attacker.example/provider",
     ]) {
       expect(() => assertVerifiedTlsForDatabaseMutation(url, "require")).toThrow(
         "Remote database mutations require DATABASE_SSL_MODE=verify-full",

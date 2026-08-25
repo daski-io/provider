@@ -69,6 +69,8 @@ const uint256Schema = z.preprocess(
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
+  // Optional public build/deployment identifier shown on the health summary.
+  DEPLOYMENT_REVISION: z.string().trim().min(1).max(128).optional(),
   BASE_URL: z.string().url(),
   CHAIN_MODE: z.enum(["live", "mock"]).default("live"),
   MOCK_BUYER_AGENT_ID: uint256Schema.default(99n),

@@ -68,8 +68,9 @@ Deposits and releases must be in blocks strictly after activation. For the
 first release, scanning begins at activationBlockNumber + 1, the sequence must
 equal startingReleaseSequence + 1, and accounting begins with the signed
 starting balance. Later releases require the exact N - 1 release, scan strictly
-after its position, and start accounting at zero. There is no cumulative-gross
-field and no end-of-release-block balance check.
+after its position, and compute the interval gross amount from zero. Validation
+is interval-based: it does not rely on a cumulative gross value or an
+end-of-release-block balance snapshot.
 
 maximumLogPageEvents is a per-RPC-page density target. Dense multi-block
 queries are subdivided adaptively. It is not a lifetime-history cap; a single

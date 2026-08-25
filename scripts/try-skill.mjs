@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { dummyService } from "../src/services/dummy/index.ts";
 
 const usage =
-  "usage: npm run try-skill -- dummy <skill-id> '<json-object>'";
+  "usage: npm run try-skill -- dummy <skill-id> [\"<json-object>\"]";
 
 const [serviceSlug, skillId, rawInput] = process.argv.slice(2);
-if (!serviceSlug || !skillId || !rawInput) {
+if (!serviceSlug || !skillId) {
   throw new Error(usage);
 }
 
@@ -22,11 +25,22 @@ if (!skill) {
   throw new Error(`Unknown skill '${skillId}' for service '${serviceSlug}'`);
 }
 
+const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const examplePath = join(
+  repositoryRoot,
+  "examples",
+  "requests",
+  `${serviceSlug}-${skillId}.json`,
+);
+const inputSource = rawInput ? "command argument" :
+  `examples/requests/${serviceSlug}-${skillId}.json`;
+const inputText = rawInput ?? readFileSync(examplePath, "utf8");
+
 let input;
 try {
-  input = JSON.parse(rawInput);
+  input = JSON.parse(inputText);
 } catch {
-  throw new Error("skill input must be valid JSON");
+  throw new Error(`${inputSource} must contain a valid JSON object`);
 }
 if (!input || typeof input !== "object" || Array.isArray(input)) {
   throw new Error("skill input must be a JSON object");
@@ -39,6 +53,7 @@ if (!quote.ok) {
     mode: "offline-dummy-only",
     service: serviceSlug,
     skill: skillId,
+    inputSource,
     quote,
     documentation: skillDoc,
   }, bigintReplacer, 2) + "\n");
@@ -60,6 +75,7 @@ if (!quote.ok) {
       "No gateway admission, payment, database, supplier, or chain call occurred.",
     service: serviceSlug,
     skill: skillId,
+    inputSource,
     quote,
     result,
     documentation: skillDoc,

@@ -109,13 +109,18 @@ closed when a compatible extension or current policy is unavailable.
 
 Testnet and mainnet must use separate wallets, databases, keys, supplier
 accounts, and signed artifacts. Testnet is the mandatory first integration
-target.
+target. Run `npm run doctor -- --stage=testnet` before requesting onboarding;
+the command is read-only and never grants admission or replaces Daski review.
 
 A production deployment requires HTTPS, verified database TLS, a distinct
 migration role, protected-data key management, trusted proxy configuration,
 edge rate limiting, current identity/catalog/rail checks, and monitored
 readiness. Each real service must add fail-closed mainnet checks for live
 supplier mode, credentials, custody, and governance relevant to that service.
+Base Mainnet provider admission is allowlisted. After completing Testnet
+evidence and the provider security checklist, request Mainnet whitelisting in
+the official Daski Discord; never copy Testnet artifacts or treat a successful
+local check as approval.
 
 The dummy service cannot run on Base mainnet.
 

@@ -10,11 +10,15 @@ introducing a provider-specific dependency.
 nvm use
 npm ci
 cp .env.example .env
+npm run dev:db:up
+npm run doctor -- --stage=testnet
 ```
 
 The unit suite does not require a populated `.env`, PostgreSQL, an RPC, or a
 supplier. Full runtime boot requires the Testnet onboarding values described in
-the README.
+the README. The bundled PostgreSQL 16 service binds only to loopback and is for
+local development; never point disposable-database security scripts at a shared
+database.
 
 ## Where code belongs
 
@@ -38,6 +42,8 @@ npm run typecheck
 npm run typecheck:test
 npm run lint
 npm run lint:architecture
+npm run docs:check
+npm run skill:validate
 npm run test:run
 npm run build
 ```

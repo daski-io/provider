@@ -27,7 +27,16 @@ if (
 ) {
   failures.push("runtime entrypoints must use the sanitized bootstrap");
 }
+const bootstrapSource = read("src/bootstrap.ts");
+if (!bootstrapSource.includes("npm run doctor -- --stage=testnet")) {
+  failures.push(
+    "sanitized configuration failures must route operators to read-only doctor",
+  );
+}
 for (const script of [
+  "doctor",
+  "docs:check",
+  "skill:validate",
   "typecheck",
   "typecheck:test",
   "test:run",
@@ -106,6 +115,7 @@ for (const entry of [
   ".git",
   ".github",
   ".claude",
+  "compose.yaml",
   "docs",
   "scripts",
   "test",
@@ -113,6 +123,40 @@ for (const entry of [
   "**/captures",
 ]) {
   if (!ignored.has(entry)) failures.push(`.dockerignore must exclude ${entry}`);
+}
+
+const composeSource = read("compose.yaml");
+if (!/postgres:16-bookworm@sha256:[0-9a-f]{64}/.test(composeSource)) {
+  failures.push("compose.yaml must pin the reviewed PostgreSQL 16 image digest");
+}
+if (
+  !composeSource.includes('"127.0.0.1:55432:5432"')
+  || !/^\s*network_mode:\s*bridge\s*$/m.test(composeSource)
+) {
+  failures.push("the local PostgreSQL service must publish only on loopback");
+}
+if (
+  !composeSource.includes("provider_postgres_data:/var/lib/postgresql/data")
+  || !composeSource.includes("name: daski-provider-dev-postgres")
+) {
+  failures.push("the local PostgreSQL service must use its named development volume");
+}
+for (const requiredPath of ["scripts/doctor.mjs", ".agents/skills/daski-provider/SKILL.md"]) {
+  if (!existsSync(join(root, requiredPath))) failures.push(`${requiredPath} is missing`);
+}
+const releaseWorkflow = read(".github/workflows/security-release.yml");
+for (const required of [
+  'tags: ["v*"]',
+  "npm run docs:check",
+  "npm run skill:validate",
+  "docker compose config --quiet",
+  "daski-provider-agent-skill.zip",
+  "SHA256SUMS",
+  "gh release create",
+]) {
+  if (!releaseWorkflow.includes(required)) {
+    failures.push(`security-release workflow is missing: ${required}`);
+  }
 }
 
 const sourceFiles = files(join(root, "src"));
@@ -341,15 +385,20 @@ for (const file of productionSources) {
   }
 }
 
-for (const publicDoc of [
+const publicDocs = [
   "README.md",
   "SECURITY.md",
   ...files(join(root, "docs")),
-]) {
+];
+for (const publicDoc of publicDocs) {
   const source = readFileSync(publicDoc, "utf8");
-  if (/\.claude\//.test(source)) {
+  const path = projectPath(publicDoc);
+  if (/\.claude\//.test(source) && path !== "docs/agent-skill.md") {
     failures.push(`${projectPath(publicDoc)} references a harness-local file`);
   }
+}
+if (!read("docs/agent-skill.md").includes(".agents/skills/daski-provider")) {
+  failures.push("agent skill guide must keep the portable installation canonical");
 }
 
 if (failures.length > 0) {

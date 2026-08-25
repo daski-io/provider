@@ -44,6 +44,11 @@ only core and cross-service tests.
 ## Commands
 
 ```bash
+npm run dev:db:up
+npm run doctor -- --stage=testnet
+npm run try-skill -- dummy echo
+npm run docs:check
+npm run skill:validate
 npm run dev
 npm run typecheck
 npm run typecheck:test
@@ -57,9 +62,12 @@ npm run build
 npm start
 ```
 
-Node 24 and PostgreSQL are required. Unit tests need no live database, RPC, or
-supplier. PostgreSQL security/migration scripts require an explicitly selected
-disposable database.
+Node 24 and PostgreSQL 16 are required. The bundled Compose service is a
+loopback-only development database; `npm run dev:db:stop` preserves its named
+volume. `doctor` is read-only and reports stable, redacted setup findings for
+local, Testnet, or Mainnet. Unit tests need no live database, RPC, or supplier.
+PostgreSQL security/migration scripts require an explicitly selected disposable
+database.
 
 ## Change workflow
 
@@ -136,16 +144,25 @@ The dummy service must remain incapable of booting on Base mainnet.
 
 Start at `README.md`, then use:
 
+- `docs/getting-started.md`
+- `docs/integrating-existing-product.md`
 - `docs/adding-a-service.md`
+- `docs/configuration.md`
+- `docs/onboarding.md`
+- `docs/troubleshooting.md`
 - `docs/architecture.md`
 - `docs/daski-skill-creation-best-practices.md`
 - `docs/protocol-cheatsheet.md`
 - `docs/service-taxonomy.md`
 - `docs/standard-rail-evidence-v2.md`
+- `docs/agent-skill.md`
+- `docs/releasing.md`
 - `SECURITY.md`
 
-Do not leave the only copy of a durable decision in `.claude/`, `.codex/`,
-another harness directory, or assistant memory.
+The portable agent entrypoint is `.agents/skills/daski-provider/SKILL.md`. It
+routes agents to the tracked documentation and must not become a second manual.
+Do not leave the only copy of a durable decision in a harness directory or
+assistant memory.
 
 ## Git policy
 

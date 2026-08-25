@@ -31,6 +31,7 @@ scripts
 !scripts/copy-assets.mjs
 **/fixtures
 **/captures
+compose.yaml
 **/audits/**
 **/reports/**
 **/audit-*.md

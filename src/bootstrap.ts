@@ -6,6 +6,7 @@ try {
   if (error instanceof Error && error.name === "ConfigurationError") {
     logError("Startup configuration is invalid", {
       details: error.message,
+      hint: "Run npm run doctor -- --stage=testnet for redacted setup guidance.",
     });
   } else {
     logError("Startup import failed", errorExtra(error));

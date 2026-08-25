@@ -1,0 +1,28 @@
+name: daski-provider-dev
+
+services:
+  postgres:
+    image: postgres:16-bookworm@sha256:da788743d2060767375896de4d646f7576f5911461444b372616f19ea61db2ec
+    # This one-service stack needs no Compose DNS. The default bridge keeps
+    # loopback publication working on Docker Desktop versions that omit port
+    # mappings on generated bridges.
+    network_mode: bridge
+    environment:
+      POSTGRES_DB: daski_provider
+      POSTGRES_USER: daski_provider
+      POSTGRES_PASSWORD: local-only-provider-password
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - provider_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U daski_provider -d daski_provider"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  provider_postgres_data:
+    name: daski-provider-dev-postgres

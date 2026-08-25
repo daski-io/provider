@@ -6,9 +6,18 @@ never point smoke tests at a shared, Testnet, or production database.
 
 ## Safe local learning
 
-- `npm run try-skill -- dummy <skill-id> '<json-object>'` invokes only the
-  bundled dummy adapter in memory. It deliberately refuses real services and
+- `npm run try-skill -- dummy echo` and
+  `npm run try-skill -- dummy create-note` load tracked request examples and
+  invoke only the bundled dummy adapter in memory. An optional JSON object may
+  be supplied as a final argument. The command refuses real services and
   performs no gateway, payment, database, supplier, or chain work.
+- `npm run doctor -- --stage=<local|testnet|mainnet>` performs redacted,
+  read-only environment, repository, PostgreSQL, and configuration checks.
+  Add `--live` only when bounded provider-health and Base RPC reads are wanted;
+  `--json` emits stable machine-readable check codes. It does not register,
+  deploy, fund, sign, whitelist, migrate, or call a supplier.
+- `npm run dev:db:up` starts the loopback-only PostgreSQL 16 development
+  service. `npm run dev:db:stop` stops it while preserving its named volume.
 - `npm run copy-assets` copies core UI assets and every installed service's
   documentation into `dist/`; `npm run build` runs it automatically.
 

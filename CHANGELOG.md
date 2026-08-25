@@ -13,6 +13,13 @@ All notable changes to this project will be documented here.
   guidance.
 - Genericity and composition gates that prevent known provider-specific
   services, suppliers, brands, and policies from entering the starter.
+- Human-first onboarding guides for existing API and MCP products, including
+  Testnet evidence, Mainnet allowlisting, configuration, and troubleshooting.
+- A loopback-only PostgreSQL 16 Compose service and a read-only, redacted
+  `doctor` for local, Testnet, and Mainnet readiness diagnostics.
+- A harness-agnostic Agent Skill under `.agents/skills/` plus installation and
+  validation guidance for compatible coding agents.
+- Documentation, skill, and release-package validation gates.
 
 ### Changed
 

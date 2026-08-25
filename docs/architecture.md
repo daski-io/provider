@@ -46,6 +46,7 @@ src/
 test/                         core and cross-service tests
 docs/                         public provider integration guidance
 scripts/                      build, registration, migration, and security tools
+.agents/skills/daski-provider/ portable agent router into the public docs
 ```
 
 `src/providerExtensions/` is intentionally absent until a provider needs a
@@ -201,4 +202,9 @@ Mock chain mode is limited to provider-only testing. The gateway has no fake
 local facilitator, so mock mode is not an end-to-end payment topology.
 
 Base mainnet requires a separate coordinated release and fails closed while
-the dummy service is installed.
+the dummy service is installed. Provider admission is allowlisted; complete the
+[Testnet onboarding checklist](onboarding.md) and ask for Mainnet whitelisting
+through the official Daski Discord.
+
+The hosting-neutral deployment contract and release evidence are described in
+[getting started](getting-started.md) and [releasing](releasing.md).

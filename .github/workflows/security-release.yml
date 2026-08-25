@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [develop, main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -63,6 +64,9 @@ jobs:
       - run: npm run typecheck:test
       - run: npm run lint
       - run: npm run lint:architecture
+      - run: npm run docs:check
+      - run: npm run skill:validate
+      - run: docker compose config --quiet
       - run: npm run test:coverage
       - run: npm run test:critical-coverage
       - run: npm run test:mainnet-readiness
@@ -86,3 +90,43 @@ jobs:
             'test ! -e /app/test && test ! -e /app/docs && test ! -e /app/scripts && test ! -e /app/.env'
           docker run --rm --entrypoint sh daski-provider:ci -c \
             '! grep -R -E "PaymentRouter|PAYMENT_ROUTER_ADDRESS|daski-exact" /app/dist | grep -v "^/app/dist/core/db/migrations/"'
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+      - name: Verify tag and package version
+        run: >-
+          node -e 'const fs=require("node:fs");
+          const expected=process.env.GITHUB_REF_NAME.slice(1);
+          const actual=require("./package.json").version;
+          const source=fs.readFileSync(".agents/skills/daski-provider/SKILL.md","utf8");
+          const skill=/^  version: "([^"]+)"$/m.exec(source)?.[1];
+          if(actual!==expected||skill!==expected){throw new Error(
+          `tag ${expected} does not match package ${actual} and skill ${skill}`)}'
+      - name: Build release archives
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="provider-${VERSION}/" \
+            --output="provider-${VERSION}.tar.gz" HEAD
+          git archive --format=zip --prefix=daski-provider/ \
+            --output=daski-provider-agent-skill.zip \
+            HEAD:.agents/skills/daski-provider
+          sha256sum "provider-${VERSION}.tar.gz" \
+            daski-provider-agent-skill.zip > SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          provider-*.tar.gz daski-provider-agent-skill.zip SHA256SUMS

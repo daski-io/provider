@@ -1,8 +1,9 @@
 # Adding a service
 
 This guide turns the compiled `dummy` module into a real provider-owned Daski
-service. Read the [architecture](architecture.md) and
-[security model](../SECURITY.md) first.
+service. If you already expose a product through HTTP or MCP, begin with
+[integrating an existing product](integrating-existing-product.md). Then read
+the [architecture](architecture.md) and [security model](../SECURITY.md).
 
 ## 1. Define the offering with Daski
 
@@ -431,12 +432,18 @@ npm run typecheck
 npm run typecheck:test
 npm run lint
 npm run lint:architecture
+npm run docs:check
+npm run skill:validate
 npm run test:run
 npm run test:coverage
 npm run test:critical-coverage
 npm run test:mainnet-readiness
 npm run build
 ```
+
+Run `npm run doctor -- --stage=testnet`, then follow the
+[onboarding checklist](onboarding.md). A passing diagnostic does not create or
+approve signed standard-rail artifacts.
 
 After a successful Testnet boot, inspect:
 

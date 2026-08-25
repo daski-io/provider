@@ -15,10 +15,14 @@ function assert(condition, message) {
 
 export async function verifySupplierOperationDiagnostics() {
   const service = await pool.query(
-    "SELECT id FROM services WHERE slug = 'dummy'",
+    `SELECT id
+       FROM services
+      WHERE is_active = true
+      ORDER BY created_at, id
+      LIMIT 1`,
   );
   const serviceId = service.rows[0]?.id;
-  assert(serviceId, "dummy service is unavailable for supplier diagnostic test");
+  assert(serviceId, "an active service is required for supplier diagnostics");
   const opKey = `security-diagnostic:${randomUUID()}`;
   const request = { testId: randomUUID() };
   const executeSentinel = "SUPPLIER_EXECUTE_ARBITRARY_SENTINEL";

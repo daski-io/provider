@@ -114,6 +114,10 @@ describe("agent card generator", () => {
 
     expect(ext.x402Version).toBe(2);
     expect(ext.facilitatorUrl).toBe("https://gateway.test");
+    expect(card.capabilities).toMatchObject({
+      streaming: false,
+      pushNotifications: false,
+    });
   });
 
   it("emits service taxonomy and per-skill fulfillment without the legacy category", () => {

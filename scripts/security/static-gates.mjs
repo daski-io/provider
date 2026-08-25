@@ -21,6 +21,12 @@ if (packageJson.private !== true) {
 if (packageJson.engines?.node !== ">=24.0.0 <25") {
   failures.push("package.json must restrict production to Node 24");
 }
+if (
+  !packageJson.scripts?.dev?.includes("src/bootstrap.ts")
+  || !packageJson.scripts?.start?.includes("dist/bootstrap.js")
+) {
+  failures.push("runtime entrypoints must use the sanitized bootstrap");
+}
 for (const script of [
   "typecheck",
   "typecheck:test",
@@ -311,7 +317,7 @@ const reusableCoreEntrypoints = [
   "src/core/suppliers/resourceLock.ts",
 ];
 const pending = [
-  join(root, "src/index.ts"),
+  join(root, "src/bootstrap.ts"),
   join(root, "src/rotateProtectedData.ts"),
   join(root, "src/core/standardRail/offerCli.ts"),
   ...reusableCoreEntrypoints.map((path) => join(root, path)),

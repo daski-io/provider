@@ -42,7 +42,7 @@ export function generateAgentCard(
     }],
     capabilities: {
       streaming: false,
-      pushNotifications: true,
+      pushNotifications: false,
       extensions: [{
         uri: DASKI_EXT_URI,
         description:

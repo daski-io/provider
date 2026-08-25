@@ -7,9 +7,12 @@ import { skills } from "../manifest.js";
 
 const adapter = new DummyAdapter();
 
-function task(skillId: string): TaskContext {
+function task(
+  skillId: string,
+  id = "00000000-0000-4000-8000-000000000001",
+): TaskContext {
   return {
-    id: "task-dummy-1",
+    id,
     service_id: "service-dummy-1",
     skill_id: skillId,
     status: "working",
@@ -17,7 +20,7 @@ function task(skillId: string): TaskContext {
 }
 
 describe("dummy service", () => {
-  it("ships complete docs for every declared skill", () => {
+  it("ships complete docs and request examples for every declared skill", () => {
     expect(dummyService.manifest.slug).toBe("dummy");
     expect(Object.keys(dummyService.protocol.docs.skills).sort())
       .toEqual(skills.map((skill) => skill.id).sort());
@@ -26,6 +29,7 @@ describe("dummy service", () => {
     );
     for (const doc of Object.values(dummyService.protocol.docs.skills)) {
       expect(doc).not.toContain("Documentation unavailable");
+      expect(doc).toContain("## Example request");
     }
   });
 
@@ -64,6 +68,7 @@ describe("dummy service", () => {
       ok: true,
       amount: BigInt(NOTE_PRICE_ATOMIC),
       currency: "USDC",
+      notes: [expect.stringContaining("unique task id")],
     });
 
     const result = await adapter.execute(
@@ -76,34 +81,57 @@ describe("dummy service", () => {
       artifacts: [{
         name: "note_created",
         data: {
-          note: "launch-checklist",
+          note: "launch-checklist-00000000-0000-4000-8000-000000000001",
           title: "Launch Checklist!",
           characters: 11,
         },
       }],
       asset: {
         assetType: "note",
-        assetIdentifier: "launch-checklist",
+        assetIdentifier:
+          "launch-checklist-00000000-0000-4000-8000-000000000001",
         assetData: {
           title: "Launch Checklist!",
           characters: 11,
         },
       },
     });
-    expect(await dummyService.assets?.assetIdentifierFromData?.(
+  });
+
+  it("uses the task id to keep repeated paid titles collision-safe", async () => {
+    const first = await adapter.execute(
       "create-note",
-      { title: "Launch Checklist!" },
-    )).toBe("launch-checklist");
-    expect(await dummyService.assets?.assetIdentifierFromData?.(
-      "echo",
-      { title: "Launch Checklist!" },
-    )).toBeNull();
+      task("create-note", "00000000-0000-4000-8000-000000000001"),
+      { title: "Same title", body: "🙂" },
+    );
+    const second = await adapter.execute(
+      "create-note",
+      task("create-note", "00000000-0000-4000-8000-000000000002"),
+      { title: "Same title", body: "🙂" },
+    );
+    expect(first.asset?.assetIdentifier)
+      .toBe("same-title-00000000-0000-4000-8000-000000000001");
+    expect(second.asset?.assetIdentifier)
+      .toBe("same-title-00000000-0000-4000-8000-000000000002");
+    expect(second.asset?.assetIdentifier).not.toBe(first.asset?.assetIdentifier);
+    expect(first.asset?.assetData.characters).toBe(1);
   });
 
   it("rejects invalid and unknown requests without side effects", async () => {
     await expect(adapter.quote("echo", { message: " " })).resolves.toMatchObject({
       ok: false,
       errors: [{ field: "message", code: "missing" }],
+    });
+    await expect(adapter.quote("create-note", {
+      title: "Valid",
+      body: "x".repeat(2_001),
+    })).resolves.toMatchObject({
+      ok: false,
+      errors: [{ field: "body", code: "too_long" }],
+    });
+    await expect(adapter.quote("unknown", {})).resolves.toMatchObject({
+      ok: false,
+      errors: [{ field: "skillId", code: "unknown_skill" }],
     });
     await expect(adapter.execute(
       "create-note",

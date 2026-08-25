@@ -9,7 +9,15 @@ provider request flow.
 
 | Field | Type | Constraints |
 | --- | --- | --- |
-| `message` | string | 1–500 characters |
+| `message` | string | 1–500 Unicode code points |
+
+## Example request
+
+```json
+{
+  "message": "hello daski"
+}
+```
 
 ## Output
 

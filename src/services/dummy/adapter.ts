@@ -73,7 +73,10 @@ export class DummyAdapter implements FulfillmentAdapter {
           ok: true,
           amount: BigInt(NOTE_PRICE_ATOMIC),
           currency: "USDC",
-          notes: [`note identifier will be '${title.ok ? title.identifier : ""}'`],
+          notes: [
+            `note identifier prefix will be '${title.ok ? title.identifier : ""}'; ` +
+              "the final identifier includes the unique task id",
+          ],
         };
       }
       default:

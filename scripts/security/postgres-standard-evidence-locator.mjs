@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 
 const { admitStandardEvidence } = await import(
   "../../dist/core/standardRail/evidenceAdmissions.js"
@@ -10,18 +9,25 @@ function assert(condition, message) {
 }
 
 export async function verifyStandardEvidenceLocatorIndex(pool) {
-  const migration = await readFile(
-    new URL("../../dist/core/db/migrations/041_standard_rail_hardening.sql", import.meta.url),
-    "utf8",
-  );
-  const indexSql = migration.match(
-    /CREATE UNIQUE INDEX standard_evidence_chain_locator_unique_idx[\s\S]*?;/,
-  )?.[0];
-  assert(indexSql, "standard evidence locator index is missing");
-
   const schema = `standard_evidence_${randomUUID().replaceAll("-", "")}`;
   const client = await pool.connect();
   try {
+    const installedIndex = await client.query(
+      `SELECT pg_get_indexdef(
+         to_regclass('public.standard_evidence_chain_locator_unique_idx')
+       ) AS definition`,
+    );
+    const indexSql = installedIndex.rows[0]?.definition;
+    assert(indexSql, "standard evidence locator index is missing");
+    const scratchIndexSql = indexSql.replace(
+      / ON public\.standard_evidence_admissions /,
+      ` ON "${schema}".standard_evidence_admissions `,
+    );
+    assert(
+      scratchIndexSql !== indexSql,
+      "standard evidence locator index targets the wrong table",
+    );
+
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
     await client.query(`CREATE TABLE standard_evidence_admissions (
@@ -42,7 +48,7 @@ export async function verifyStandardEvidenceLocatorIndex(pool) {
         (evidence_kind = 'release' AND release_sequence BETWEEN 1 AND 18446744073709551615)
       )
     )`);
-    await client.query(indexSql);
+    await client.query(scratchIndexSql);
 
     const scopedPool = {
       connect: async () => ({

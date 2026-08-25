@@ -3,7 +3,11 @@ import type {
   TaskContext,
 } from "../../../core/serviceRegistry/types.js";
 import { NOTE_ASSET_TYPE } from "../config.js";
-import { validateBody, validateTitle } from "../validation.js";
+import {
+  countCharacters,
+  validateBody,
+  validateTitle,
+} from "../validation.js";
 
 /// Paid skill: FIRST-TIME provisioning. Returning the `asset` block makes
 /// the engine INSERT the assets row and link it to the transaction — the
@@ -11,7 +15,7 @@ import { validateBody, validateTitle } from "../validation.js";
 /// EXISTING asset must mutate it in place instead and omit `asset` (see the
 /// AdapterResult docs).
 export async function executeCreateNote(
-  _task: TaskContext,
+  task: TaskContext,
   data: Record<string, unknown>,
 ): Promise<AdapterResult> {
   const title = validateTitle(data.title);
@@ -23,23 +27,27 @@ export async function executeCreateNote(
     return { status: "failed", error: bodyInvalid.message };
   }
   const body = typeof data.body === "string" ? data.body : "";
+  const identifier = `${title.identifier}-${task.id.toLowerCase()}`;
   return {
     status: "completed",
-    message: `Note '${title.identifier}' created.`,
+    message: `Note '${identifier}' created.`,
     artifacts: [
       {
         name: "note_created",
         data: {
-          note: title.identifier,
+          note: identifier,
           title: data.title as string,
-          characters: body.length,
+          characters: countCharacters(body),
         },
       },
     ],
     asset: {
       assetType: NOTE_ASSET_TYPE,
-      assetIdentifier: title.identifier,
-      assetData: { title: data.title as string, characters: body.length },
+      assetIdentifier: identifier,
+      assetData: {
+        title: data.title as string,
+        characters: countCharacters(body),
+      },
     },
   };
 }

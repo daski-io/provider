@@ -55,9 +55,15 @@ const adminTokenSchema = z.string().min(32).refine(
   { message: "must be a high-entropy secret and not a documented placeholder" },
 );
 const UINT256_MAX = (1n << 256n) - 1n;
-const uint256Schema = z.coerce.bigint().refine(
-  (value) => value >= 0n && value <= UINT256_MAX,
-  { message: "must fit an unsigned 256-bit integer" },
+const uint256Schema = z.preprocess(
+  (value) =>
+    typeof value === "string" && /^\d+$/.test(value.trim())
+      ? BigInt(value.trim())
+      : value,
+  z.bigint({ invalid_type_error: "must be an unsigned decimal integer" }).refine(
+    (value) => value >= 0n && value <= UINT256_MAX,
+    { message: "must fit an unsigned 256-bit integer" },
+  ),
 );
 
 const envSchema = z.object({
@@ -138,7 +144,10 @@ const envSchema = z.object({
     message: "CHAIN_ID must be Base (8453) or Base Sepolia (84532)",
   }),
   CHAIN_WRITE_FINALITY_CONFIRMATIONS: z.coerce.number().int().min(1).max(10_000).default(12),
-  PROVIDER_WALLET_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+  PROVIDER_WALLET_PRIVATE_KEY: z.string().regex(
+    /^0x[0-9a-fA-F]{64}$/,
+    "must be 0x followed by exactly 64 hexadecimal characters",
+  ),
   IDENTITY_REGISTRY_ADDRESS: addressSchema,
   SERVICE_REGISTRY_ADDRESS: addressSchema,
   // The provider's ERC-8004 agentId. Constant across all services.
@@ -147,7 +156,7 @@ const envSchema = z.object({
 
   // LLM client (core). Used by the pre-execute agent runner. Per-service
   // prompts override only the system prompt; the model + key are global.
-  OPENAI_API_KEY: z.string(),
+  OPENAI_API_KEY: z.string().default(""),
   LLM_MODEL: z.string().default("gpt-5.4-mini"),
   // Per-agent model overrides. Both fall back to LLM_MODEL when unset, so
   // existing deploys keep working. The tool-using triage / operator agents
@@ -437,11 +446,31 @@ const envSchema = z.object({
 
 export type Config = z.infer<typeof envSchema>;
 
+export class ConfigurationError extends Error {
+  constructor(issues: string[]) {
+    super(
+      "Invalid configuration:\n" +
+        issues.map((issue) => `- ${issue}`).join("\n"),
+    );
+    this.name = "ConfigurationError";
+  }
+}
+
 export function parseConfig(env: NodeJS.ProcessEnv): Config {
   if (env.PAYMENT_RAIL !== undefined) {
-    throw new Error("PAYMENT_RAIL is retired; the provider always uses standard Exact-EVM");
+    throw new ConfigurationError([
+      "PAYMENT_RAIL is retired; the provider always uses standard Exact-EVM",
+    ]);
   }
-  return envSchema.parse(env);
+  const parsed = envSchema.safeParse(env);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") : "environment";
+      return `${path}: ${issue.message}`;
+    });
+    throw new ConfigurationError([...new Set(issues)]);
+  }
+  return parsed.data;
 }
 
 export const config: Config = parseConfig(process.env);

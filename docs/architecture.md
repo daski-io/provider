@@ -7,13 +7,14 @@ service modules implement the product being sold.
 ## Dependency direction
 
 ```text
-src/index.ts
-  ├─ providerServices.ts ───────────────> services/<slug>/
-  ├─ providerLaunchPolicy.ts
-  ├─ providerScreening.ts
-  └─ core/
-       ↑
-       └──────────────── services consume core contracts
+src/bootstrap.ts
+  └─ index.ts
+       ├─ providerServices.ts ───────────> services/<slug>/
+       ├─ providerLaunchPolicy.ts
+       ├─ providerScreening.ts
+       └─ core/
+            ↑
+            └──────────── services consume core contracts
 ```
 
 The allowed dependency direction is strict:
@@ -37,6 +38,8 @@ src/
       docs/
       skills/
       tests/                  service-owned tests
+  providerExtensions/
+    <name>/                   optional provider policy/vendor implementation
   providerServices.ts         installed services
   providerLaunchPolicy.ts     exact paid outcome/action allowlist
   providerScreening.ts        optional policy extension composition
@@ -44,6 +47,11 @@ test/                         core and cross-service tests
 docs/                         public provider integration guidance
 scripts/                      build, registration, migration, and security tools
 ```
+
+`src/providerExtensions/` is intentionally absent until a provider needs a
+private policy integration. Such an extension is wired only through the root
+`providerScreening.ts` composition boundary; it cannot import services, and
+services cannot import it.
 
 ## Service modules
 

@@ -48,7 +48,7 @@ export const skills: SkillDefinition[] = [
       "artifact, completing immediately. No payment, ownership, or " +
       "authorization requirements — the minimal end-to-end round trip for " +
       "verifying connectivity with this provider. Send `message` (1-500 " +
-      "characters); the response artifact `echo_result` carries the same " +
+      "Unicode code points); the response artifact `echo_result` carries the same " +
       "text plus the service's processing timestamp.",
     examples: [
       "Echo the message 'hello daski'",
@@ -70,9 +70,10 @@ export const skills: SkillDefinition[] = [
       "Paid demonstration skill: validates a short note and provisions a " +
       "non-sensitive asset owned by the wallet-authorized payer. Requires " +
       "payment ($0.10 USDC) but no additional authorization. Send `title` " +
-      "(1-80 characters, becomes the kebab-case asset identifier) and optional " +
-      "`body` (up to 2,000 characters). The body is not retained. Completes " +
-      "with a `note_created` artifact naming the asset identifier.",
+      "(1-80 Unicode code points, becomes the asset-identifier prefix) and " +
+      "optional `body` (up to 2,000 Unicode code points). A unique task id " +
+      "suffix prevents repeated titles from colliding. The body is not retained. " +
+      "Completes with a `note_created` artifact naming the asset identifier.",
     examples: [
       "Create a note titled 'Launch checklist'",
       "Store a note with title 'ideas' and body 'ship the template repo'",

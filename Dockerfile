@@ -17,7 +17,7 @@ RUN npm prune --omit=dev
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
-LABEL org.opencontainers.image.source="https://github.com/daski-io/daski-provider" \
+LABEL org.opencontainers.image.source="https://github.com/daski-io/provider" \
       org.opencontainers.image.description="Daski provider runtime"
 
 COPY --chown=node:node package.json package-lock.json ./
@@ -32,4 +32,4 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 ENV NODE_ENV=production
 EXPOSE 4000
 USER node
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/bootstrap.js"]

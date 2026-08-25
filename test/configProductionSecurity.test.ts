@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseConfig } from "../src/core/config.js";
+import {
+  ConfigurationError,
+  parseConfig,
+} from "../src/core/config.js";
 import { BASE_MAINNET_EXTERNAL_CONTRACTS } from "../src/core/chain/reviewedDeployments.js";
 
 function productionTestnetEnv(): NodeJS.ProcessEnv {
@@ -78,6 +81,28 @@ describe("production database security", () => {
       HTTP_HEADERS_TIMEOUT_MS: "20000",
       HTTP_REQUEST_TIMEOUT_MS: "10000",
     })).toThrow(/header timeout/);
+  });
+
+  it("reports placeholder fields without echoing their values", () => {
+    const privateValue = "not-a-valid-private-key-and-never-print-this";
+    try {
+      parseConfig({
+        ...productionTestnetEnv(),
+        PROVIDER_AGENT_ID: "REPLACE_WITH_ERC_8004_AGENT_ID",
+        PROVIDER_WALLET_PRIVATE_KEY: privateValue,
+        OPENAI_API_KEY: undefined,
+      });
+      throw new Error("expected configuration parsing to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationError);
+      expect((error as Error).message).toContain(
+        "PROVIDER_AGENT_ID: must be an unsigned decimal integer",
+      );
+      expect((error as Error).message).toContain(
+        "PROVIDER_WALLET_PRIVATE_KEY: must be 0x followed by exactly 64 hexadecimal characters",
+      );
+      expect((error as Error).message).not.toContain(privateValue);
+    }
   });
 });
 

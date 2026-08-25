@@ -13,12 +13,14 @@
     "node": ">=24.0.0 <25"
   },
   "scripts": {
-    "dev": "node --watch --env-file-if-exists=.env --import=tsx src/index.ts",
+    "dev": "node --watch --env-file-if-exists=.env --import=tsx src/bootstrap.ts",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc && npm run copy-assets",
     "copy-assets": "node scripts/copy-assets.mjs",
-    "start": "node --env-file-if-exists=.env dist/index.js",
+    "start": "node --env-file-if-exists=.env dist/bootstrap.js",
     "standard-rail:sign-offer": "node --env-file-if-exists=.env dist/core/standardRail/offerCli.js",
+    "try-skill": "node --import=tsx scripts/try-skill.mjs",
+    "ops:sync-preexecute": "node --env-file-if-exists=.env --import=tsx scripts/sync-preexecute-llm-config.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

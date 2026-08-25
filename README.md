@@ -63,12 +63,19 @@ You need:
 - a dedicated Base Sepolia provider wallet with Testnet ETH;
 - a public HTTPS origin for the running provider;
 - current Testnet contract coordinates and signed standard-rail artifacts from
-  Daski provider onboarding; and
+  [Daski provider onboarding](https://daski.io/providers); and
 - supplier sandbox credentials, if your replacement service calls a supplier.
 
 A full server will not boot from placeholder configuration. This is deliberate:
 the provider validates its identity, catalog, gateway signer, contracts, and
 signed outcome/action sets before listening.
+
+Daski onboarding reviews your service and supplies a mutually consistent set of
+public Testnet coordinates and signed outcome, servicing-admission, and
+asset-action artifacts. Providers do not generate or edit those artifacts.
+Start at the [provider page](https://daski.io/providers), or use the
+[Daski Discord](https://discord.gg/uyeMp7Q2HW) if you need an onboarding
+contact.
 
 ## Testnet-first quickstart
 
@@ -82,6 +89,21 @@ npm ci
 cp .env.example .env
 ```
 
+Before configuring a database, wallet, or contracts, exercise the bundled
+reference adapter locally:
+
+```bash
+npm run try-skill -- dummy echo '{"message":"Hello, Daski"}'
+npm run try-skill -- dummy create-note '{"title":"First note","body":"Hello"}'
+```
+
+This command deliberately works only with `dummy`. It invokes that adapter in
+memory and prints the quote, result, and skill documentation. It does not
+perform gateway admission, payment verification, persistence, supplier calls,
+or chain writes, so it is a learning aid rather than an integration or
+security test. Real services should be exercised through their co-located
+tests and then through the Testnet gateway.
+
 Create a local PostgreSQL database:
 
 ```bash
@@ -93,6 +115,9 @@ Edit `.env`. Start with Base Sepolia (`CHAIN_ID=84532`) and
 artifacts supplied during Daski onboarding without modifying them.
 
 Before attempting a network boot, verify the repository:
+
+The template shows the variables every deployment must consider. Less common
+tunables and their safe defaults are documented inline in `src/core/config.ts`.
 
 ```bash
 npm run typecheck
@@ -169,7 +194,7 @@ requires a complete, internally consistent contract deployment, facilitator,
 signer set, and newly signed artifacts; it is an advanced protocol-development
 path, not the provider quickstart.
 
-`CHAIN_MODE=mock` exists for bounded provider-only testing. It binds the
+`CHAIN_MODE=mock` exists only for bounded provider-side testing. It binds the
 provider to loopback and requires an explicit mock buyer wallet, but it does
 not remove the standard-rail artifact requirements and cannot stand in for a
 paid gateway integration.
@@ -181,7 +206,7 @@ paid gateway integration.
 | Skill | Price | Demonstrates |
 | --- | --- | --- |
 | `echo` | Free | input validation, immediate execution, and an artifact |
-| `create-note` | 0.10 USDC | quote validation, paid dispatch, canonical asset identity, and asset provisioning |
+| `create-note` | 0.10 USDC | quote validation, paid dispatch, collision-safe asset identity, and asset provisioning |
 
 The service has no supplier, custom database table, private policy, background
 worker, or wallet asset action. Its tests live in
@@ -208,8 +233,9 @@ version is:
 5. Register the module once in `src/providerServices.ts`.
 6. Replace the dummy outcome in `src/providerLaunchPolicy.ts` with the exact
    outcome/action set reviewed during Daski onboarding.
-7. Remove `src/services/dummy` and prove the genericity and composition tests
-   still pass.
+7. Remove `src/services/dummy` and its offline `try-skill` command when it
+   is no longer useful, then prove the genericity and composition tests still
+   pass.
 8. Deploy to Testnet, exercise free and paid paths through the gateway, and
    review durable evidence before considering mainnet.
 
@@ -278,6 +304,9 @@ Service-owned tests belong under
 `src/services/<slug>/tests`. Keep `test/` for core and genuinely
 cross-service contracts.
 
+Operator and CI helpers are catalogued with their prerequisites and mutation
+risks in [`scripts/README.md`](scripts/README.md).
+
 | Command | Purpose |
 | --- | --- |
 | `npm run test:run` | Complete unit suite; no live database or chain required |
@@ -302,7 +331,9 @@ never target a shared or production database.
   `/.well-known/agent-registration.json`
 - `/agent-cards/<slug>.json`, `/skills/*`, and `/llms.txt`
 - `/standard-rail/*`
-- `/a2a/:serviceSlug`
+- `/a2a/:serviceSlug` — JSON-RPC `SendMessage` for admitted open free
+  work and `GetTask` for polling; streaming, task listing, cancellation, and
+  push-configuration methods are not implemented
 - `/admin/ui/*` and `/admin/*`
 - `/webhooks/postmark/*`
 
@@ -314,13 +345,48 @@ facet.
 The included Dockerfile builds a non-root Node 24 runtime. `railway.json`
 uses `/health/ready` as the activation gate, but the image works on any
 container platform that supplies PostgreSQL, HTTPS ingress, and the required
-environment.
+environment. The static architecture gate intentionally verifies that
+`railway.json` keeps readiness as its health check. If you replace Railway,
+change the deployment descriptor and that assertion together only after the
+new platform has an equivalent readiness-based activation gate.
 
 Testnet is the first deployment target. Keep `CHAIN_ID=84532`, use a
 dedicated Testnet wallet and supplier sandbox, and run end-to-end purchases
 through the Daski gateway. Mainnet requires a separate security/release review,
 production database roles and TLS, edge/proxy controls, live supplier
 readiness, and removal of the dummy service.
+
+## Staying current
+
+Fork [daski-io/provider](https://github.com/daski-io/provider) when possible
+instead of copying the files without history. A fork retains upstream lineage
+for protocol and security updates:
+
+```bash
+git remote add upstream https://github.com/daski-io/provider.git
+git fetch upstream
+git merge upstream/develop
+```
+
+Keep provider-specific work concentrated in `src/services/`, the root
+composition files, your optional `src/providerExtensions/` implementations,
+environment configuration, and deployment files. Review upstream changes
+before merging, resolve schema and policy changes deliberately, and rerun the
+complete quality gates plus Testnet purchases. Never overwrite an applied
+migration to make an update merge cleanly.
+
+After forking, replace the vulnerability-reporting destination in
+[`SECURITY.md`](SECURITY.md) with a private channel operated by your
+organization.
+
+## Working with coding agents
+
+[`AGENTS.md`](AGENTS.md) is the repository's authoritative guide for coding
+agents. Ask an agent to read it before making changes, keep service tests and
+docs beside the service, and record durable decisions in repository
+documentation. An agent must not bypass readiness, weaken signed-artifact
+validation, fabricate onboarding artifacts, or run mutating operator scripts
+against shared environments to make a task appear complete.
 
 ## Documentation
 
@@ -332,6 +398,7 @@ readiness, and removal of the dummy service.
 - [Standard-rail evidence V2](docs/standard-rail-evidence-v2.md)
 - [Security model](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+- [Operator and CI scripts](scripts/README.md)
 
 ## License
 

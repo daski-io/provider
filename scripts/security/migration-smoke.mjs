@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 
 const { runMigrations, closeMigrationPool, pool } = await import("../../dist/core/db/pool.js");
 const {
@@ -13,165 +12,86 @@ const { registerService } = await import("../../dist/core/serviceRegistry/regist
 const { installProviderScreening } = await import("../../dist/providerScreening.js");
 const { providerServices } = await import("../../dist/providerServices.js");
 
-async function verifyConfirmationPayloadUpgrade() {
-  const schema = `confirmation_upgrade_${randomUUID().replaceAll("-", "")}`;
-  const liveId = randomUUID();
-  const historicalId = randomUUID();
-  const encryptedId = randomUUID();
+async function verifyBaselineSecuritySchema() {
+  const columns = await pool.query(
+    `SELECT table_name, column_name
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN (
+          'operator_confirmation_intents',
+          'supplier_operations'
+        )`,
+  );
+  const confirmationColumns = new Set(
+    columns.rows
+      .filter((row) => row.table_name === "operator_confirmation_intents")
+      .map((row) => row.column_name),
+  );
+  const supplierColumns = new Set(
+    columns.rows
+      .filter((row) => row.table_name === "supplier_operations")
+      .map((row) => row.column_name),
+  );
+  if (
+    confirmationColumns.has("pending_payload")
+    || !confirmationColumns.has("pending_payload_encrypted")
+    || !confirmationColumns.has("payload_purged_at")
+  ) {
+    throw new Error("fresh baseline exposes an unsafe confirmation payload schema");
+  }
+  if (supplierColumns.has("error") || !supplierColumns.has("error_code")) {
+    throw new Error("fresh baseline exposes an unsafe supplier diagnostic schema");
+  }
+
+  const service = await pool.query(
+    "SELECT id FROM services WHERE is_active = true ORDER BY created_at, id LIMIT 1",
+  );
+  if (!service.rows[0]?.id) {
+    throw new Error("fresh baseline smoke requires one registered active service");
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`CREATE SCHEMA "${schema}"`);
-    await client.query(`SET LOCAL search_path TO "${schema}", public`);
-    await client.query(
-      `CREATE TABLE operator_confirmation_intents (
-         id UUID PRIMARY KEY,
-         action_name TEXT NOT NULL,
-         target_type TEXT NOT NULL,
-         target_id TEXT NOT NULL,
-         pending_payload JSONB NOT NULL DEFAULT '{}',
-         pending_payload_encrypted TEXT,
-         consumed_at TIMESTAMPTZ,
-         voided_at TIMESTAMPTZ,
-         execution_status TEXT NOT NULL DEFAULT 'not_started',
-         execution_finished_at TIMESTAMPTZ,
-         execution_error_code TEXT,
-         execution_error_summary TEXT
-       )`,
-    );
-    await client.query(
-      `INSERT INTO operator_confirmation_intents(
-         id, action_name, target_type, target_id, pending_payload,
-         pending_payload_encrypted, consumed_at
-       ) VALUES
-         ($1,'live.action','asset','live-target',$4,NULL,NULL),
-         ($2,'historical.action','asset','historical-target',$4,NULL,now()),
-         ($3,'encrypted.action','asset','encrypted-target',$4,'daski:v1:test',NULL)`,
-      [liveId, historicalId, encryptedId, JSON.stringify({ secret: "legacy-secret" })],
-    );
-    const migration = await readFile(
-      "dist/core/db/migrations/036_confirmation_payload_confidentiality.sql",
-      "utf8",
-    );
-    await client.query(migration);
-
-    const columns = await client.query(
-      `SELECT column_name FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = 'operator_confirmation_intents'`,
-      [schema],
-    );
-    const names = new Set(columns.rows.map((row) => row.column_name));
-    if (names.has("pending_payload") || !names.has("payload_purged_at")) {
-      throw new Error("confirmation payload upgrade did not remove its plaintext column");
-    }
-    const rows = await client.query(
-      `SELECT id, action_name, target_id, pending_payload_encrypted,
-              consumed_at, voided_at, execution_status
-         FROM operator_confirmation_intents
-        ORDER BY action_name`,
-    );
-    const live = rows.rows.find((row) => row.id === liveId);
-    const historical = rows.rows.find((row) => row.id === historicalId);
-    const encrypted = rows.rows.find((row) => row.id === encryptedId);
-    if (!live?.voided_at || live.execution_status !== "failed") {
-      throw new Error("unencrypted live confirmation survived the upgrade");
-    }
-    if (
-      historical?.action_name !== "historical.action"
-      || historical.target_id !== "historical-target"
-      || !historical.consumed_at
-    ) {
-      throw new Error("confirmation upgrade discarded safe historical metadata");
-    }
-    if (encrypted?.voided_at || encrypted?.pending_payload_encrypted !== "daski:v1:test") {
-      throw new Error("encrypted live confirmation was invalidated by the upgrade");
-    }
-
     await client.query("SAVEPOINT invalid_live_payload");
-    let rejected = false;
+    let livePayloadRejected = false;
     try {
       await client.query(
         `INSERT INTO operator_confirmation_intents(
-           id, action_name, target_type, target_id, pending_payload_encrypted
-         ) VALUES ($1,'invalid.action','asset','invalid-target',NULL)`,
-        [randomUUID()],
+           id, operator_wallet, thread_id, action_name, arguments_hash,
+           target_type, target_id, expires_at, pending_payload_encrypted
+         ) VALUES (
+           $1, '0x0000000000000000000000000000000000000001', $2,
+           'invalid.action', $3, 'asset', 'invalid-target',
+           now() + interval '5 minutes', NULL
+         )`,
+        [randomUUID(), randomUUID(), Buffer.alloc(32)],
       );
     } catch {
-      rejected = true;
+      livePayloadRejected = true;
       await client.query("ROLLBACK TO SAVEPOINT invalid_live_payload");
     }
-    if (!rejected) throw new Error("confirmation payload upgrade left live plaintext authority");
-    await client.query("ROLLBACK");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-async function verifySupplierDiagnosticUpgrade() {
-  const schema = `supplier_diagnostic_${randomUUID().replaceAll("-", "")}`;
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`CREATE SCHEMA "${schema}"`);
-    await client.query(`SET LOCAL search_path TO "${schema}", public`);
-    await client.query(
-      `CREATE TABLE supplier_operations (
-         id UUID PRIMARY KEY,
-         state TEXT NOT NULL,
-         error TEXT
-       )`,
-    );
-    await client.query(
-      `INSERT INTO supplier_operations(id, state, error) VALUES
-         ($1, 'ambiguous', 'buyer-secret@example.test'),
-         ($2, 'failed', '/private/supplier/path'),
-         ($3, 'confirmed', 'historical noise')`,
-      [randomUUID(), randomUUID(), randomUUID()],
-    );
-    const migration = await readFile(
-      "dist/core/db/migrations/037_supplier_operation_error_codes.sql",
-      "utf8",
-    );
-    await client.query(migration);
-
-    const columns = await client.query(
-      `SELECT column_name FROM information_schema.columns
-        WHERE table_schema = $1 AND table_name = 'supplier_operations'`,
-      [schema],
-    );
-    const names = new Set(columns.rows.map((row) => row.column_name));
-    if (names.has("error") || !names.has("error_code")) {
-      throw new Error("supplier diagnostic upgrade retained its plaintext column");
-    }
-    const rows = await client.query(
-      "SELECT state, error_code FROM supplier_operations ORDER BY state",
-    );
-    const codes = Object.fromEntries(
-      rows.rows.map((row) => [row.state, row.error_code]),
-    );
-    if (
-      codes.ambiguous !== "legacy.ambiguous"
-      || codes.failed !== "legacy.failed"
-      || codes.confirmed !== null
-    ) {
-      throw new Error("supplier diagnostic upgrade did not map legacy states");
+    if (!livePayloadRejected) {
+      await client.query("ROLLBACK TO SAVEPOINT invalid_live_payload");
+      throw new Error("fresh baseline accepts live plaintext confirmation authority");
     }
 
-    await client.query("SAVEPOINT invalid_error_code");
-    let rejected = false;
+    await client.query("SAVEPOINT invalid_supplier_error_code");
+    let supplierErrorRejected = false;
     try {
       await client.query(
-        "UPDATE supplier_operations SET error_code = 'raw supplier message'",
+        `INSERT INTO supplier_operations(
+           id, service_id, op_key, kind, error_code
+         ) VALUES ($1, $2, $3, 'smoke', 'raw supplier message')`,
+        [randomUUID(), service.rows[0].id, `smoke:${randomUUID()}`],
       );
     } catch {
-      rejected = true;
-      await client.query("ROLLBACK TO SAVEPOINT invalid_error_code");
+      supplierErrorRejected = true;
+      await client.query("ROLLBACK TO SAVEPOINT invalid_supplier_error_code");
     }
-    if (!rejected) {
-      throw new Error("supplier diagnostic error-code constraint was not enforced");
+    if (!supplierErrorRejected) {
+      await client.query("ROLLBACK TO SAVEPOINT invalid_supplier_error_code");
+      throw new Error("fresh baseline accepts an unbounded supplier diagnostic");
     }
     await client.query("ROLLBACK");
   } catch (error) {
@@ -260,8 +180,7 @@ try {
   if (Number(core.rows[0].n) !== 0 || missingServiceChecksums !== 0) {
     throw new Error("migration checksum evidence is incomplete");
   }
-  await verifyConfirmationPayloadUpgrade();
-  await verifySupplierDiagnosticUpgrade();
+  await verifyBaselineSecuritySchema();
   await verifyDurableJobFencing();
   process.stdout.write("core and service migration smoke passed\n");
 } finally {

@@ -5,12 +5,18 @@ starter and the obligations of a provider that adds a real service.
 
 ## Reporting a vulnerability
 
-Use a private GitHub security advisory or contact the Daski repository
-maintainers privately. Do not put exploit details, credentials, customer data,
-protected payloads, or affected transaction identifiers in a public issue.
+For this upstream starter, open a
+[private GitHub security advisory](https://github.com/daski-io/provider/security/advisories/new).
+Do not put exploit details, credentials, customer data, protected payloads, or
+affected transaction identifiers in a public issue.
 
 Include the affected commit, chain/environment, reproduction conditions, and
 the smallest safe proof needed to validate the finding.
+
+Providers who fork this repository must replace this destination with a
+private security channel they operate. Report vulnerabilities in a provider's
+deployment or customer/supplier data to that provider, not to this upstream
+starter.
 
 ## Threat model
 

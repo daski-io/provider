@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
 const databaseUrl = process.env.DATABASE_URL_TEST ??
   "postgresql://postgres:password@localhost:5433/daski_gateway_test";
 
-describe("standard reputation write migration against PostgreSQL", () => {
+describe("standard reputation baseline against PostgreSQL", () => {
   it("admits the standard outcome purpose without reopening retired writes", async () => {
     const schema = `provider_reputation_${randomUUID().replaceAll("-", "")}`;
     const client = new pg.Client({ connectionString: databaseUrl });
@@ -19,17 +18,9 @@ describe("standard reputation write migration against PostgreSQL", () => {
         purpose TEXT NOT NULL,
         CONSTRAINT provider_chain_writes_purpose_check CHECK (purpose IN (
           'reputation_attestation','refund_approval','refund','service_registration',
-          'service_uri_update','nonce_cancel'
+          'service_uri_update','nonce_cancel','standard_reputation_outcome'
         ))
       )`);
-      const migration = readFileSync(
-        new URL(
-          "../src/core/db/migrations/045_standard_reputation_outcome_writes.sql",
-          import.meta.url,
-        ),
-        "utf8",
-      );
-      await client.query(migration);
       await expect(client.query(
         "INSERT INTO provider_chain_writes (id,purpose) VALUES ($1,$2)",
         [randomUUID(), "standard_reputation_outcome"],

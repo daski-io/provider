@@ -9,8 +9,12 @@ export const TITLE_MAX = 80;
 export const BODY_MAX = 2_000;
 export const MESSAGE_MAX = 500;
 
-/// Canonical note identifier: kebab-case of the title. "Launch Checklist!"
-/// → "launch-checklist". Deterministic so the buyer can re-derive it.
+export function countCharacters(value: string): number {
+  return Array.from(value).length;
+}
+
+/// Canonical note identifier prefix: kebab-case of the title.
+/// "Launch Checklist!" → "launch-checklist".
 export function noteIdentifierFromTitle(title: string): string | null {
   const identifier = title
     .toLowerCase()
@@ -26,7 +30,7 @@ export function validateTitle(value: unknown): { ok: true; identifier: string } 
       error: { field: "title", code: "missing", message: "title is required" },
     };
   }
-  if (value.length > TITLE_MAX) {
+  if (countCharacters(value) > TITLE_MAX) {
     return {
       ok: false,
       error: {
@@ -55,7 +59,7 @@ export function validateBody(value: unknown): QuoteError | null {
   if (typeof value !== "string") {
     return { field: "body", code: "invalid", message: "body must be a string" };
   }
-  if (value.length > BODY_MAX) {
+  if (countCharacters(value) > BODY_MAX) {
     return {
       field: "body",
       code: "too_long",
@@ -69,7 +73,7 @@ export function validateMessage(value: unknown): QuoteError | null {
   if (typeof value !== "string" || value.trim().length === 0) {
     return { field: "message", code: "missing", message: "message is required" };
   }
-  if (value.length > MESSAGE_MAX) {
+  if (countCharacters(value) > MESSAGE_MAX) {
     return {
       field: "message",
       code: "too_long",

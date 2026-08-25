@@ -327,6 +327,11 @@ only the minimum safe data through `buildPreExecuteReviewData`.
 
 ## 10. Assemble the module
 
+If screening is required, place the provider-owned policy/vendor adapter under
+`src/providerExtensions/<name>/` and wire it only through
+`src/providerScreening.ts`. The service declares subjects and scopes; it
+must not import the extension or know which vendor implements the policy.
+
 ```typescript
 export const reportBuilderService: ServiceModule = {
   manifest,
@@ -366,9 +371,10 @@ suite's coverage and add the risks your service introduces:
 - docs exactly cover declared skills;
 - valid/invalid/free/paid quotes;
 - execute revalidation;
-- artifacts and canonical asset identifiers;
+- exact field bounds, including Unicode code-point boundaries;
+- artifacts and canonical, collision-safe asset identifiers;
 - supplier success, rejection, retry, ambiguity, and reconciliation;
-- idempotency and concurrent attempts;
+- idempotency, repeated equivalent inputs, and concurrent attempts;
 - cancellation before and after each irreversible boundary;
 - readiness in sandbox/live modes;
 - protected-data redaction and rotation;
@@ -396,9 +402,10 @@ export const providerServices: ServiceModule[] = [reportBuilderService];
 
 Remove the dummy import and folder when you no longer need the reference.
 
-If the service requires a provider screening policy, implement it outside both
-core and service code, then install it through `src/providerScreening.ts`.
-The service declares subjects/scopes; the extension declares policy/vendor.
+If the service requires a provider screening policy, implement it under
+`src/providerExtensions/<name>/`, outside both core and service code, then
+install it through `src/providerScreening.ts`. The service declares
+subjects/scopes; the extension declares policy/vendor.
 
 ## 13. Coordinate the launch policy
 

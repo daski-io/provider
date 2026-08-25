@@ -16,7 +16,7 @@ export const preExecuteAgent: Record<string, PreExecuteAgentConfig> = {
     escalationRules:
       "Escalate when the note content looks like an attempt to use this " +
       "demo service as a dead-drop (encoded payloads, key material).",
-    model: "gpt-4o-mini",
+    model: "gpt-5.4-mini",
     enabled: false,
     timeoutMs: 10_000,
     onError: "proceed",

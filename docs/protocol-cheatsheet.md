@@ -18,6 +18,15 @@ The provider accepts paid work only through the standard Exact-EVM rail.
 There is no provider payment endpoint, local facilitator, native settlement
 router, or alternate payment-rail selector.
 
+## Direct A2A methods
+
+`POST /a2a/:serviceSlug` accepts JSON-RPC `SendMessage` only for admitted,
+open, free skills. `GetTask` polls a public free task when the initial call
+does not return a terminal result. `SubscribeToTask` and `ListTasks` return
+an explicit unsupported-operation error; `CancelTask` and push-configuration
+methods are not implemented. Paid and order-bound work always enters through
+the Daski gateway and standard rail.
+
 ## Provider endpoints
 
 - `GET /health/live`

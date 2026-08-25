@@ -22,6 +22,7 @@ the README.
 - One service's behavior and tests: `src/services/<slug>/`
 - Installed services: `src/providerServices.ts`
 - Reviewed paid outcomes/actions: `src/providerLaunchPolicy.ts`
+- Optional provider policy/vendor implementations: `src/providerExtensions/`
 - Core/cross-service tests: `test/`
 
 Core may not import a service, and sibling services may not import each other.

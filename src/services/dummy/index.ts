@@ -5,7 +5,6 @@ import type { ServiceModule } from "../../core/serviceRegistry/types.js";
 import { manifest, skills } from "./manifest.js";
 import { DummyAdapter } from "./adapter.js";
 import { preExecuteAgent } from "./preExecuteAgent.js";
-import { noteIdentifierFromTitle } from "./validation.js";
 
 // Compiled and tested reference implementation of ServiceModule.
 // docs/adding-a-service.md walks through copying this folder.
@@ -34,14 +33,6 @@ export const dummyService: ServiceModule = {
       skills: Object.fromEntries(
         skills.map((skill) => [skill.id, tryDoc(skill.id, fallback(skill.id))]),
       ),
-    },
-  },
-  assets: {
-    assetIdentifierFromData(skillId, data) {
-      if (skillId !== "create-note") return null;
-      return typeof data.title === "string"
-        ? noteIdentifierFromTitle(data.title)
-        : null;
     },
   },
 };

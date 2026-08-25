@@ -10,9 +10,11 @@ tested, always-current demonstration:
 | `create-note` | $0.10 | payment | quote validation, paid execution, asset provisioning |
 
 A "note" is an asset: `create-note` provisions it under the payer wallet using
-the title's kebab-case canonical identifier. Only the title and body character
-count enter asset metadata; the body is not retained. Do not send sensitive
-content to this demonstration service.
+a title-derived kebab-case prefix plus the task id. Repeating a title therefore
+cannot collide with an earlier paid order. Length limits and reported counts
+use Unicode code points rather than UTF-16 code units. Only the title and body
+character count enter asset metadata; the body is not retained. Do not send
+sensitive content to this demonstration service.
 
 The dummy intentionally has no asset action because it is not part of the
 reviewed launch action catalog.

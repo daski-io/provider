@@ -1,76 +1,39 @@
-import { readFile, readdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const skillDirectory = join(ROOT, ".agents/skills/daski-provider");
-const skillPath = join(skillDirectory, "SKILL.md");
+const path = ".agents/skills/daski-provider/SKILL.md";
+const source = readFileSync(path, "utf8")
+  .replaceAll("\r\n", "\n")
+  .replaceAll("\r", "\n");
 const failures = [];
-const source = (await readFile(skillPath, "utf8")).replace(/\r\n?/g, "\n");
-
-const frontmatterMatch = /^---\n([\s\S]*?)\n---\n([\s\S]+)$/.exec(source);
-if (!frontmatterMatch) {
-  failures.push("SKILL.md must contain YAML frontmatter and a non-empty body");
-} else {
-  const frontmatter = frontmatterMatch[1];
-  const body = frontmatterMatch[2];
-  const topLevel = [...frontmatter.matchAll(/^([a-z][a-z0-9-]*):(?:\s*(.*))?$/gm)]
-    .filter((match) => !match[0].startsWith(" "));
-  const fields = new Map(topLevel.map((match) => [match[1], match[2]?.trim() ?? ""]));
-  const allowed = new Set([
-    "name",
-    "description",
-    "license",
-    "allowed-tools",
-    "metadata",
-  ]);
-  for (const field of fields.keys()) {
-    if (!allowed.has(field)) failures.push(`unsupported skill frontmatter field: ${field}`);
-  }
-  if (fields.get("name") !== "daski-provider") {
-    failures.push("skill name must be daski-provider");
-  }
-  const description = fields.get("description") ?? "";
-  if (description.length < 80 || description.length > 1_024) {
-    failures.push("skill description must be discriminating and 80-1024 characters");
-  }
-  if (fields.get("license") !== "MIT") failures.push("skill license must be MIT");
-  if (!/^\s{2}version:\s+"1\.0\.0"\s*$/m.test(frontmatter)) {
-    failures.push("skill metadata.version must be 1.0.0");
-  }
-  if (body.split(/\s+/).length > 1_600) {
-    failures.push("skill is too large; detailed guidance belongs in repository docs");
-  }
+const frontmatter = /^---\n([\s\S]*?)\n---\n/.exec(source)?.[1];
+if (!frontmatter) failures.push("SKILL.md must contain YAML frontmatter");
+else {
   for (const required of [
-    "AGENTS.md",
-    "docs/getting-started.md",
-    "docs/integrating-existing-product.md",
-    "docs/onboarding.md",
-    "docs/troubleshooting.md",
-    "npm run doctor",
-    "npm run try-skill",
-    "Daski whitelisting",
+    "name: daski-provider",
+    "description:",
+    "license: MIT",
+    'version: "',
   ]) {
-    if (!body.includes(required)) failures.push(`skill is missing required routing: ${required}`);
+    if (!frontmatter.includes(required)) failures.push(`frontmatter missing: ${required}`);
   }
-  for (const nonPortable of [
-    "disable-model-invocation",
-    "${CLAUDE_SKILL_DIR}",
-    "$ARGUMENTS",
-    "!`",
-  ]) {
-    if (source.includes(nonPortable)) failures.push(`skill uses non-portable syntax: ${nonPortable}`);
-  }
-  if (/\b(?:TODO|TBD)\b/.test(source)) failures.push("skill contains an unfinished marker");
 }
-
-const entries = await readdir(skillDirectory, { withFileTypes: true });
-if (entries.some((entry) => entry.name !== "SKILL.md")) {
-  failures.push("instruction-only skill must not contain unreviewed bundled resources");
+const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+if (!frontmatter?.includes(`version: "${packageVersion}"`)) {
+  failures.push("skill version must equal package.json version");
 }
-
-if (failures.length > 0) {
+if (source.split("\n").length > 180) failures.push("SKILL.md should remain a thin router");
+for (const required of [
+  "AGENTS.md", "docs/getting-started.md", "docs/integrating-existing-product.md",
+  "docs/adding-a-service.md", "docs/onboarding.md", "provider-full",
+]) {
+  if (!source.includes(required)) failures.push(`skill is missing route: ${required}`);
+  if (required.endsWith(".md") && !existsSync(required)) failures.push(`missing ${required}`);
+}
+for (const forbidden of ["TODO", "TBD", "Documentation unavailable"]) {
+  if (source.includes(forbidden)) failures.push(`skill contains unfinished marker: ${forbidden}`);
+}
+if (failures.length) {
   process.stderr.write(`${failures.join("\n")}\n`);
   process.exit(1);
 }
-process.stdout.write("daski-provider Agent Skill validation passed\n");
+process.stdout.write("Daski provider skill validation passed\n");

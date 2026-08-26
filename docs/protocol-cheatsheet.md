@@ -1,54 +1,96 @@
-# Standard-rail protocol cheatsheet
+# Protocol cheatsheet
 
-The provider accepts paid work only through the standard Exact-EVM rail.
+This is an orientation aid, not a substitute for the signed artifacts or core
+validators.
 
-## Payment and dispatch
+## Discovery
 
-1. The gateway obtains a provider-signed quote for an admitted outcome.
-2. The buyer signs an EIP-3009 `transferWithAuthorization` for exact USDC.
-3. The facilitator submits that authorization directly to the outcome's
-   immutable splitter.
-4. The gateway independently verifies the deposit event and sends a signed,
-   recipe-bound dispatch to the provider.
-5. The provider verifies the gateway signer, audience, order, quote, request
-   hash, policy hashes, deadlines, and replay state before fulfillment.
-6. Provider terminal attestations and chain evidence drive the gateway order
-   state machine. Launch payments are not automatically reversed after release.
+| Surface | Purpose |
+| --- | --- |
+| `/.well-known/agent.json` | Provider-level ERC-8004 discovery |
+| `/.well-known/agent-registration.json` | Registration metadata for reviewed onboarding tooling |
+| `/agent-cards/<slug>.json` | One service's capabilities and protocol endpoint |
+| `/skills/<slug>.md` | Service documentation |
+| `/skills/<slug>/<skill>.md` | Skill documentation |
+| `/llms.txt` | Agent-readable documentation index |
+| `/standard-rail/outcomes` | Non-secret summary of installed reviewed outcomes |
 
-There is no provider payment endpoint, local facilitator, native settlement
-router, or alternate payment-rail selector.
+## Paid order
 
-## Direct A2A methods
+This starter implements fixed listing quotes only. Daski signs `QuoteV1` from
+the reviewed fixed offer; there is no provider quote callback.
 
-`POST /a2a/:serviceSlug` accepts JSON-RPC `SendMessage` only for admitted,
-open, free skills. `GetTask` polls a public free task when the initial call
-does not return a terminal result. `SubscribeToTask` and `ListTasks` return
-an explicit unsupported-operation error; `CancelTask` and push-configuration
-methods are not implemented. Paid and order-bound work always enters through
-the Daski gateway and standard rail.
+The gateway sends `/standard-rail/dispatch` with exactly:
 
-## Provider endpoints
+```text
+dispatch       SignedEnvelope<StandardRailDispatchV2>
+quote          SignedEnvelope<QuoteV1>
+request        object matching the reviewed JSON Schema
+evidenceBundle StandardEvidenceBundleV2 (deposit + release)
+```
 
-- `GET /health/live`
-- `GET /health/ready`
-- `GET /.well-known/agent.json`
-- `POST /standard-rail/quote`
-- `POST /standard-rail/dispatch`
-- lifecycle, outcome, and evidence operations under `/standard-rail`
+Core verifies the gateway signature and every domain/payment/request binding.
+On success it returns a provider-signed terminal response whose state is
+`completed` or `failed`. Calls that fail admission receive a generic error and
+never invoke the service.
 
-The exact schemas are defined in `src/core/standardRail/schema.ts` and
-`src/core/standardRail/types.ts`. Treat signatures and hash fields as opaque
-protocol commitments; callers must canonicalize exactly as the gateway does.
+The gateway can query `/standard-rail/dispatch/status` with a signed
+`DispatchStatusQueryV1`. The query is bound to the original order and dispatch
+hash. A changed replay is rejected.
 
-## ERC-8004 identity
+## Service result
 
-`PROVIDER_AGENT_ID` identifies the provider in the canonical per-chain
-ERC-8004 registry. The provider refuses startup unless the registry's verified
-`agentWallet` matches `PROVIDER_WALLET_PRIVATE_KEY`.
+Successful service execution returns:
 
-## Ownership and subsequent actions
+```json
+{
+  "status": "completed",
+  "message": "Optional public summary",
+  "artifacts": [
+    {
+      "name": "result",
+      "mimeType": "application/json",
+      "data": { "example": true }
+    }
+  ]
+}
+```
 
-Standard dispatch records the payer and order identity on the task. Subsequent
-asset mutations use the provider's capability schemas and the identity bound
-to that standard order. A public task ID or transaction hash is never an
-authorization credential.
+A controlled failure returns:
+
+```json
+{
+  "status": "failed",
+  "errorCode": "stable_product_error",
+  "message": "Safe public explanation"
+}
+```
+
+Do not return pending states, access-bearing product credentials, raw upstream
+responses, or unbounded artifacts. Core caps the total encoded result at 1 MB.
+
+## Fixed outcome coordination
+
+The following must agree exactly:
+
+- service and skill ids in the installed `ServiceModule`;
+- fixed atomic-USDC price in the skill manifest;
+- outcome id in `src/providerLaunchPolicy.ts`;
+- request schema, fixed price, capacity, deadline, token, payee, contract
+  provenance, and hashes in Daski-issued `STANDARD_RAIL_OUTCOMES_JSON`; and
+- provider wallet, identity, public audience, environment, and chain.
+
+A mismatch is a boot or dispatch failure. Request a new coordinated artifact;
+never loosen exact-set validation or edit an issued artifact.
+
+## Terms
+
+| Term | Meaning |
+| --- | --- |
+| Provider | The organization operating this runtime and its ERC-8004 identity |
+| Supplier | The upstream API, MCP server, or product, even if provider-owned |
+| Service | One coherent public product boundary |
+| Skill | One buyer-visible fixed operation |
+| Outcome | The reviewed listing/payment coordinate for a skill |
+| Gateway | Daski entrypoint that admits payment and signs provider calls |
+| Payer | Wallet authorized and verified by the standard rail |

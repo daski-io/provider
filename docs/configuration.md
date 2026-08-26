@@ -1,251 +1,141 @@
 # Configuration
 
-`.env.example` is the Testnet-first configuration worksheet. Copy it to
-`.env` for local development, keep `.env` untracked, and inject the same names
-from a secret manager in deployed environments.
+Copy `.env.example` to `.env` for local work. Production secrets belong in the
+hosting platform's secret manager, not in Git, images, logs, support bundles,
+or agent prompts.
 
-This guide covers every variable in the template. Less common tuning values
-and their validated defaults live next to the schema in `src/core/config.ts`.
-Service-specific variables belong in `src/services/<slug>/config.ts` and
-should be documented with that service.
+Configuration fails closed at startup. The Base chain, audiences, wallet,
+outcome, contracts, and hashes form one coordinated release set; do not mix
+Testnet/Mainnet or revisions.
 
-## Loading and precedence
+## Provider and runtime
 
-`npm run dev`, `npm start`, and `npm run doctor` load `.env` when it exists
-using Node's native environment-file support. Values already supplied by the
-process environment take precedence. Container platforms should inject values
-at runtime rather than copy `.env` into an image.
-
-Doctor reports whether a required name came from `.env`, the process
-environment, or is missing. It never prints secret values.
-
-## Stage posture
-
-| Stage | `NODE_ENV` | `CHAIN_ID` | `CHAIN_MODE` | `STANDARD_RAIL_ENVIRONMENT` |
-| --- | --- | --- | --- | --- |
-| Local provider tests | `development` or `test` | `84532` | `mock` or `live` | `testnet` when artifacts are loaded |
-| Testnet deployment | normally `production` | `84532` | `live` | `testnet` |
-| Mainnet deployment | `production` | `8453` | `live` | `mainnet` |
-
-Production means long-lived deployment hygiene, even on Testnet. Mainnet adds
-separate fail-closed contract, proxy, edge, supplier, custody, and governance
-requirements.
-
-## Runtime and public origins
-
-| Variable | Purpose and rules |
+| Variable | Purpose and rule |
 | --- | --- |
-| `NODE_ENV` | `development`, `test`, or `production`. Mainnet requires `production`. |
-| `PORT` | HTTP listen port; defaults to 4000. The container exposes the platform-supplied port. |
-| `DEPLOYMENT_REVISION` | Optional public commit, tag, or build id shown in health output; maximum 128 characters. |
-| `BASE_URL` | Stable public origin of this provider. Production and signed audiences require credential-free HTTPS. Mock mode requires loopback. |
-| `GATEWAY_BASE_URL` | Public Daski gateway origin used by standard-rail/admin enrichment. It must agree with the signed gateway origin. |
-| `CHAIN_MODE` | `live` for Testnet/Mainnet. `mock` is loopback-only provider testing and never a paid gateway topology. |
+| `NODE_ENV` | `development`, `test`, or `production`; Base Mainnet requires `production`. |
+| `PORT` | HTTP port, default `4000`. |
+| `DEPLOYMENT_REVISION` | Optional public-safe commit/image identifier, at most 128 characters. |
+| `BASE_URL` | This provider's exact public origin; HTTPS in production. Loopback only when `CHAIN_MODE=mock`. |
+| `GATEWAY_BASE_URL` | Credential-free HTTPS Daski gateway origin. |
+| `CHAIN_MODE` | `live` normally; `mock` only for bounded loopback tests and never production/Mainnet. |
+| `PROVIDER_NAME` | Public legal/provider name. |
+| `PROVIDER_DESCRIPTION` | Optional public description, at most 2,000 characters. |
+| `PROVIDER_WEBSITE_URL` | Optional credential-free HTTPS website. |
+| `PROVIDER_ICON_URL` | Optional credential-free HTTPS icon URL. |
+| `MARKETPLACE_TERMS_URL` | Daski-provided marketplace terms HTTPS URL. |
+| `MARKETPLACE_PRIVACY_URL` | Daski-provided marketplace privacy HTTPS URL. |
+| `PROVIDER_TERMS_URL` | Provider's public HTTPS terms. |
+| `PROVIDER_PRIVACY_URL` | Provider's public HTTPS privacy notice. |
+| `SUPPORT_EMAIL` | Public support address. |
+| `SUPPORT_RESPONSE_SLA` | Public support expectation; default `1 business day`. |
 
-Do not silently change a public origin after signed artifacts or ERC-8004
-registration are issued. Audience and service URI changes require coordinated
-revalidation.
-
-## Provider identity and legal metadata
-
-| Variable | Purpose and rules |
-| --- | --- |
-| `PROVIDER_NAME` | Public legal or trading name shown in provider discovery. Required. |
-| `PROVIDER_DESCRIPTION` | Optional concise public provider description. |
-| `PROVIDER_WEBSITE_URL` | Optional organization website, distinct from the provider API origin. |
-| `PROVIDER_ICON_URL` | Optional public square icon URL hosted by the provider or its reviewed CDN. |
-| `MARKETPLACE_TERMS_URL` | Daski marketplace terms supplied/confirmed during onboarding; HTTPS. |
-| `MARKETPLACE_PRIVACY_URL` | Daski marketplace privacy notice supplied/confirmed during onboarding; HTTPS. |
-| `PROVIDER_TERMS_URL` | Provider's own public terms; HTTPS. |
-| `PROVIDER_PRIVACY_URL` | Provider's own public privacy notice; HTTPS. |
-| `SUPPORT_EMAIL` | Public support address included in every AgentCard. |
-| `SUPPORT_RESPONSE_SLA` | Public free-text response target; defaults to one business day. |
-
-Marketplace and provider legal URLs are separate because a purchase can be
-subject to both sets. Keep them stable, public, and consistent with the
-service's actual handling of data and fulfillment.
+URLs must not embed usernames, passwords, tokens, or fragments.
 
 ## PostgreSQL
 
-| Variable | Purpose and rules |
+| Variable | Purpose and rule |
 | --- | --- |
-| `DATABASE_URL` | Long-lived runtime database principal. Local Compose uses `postgresql://daski_provider:local-only-provider-password@127.0.0.1:55432/daski_provider`. |
-| `MIGRATION_DATABASE_URL` | Separate schema-owner principal. Required in production and must differ from `DATABASE_URL`. |
-| `DATABASE_SSL_MODE` | `disable`, `require`, or `verify-full`. Production requires `verify-full`; local loopback Compose uses `disable`. |
-| `DATABASE_CA_CERT` | Optional PEM CA material for verified database TLS. Literal `\\n` sequences are expanded. |
+| `DATABASE_URL` | Required runtime principal. Local Compose value is in `.env.example`. |
+| `MIGRATION_DATABASE_URL` | Optional locally; required and distinct in production. Schema-owner principal. |
+| `DATABASE_SSL_MODE` | `disable`, `require`, or `verify-full`; production requires `verify-full`. |
+| `DATABASE_CA_CERT` | PEM CA bundle used by verified TLS when the system trust store is insufficient. |
+| `DATABASE_ACQUIRE_TIMEOUT_MS` | Pool acquisition bound, default 5,000. |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | Query/statement bound, default 30,000. |
+| `DATABASE_IDLE_TX_TIMEOUT_MS` | Idle transaction bound, default 30,000. |
+| `DATABASE_POOL_MAX` | Connection pool size, default 10. |
+| `DATABASE_APPLICATION_NAME` | PostgreSQL application label, default `daski-provider`. |
 
-Production runtime roles must not own or create schema objects. Migrations use
-the distinct privileged role, then runtime privileges are reduced and checked.
-Never use a production or shared Testnet URL with disposable migration/security
-smoke scripts.
+Production's runtime principal must not own tables/schema, create schema,
+create temporary objects, or have superuser/database/role/bypass-RLS powers.
+The migration principal needs schema creation but no cluster-wide powers.
+Boot applies privileges and verifies separation when both URLs are provided.
 
-## Base and ERC-8004 coordinates
+## Chain and identity
 
-| Variable | Purpose and rules |
+| Variable | Purpose and rule |
 | --- | --- |
 | `CHAIN_ID` | `84532` for Base Sepolia or `8453` for Base Mainnet. |
-| `BASE_RPC_URL` | Primary credential-free HTTPS Base RPC endpoint. |
-| `BASE_RPC_FALLBACK_URLS` | Optional comma-separated ordered RPC fallbacks. Keep them reviewed and credential-free. |
-| `IDENTITY_REGISTRY_ADDRESS` | ERC-8004 IdentityRegistry for the selected chain. Mainnet must use the canonical reviewed address. |
-| `SERVICE_REGISTRY_ADDRESS` | Daski service registry coordinated for the selected environment. |
-| `PROVIDER_REGISTRY_ADDRESS` | Provider registry used by the registration helper. |
-| `AGENT_INDEX_ADDRESS` | Daski provider index used by the registration helper. |
-| `USDC_ADDRESS` | Canonical USDC for the selected chain. Mainnet must use Circle's reviewed canonical contract. |
-| `CHAIN_WRITE_FINALITY_CONFIRMATIONS` | Confirmation target for persisted provider chain writes. |
+| `BASE_RPC_URL` | Primary credential-free HTTPS Base RPC. Put credentials in a provider-side proxy, not the URL. |
+| `BASE_RPC_FALLBACK_URLS` | Optional comma-separated credential-free HTTPS RPCs. |
+| `PROVIDER_WALLET_PRIVATE_KEY` | Non-zero 32-byte `0x` private key. Secret; use a dedicated environment wallet. |
+| `PROVIDER_AGENT_ID` | Unsigned decimal ERC-8004 agent id coordinated during onboarding. |
+| `IDENTITY_REGISTRY_ADDRESS` | Reviewed registry address; canonical address required on Mainnet. |
+| `USDC_ADDRESS` | Reviewed Circle USDC address; canonical address required on Mainnet. |
 
-Contract addresses are public bindings, not secrets. Verify them against the
-current onboarding manifest; do not copy a mixture of Testnet and Mainnet
-coordinates.
+Never reuse Testnet keys or databases on Mainnet. The wallet key signs provider
+offers/terminal attestations and must be separated from product credentials.
 
-## Provider wallet and registration
+## Daski standard rail
 
-| Variable | Purpose and rules |
+| Variable | Purpose and rule |
 | --- | --- |
-| `PROVIDER_AGENT_ID` | Unsigned decimal ERC-8004 agent id minted/bound for this provider. One provider identity can publish several services. |
-| `PROVIDER_WALLET_PRIVATE_KEY` | Dedicated 32-byte EVM signing key, `0x` plus 64 hexadecimal characters. Secret. |
+| `STANDARD_RAIL_ENVIRONMENT` | Normally `testnet` or `mainnet`; must match every signed envelope. |
+| `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Used for dispatch and fixed quote verification. |
+| `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
+| `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |
+| `STANDARD_RAIL_OUTCOMES_JSON` | Daski-issued gzip/base64 outcome configuration for the exact launch-policy set. Do not edit or re-encode. |
+| `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Positive evidence-finality requirement; default 12, coordinated with Daski. |
+| `REPUTATION_STORAGE_ADDRESS` | Reviewed reputation contract. |
+| `EAS_ADDRESS` | Reviewed EAS contract. |
+| `EAS_RUNTIME_CODE_HASH` | Non-zero reviewed EAS runtime hash. |
+| `EAS_OUTCOME_SCHEMA_UID` | Reviewed reputation outcome schema UID. |
+| `SANCTIONS_ORACLE_ADDRESS` | Reviewed sanctions oracle used for fail-closed participant checks. |
 
-Use separate wallets for Testnet and Mainnet. The provider continuously verifies
-that the registry's wallet binding matches the configured signing key.
-Registration is a chain mutation and is never performed by doctor or boot
-merely to fix configuration.
+`STANDARD_RAIL_OUTCOMES_JSON` is not ordinary editable configuration. It pins
+the outcome/service/skill, request schema, fixed price, capacity/deadline,
+token/splitter provenance, commission/payee, controlled wallets, evidence
+policy, and provider attestation key. Ask Daski for a new full set after any
+reviewed contract change.
 
-## Standard Exact-EVM rail
+The `standard-rail:sign-offer` command reads an unsigned
+`ProviderOutcomeOfferV1` JSON envelope from standard input after `npm run build`
+and writes the wallet-signed form. Run it only as part of the reviewed
+onboarding handoff; its output is a signed security artifact.
 
-These values are issued or reviewed as one environment-specific set. Missing,
-extra, expired, differently signed, or inconsistent values fail closed.
+## HTTP and rate limiting
 
-| Variable | Purpose and rules |
+| Variable | Default / rule |
 | --- | --- |
-| `STANDARD_RAIL_ENVIRONMENT` | Signed domain environment, normally `testnet` or `mainnet`. |
-| `STANDARD_RAIL_GATEWAY_SIGNER` | Gateway protocol signer admitted for quotes, dispatch, lifecycle, and release artifacts. |
-| `STANDARD_RAIL_GATEWAY_AUDIENCE` | Audience committed by signed release envelopes. |
-| `STANDARD_RAIL_GATEWAY_ORIGIN` | Credential-free HTTPS origin used for gateway wallet endpoints; must match `GATEWAY_BASE_URL`. |
-| `STANDARD_RAIL_PROVIDER_AUDIENCE` | Provider audience; must match the `BASE_URL` origin. |
-| `REPUTATION_STORAGE_ADDRESS` | Standard reputation outcome contract. |
-| `EAS_ADDRESS` | EAS contract used by the reviewed evidence profile. |
-| `EAS_RUNTIME_CODE_HASH` | Non-zero reviewed EAS runtime code hash. |
-| `EAS_OUTCOME_SCHEMA_UID` | Reviewed bytes32 outcome schema uid. |
-| `SANCTIONS_ORACLE_ADDRESS` | Standard-rail sanctions oracle coordinate. Service/provider screening remains a separate product policy. |
-| `STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH` | Provider control profile committed by outcomes and servicing artifacts. |
-| `STANDARD_RAIL_OUTCOMES_JSON` | Compressed/encoded provider outcome configuration supplied for the exact reviewed paid outcome set. Secret-like signed configuration; do not edit. |
-| `STANDARD_RAIL_SERVICING_ADMISSION_JSON` | Signed servicing admission envelope for owner actions. Do not edit or self-sign. |
-| `STANDARD_RAIL_ASSET_ACTION_CATALOG_JSON` | Signed exact action catalog. Action ids, destructiveness, replay policy, schemas, and validity must match code. |
-| `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Standard evidence confirmation requirement; must be positive and agree with the release profile. |
+| `RATE_LIMIT_HASH_KEY` | Required high-entropy secret of at least 32 characters, used only to pseudonymize local rate-limit identities. |
+| `RATE_LIMIT_GLOBAL_CAPACITY` | `300`. |
+| `RATE_LIMIT_GLOBAL_PER_MIN` | `300`. |
+| `RATE_LIMIT_RAIL_CAPACITY` | `120`. |
+| `RATE_LIMIT_RAIL_PER_MIN` | `120`. |
+| `RATE_LIMIT_HEALTH_CAPACITY` | `120` per minute, process-local. |
+| `RATE_LIMIT_BYPASS_IPS` | Optional comma-separated reviewed IP/CIDR set; production rejects broad ranges. |
+| `EDGE_RATE_LIMIT_VERIFIED` | Mainnet must be `true` only after actual edge controls are reviewed. |
+| `TRUST_PROXY_HOPS` | `0` without a proxy; maximum 3. Mainnet requires a reviewed proxy. |
+| `TRUST_PROXY_CIDRS` | Trusted proxy IP/CIDR set. Mainnet requires a non-empty narrow set. |
+| `HTTP_MAX_CONCURRENCY` | Global in-process concurrency, default `200`. |
+| `HTTP_MAX_CONCURRENCY_PER_IP` | Per-client concurrency, default `20`, never above global. |
+| `HTTP_HEADERS_TIMEOUT_MS` | Header timeout, default `15000`, never above request timeout. |
+| `HTTP_REQUEST_TIMEOUT_MS` | Request timeout, default `60000`. Keep above the 50-second adapter budget. |
+| `HTTP_KEEP_ALIVE_TIMEOUT_MS` | Keep-alive timeout, default `5000`. |
+| `HEALTH_READINESS_CACHE_MS` | Readiness cache, default `5000`. |
+| `READINESS_MAX_AGE_SECONDS` | Maximum age of chain/identity readiness evidence, default `180`. |
 
-The configured outcome ids must exactly equal
-`src/providerLaunchPolicy.ts`. The signed action catalog must exactly equal its
-reviewed action definitions. A provider cannot locally grant itself an outcome
-or action by changing the allowlist.
+Mainnet bypass/proxy CIDRs must be IPv4 `/24` or IPv6 `/64`, or narrower.
 
-## Application secrets and protected data
+## Outbound product/RPC policy
 
-| Variable | Purpose and rules |
+| Variable | Default / rule |
 | --- | --- |
-| `ADMIN_TOKEN` | Separate high-entropy secret (minimum 32 characters) for JSON admin routes. Documented placeholders and low-diversity strings are rejected. |
-| `PROVIDER_DATA_ENCRYPTION_KEY` | Independent non-zero 32-byte key for protected provider data. It must never equal the wallet key. |
-| `PROVIDER_DATA_ENCRYPTION_KEY_ID` | Stable id for the active encryption key; 1-64 safe characters. |
-| `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` | Optional comma-separated `key-id=0x<64 hex>` read keys during controlled rotation. IDs and material must be unique. |
+| `OUTBOUND_TOTAL_TIMEOUT_MS` | `30000`; product-specific calls should usually use a smaller explicit value. |
+| `OUTBOUND_MAX_RESPONSE_BYTES` | `5000000`; set smaller per operation. |
+| `OUTBOUND_MAX_CONCURRENCY_PER_ORIGIN` | `16`. |
+| `OUTBOUND_CIRCUIT_FAILURE_THRESHOLD` | `5`. |
+| `OUTBOUND_CIRCUIT_OPEN_MS` | `30000`. |
 
-Generate independent values with a cryptographically secure tool, such as
-`openssl rand -hex 32`, and store them in a secret manager. Do not paste them
-into issues, chat, logs, screenshots, artifacts, tests, or documentation.
+Add product-specific names beneath the marked section of `.env.example` and
+parse them in `src/services/<slug>/config.ts`. Distinguish public configuration
+from secrets in the service docs. Never add a switch that lets a buyer select
+an endpoint/tool or lets Mainnet use a fake/sandbox dependency.
 
-## Optional model features
+## Stage summary
 
-| Variable | Purpose and rules |
+| Stage | Required posture |
 | --- | --- |
-| `OPENAI_API_KEY` | Optional until a service enables pre-execution review or the operator/email agents are used. Secret. |
-| `LLM_MODEL` | Default model for enabled model-backed features. |
-| `EMAIL_AGENT_LLM_MODEL` | Optional email-agent override; otherwise uses `LLM_MODEL`. |
-| `OPERATOR_AGENT_LLM_MODEL` | Optional operator-agent override; otherwise uses `LLM_MODEL`. |
-
-The dummy service does not require an API key. Model review is advisory policy,
-not input validation, payment authorization, or a substitute for deterministic
-rules.
-
-## Admin and browser access
-
-| Variable | Purpose and rules |
-| --- | --- |
-| `ADMIN_WALLET_ALLOWLIST` | Optional comma-separated wallet allowlist for SIWE browser admin access. Empty disables that login path. |
-| `CORS_ORIGINS` | Optional comma-separated browser origins. Server-to-server calls without an `Origin` header do not use this allowlist. |
-
-Keep admin authority separate from buyer and supplier credentials. Browser
-writes also require exact-origin, session, CSRF, confirmation, and audit
-controls.
-
-## Optional Postmark email
-
-| Variable | Purpose and rules |
-| --- | --- |
-| `POSTMARK_SERVER_TOKEN` | Enables configured inbound/outbound Postmark integration. Secret. |
-| `POSTMARK_TEST_MODE` | Strict boolean. Testnet can use Postmark's test mode; Mainnet cannot. |
-| `POSTMARK_INBOUND_WEBHOOK_SECRET` | Minimum 32-character webhook secret. Required in production even if normal use does not depend on inbound email. |
-| `POSTMARK_INBOUND_WEBHOOK_SECRET_PREVIOUS` | Optional previous secret during a bounded rotation window. |
-
-Webhook credentials in query strings are rejected. Use provider-supported
-authentication or a reviewed signing proxy as described in the security model.
-
-## Safety and operations controls
-
-| Variable | Purpose and rules |
-| --- | --- |
-| `SUPPLIER_BREAKER_WINDOW_MINUTES` | Rolling supplier circuit-breaker window. |
-| `SUPPLIER_BREAKER_THRESHOLD` | Failures admitted before the supplier circuit opens. |
-| `ESCALATION_MAX_HOLD_HOURS` | Maximum paid-task hold for pre-execution review before terminal handling. |
-| `RATE_LIMIT_SERVICE_CAPACITY` | Per-IP service-route burst capacity. |
-| `RATE_LIMIT_SERVICE_PER_MIN` | Per-IP sustained service-route rate. |
-| `RATE_LIMIT_A2A_CAPACITY` | Per-IP A2A burst capacity. |
-| `RATE_LIMIT_A2A_PER_MIN` | Per-IP sustained A2A rate. |
-| `RATE_LIMIT_BYPASS_IPS` | Optional reviewed gateway hosts/narrow CIDRs. Production rejects overbroad ranges. |
-| `TRUST_PROXY_HOPS` | Exact trusted reverse-proxy hop count, zero when none. Mainnet requires a reviewed proxy topology. |
-| `TRUST_PROXY_CIDRS` | Trusted proxy addresses/narrow CIDRs. Mainnet requires them; production rejects overbroad ranges. |
-| `EDGE_RATE_LIMIT_VERIFIED` | Strict boolean evidence that production edge limiting is configured. Required on Mainnet. |
-| `PUSH_NOTIFICATION_ALLOW_HTTP` | Local-only escape hatch for HTTP destinations; forbidden in production and Mainnet. |
-
-Do not raise limits or broaden proxy/bypass ranges merely to clear readiness.
-Document the real ingress topology and verify the edge behavior.
-
-## Bounded mock mode
-
-| Variable | Purpose and rules |
-| --- | --- |
-| `MOCK_BUYER_AGENT_ID` | Explicit local mock buyer agent id; defaults to 99. |
-| `MOCK_BUYER_WALLET_ADDRESS` | Wallet authorized for the configured mock buyer. Required in mock mode. |
-
-Mock mode also requires a loopback `BASE_URL`. It does not remove signed
-standard-rail artifact requirements and cannot replace a Testnet gateway paid
-purchase.
-
-## Service-specific configuration
-
-Add product variables after the template and parse them strictly in the
-service that owns them. Recommended rules:
-
-- credentials are required only when the service is installed;
-- base endpoints are fixed or selected from a closed reviewed set;
-- booleans use strict parsing;
-- Testnet prefers a supplier sandbox or explicit fake;
-- a chargeable Testnet account uses an explicit non-live mode plus durable
-  payer, operation-count, and aggregate-spend campaign limits;
-- Mainnet refuses mock, sandbox, and charged-test modes and asserts live
-  readiness;
-- values never appear in public manifests, docs, errors, logs, prompts, or
-  test fixtures; and
-- an invalid service configuration fails before traffic is accepted.
-
-Use [Integrating an existing product](integrating-existing-product.md) for API,
-MCP, and chargeable-Testnet configuration boundaries.
-
-## Validate without disclosing values
-
-```bash
-npm run doctor
-npm run doctor -- --stage=testnet
-npm run doctor -- --stage=mainnet
-npm run --silent doctor -- --stage=testnet --json
-```
-
-Share the stable check codes and missing variable names when asking for help.
-Never share `.env` or the raw JSON output of a provider/supplier system unless
-it has been deliberately redacted and approved for that channel.
+| Offline | No `.env`, database, wallet, or network required. |
+| Local | Loopback `BASE_URL`, optional `CHAIN_MODE=mock`, local PostgreSQL; full paid boot still needs artifacts. |
+| Testnet | Base Sepolia, dedicated wallet/product sandbox, stable HTTPS, reviewed Testnet artifact set. |
+| Mainnet | Base, `production`, canonical contracts/USDC, distinct DB roles, verify-full TLS, reviewed proxy/edge, live product, dummy removed, Daski whitelist. |

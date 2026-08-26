@@ -11,8 +11,8 @@ function outcome(): ProviderOutcomeConfig {
   return {
     ...standardSplitterFixture(),
     outcomeId: "dummy-create-note", serviceSlug: "dummy", serviceId: hash("0"), skillId: "create-note",
-    listingManifestHash: hash("1"), providerOfferHash: hash("2"), pricingMode: "dynamic",
-    fixedGrossAmount: "0", quoteMaximumLifetimeSeconds: 120, quoteMinimumPaymentWindowSeconds: 30,
+    listingManifestHash: hash("1"), providerOfferHash: hash("2"), pricingMode: "fixed",
+    fixedGrossAmount: "10000", quoteMaximumLifetimeSeconds: 0, quoteMinimumPaymentWindowSeconds: 0,
     providerControlProfileHash: hash("3"), activeRailProfileHash: hash("9"),
     customerIdentityPolicyId: "none", tokenRuntimeCodeHash: hash("5"),
     tokenImplementationAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

@@ -1,11 +1,3 @@
-import type { SkillPricing } from "../pricing/index.js";
-
-export interface AssetTypeLifecycle {
-  states: string[];
-  terminalStates: string[];
-  transitions: Array<{ from: string | null; to: string; skill: string }>;
-}
-
 export type CategoryFamily =
   | "business-formation"
   | "legal-ip"
@@ -24,32 +16,16 @@ export type CategoryFamily =
   | "logistics-physical"
   | "other";
 
-export type FulfillmentMode = "automated" | "human" | "hybrid";
-export type TaskDurability = "persistent" | "ephemeral";
-
 export interface ServiceManifest {
   slug: string;
-  version?: string;
+  version: string;
   name: string;
+  description: string;
   categoryFamily: CategoryFamily;
   serviceType: string;
   jurisdictions: string[];
-  description: string;
-  agentDomain?: string;
   turnaroundEstimate: string;
-  serviceLifecycle: "one-shot" | "asset-lifecycle";
-  dispatchMode: "one-shot" | "durable";
-  defaultFulfillmentMode: FulfillmentMode;
-  defaultTags?: string[];
-  supplier?: string;
-  outboundEmailFrom?: string;
-  inboundEmailAddress?: string;
-  serviceWallet?: string;
-  support?: {
-    emailAuthoritativeFor: string[];
-    skillRequiredFor: string[];
-  };
-  assetLifecycle?: Record<string, AssetTypeLifecycle>;
+  tags?: string[];
 }
 
 export interface SkillDefinition {
@@ -57,19 +33,9 @@ export interface SkillDefinition {
   name: string;
   description: string;
   examples: string[];
-  pricing: SkillPricing;
-  /**
-   * Opt-in short retention for open, free, automated reads that create no
-   * service-owned durable state. All other skills remain persistent.
-   */
-  taskDurability?: "ephemeral";
-  fulfillmentMode?: FulfillmentMode;
-  requiresAssetOwnership: boolean;
-  assetType?: string;
+  /** Fixed USDC amount in 6-decimal atomic units. */
+  fixedPriceAtomic: string;
   requiredFields?: string[];
   optionalFields?: string[];
   tags?: string[];
-  sortOrder?: number;
-  humanParties?: "required" | "varies" | "none";
-  documentationUrl?: string;
 }

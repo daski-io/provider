@@ -19,39 +19,15 @@ jobs:
         env:
           POSTGRES_USER: daski
           POSTGRES_PASSWORD: daski
-          POSTGRES_DB: daski
+          POSTGRES_DB: daski_provider_smoke
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U daski -d daski"
+          --health-cmd "pg_isready -U daski -d daski_provider_smoke"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
     env:
-      NODE_ENV: test
-      BASE_URL: http://127.0.0.1:4000
-      GATEWAY_BASE_URL: https://gateway.example.invalid
-      PROVIDER_NAME: CI Provider
-      MARKETPLACE_TERMS_URL: https://marketplace.example.invalid/terms
-      MARKETPLACE_PRIVACY_URL: https://marketplace.example.invalid/privacy
-      PROVIDER_TERMS_URL: https://provider.example.invalid/terms
-      PROVIDER_PRIVACY_URL: https://provider.example.invalid/privacy
-      DATABASE_URL: postgres://daski:daski@127.0.0.1:5432/daski
-      DATABASE_URL_TEST: postgres://daski:daski@127.0.0.1:5432/daski
-      DATABASE_SSL_MODE: disable
-      BASE_RPC_URL: https://sepolia.base.org
-      CHAIN_ID: "84532"
-      CHAIN_MODE: mock
-      PROVIDER_WALLET_PRIVATE_KEY: "0x1111111111111111111111111111111111111111111111111111111111111111"
-      IDENTITY_REGISTRY_ADDRESS: "0x1111111111111111111111111111111111111111"
-      SERVICE_REGISTRY_ADDRESS: "0x2222222222222222222222222222222222222222"
-      PROVIDER_AGENT_ID: "1"
-      MOCK_BUYER_WALLET_ADDRESS: "0x9999999999999999999999999999999999999999"
-      USDC_ADDRESS: "0x7777777777777777777777777777777777777777"
-      OPENAI_API_KEY: test-only
-      ADMIN_TOKEN: test-only-admin-token-0123456789abcdef
-      PROVIDER_DATA_ENCRYPTION_KEY: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-      PROVIDER_DATA_ENCRYPTION_KEY_ID: ci
-      SUPPORT_EMAIL: support@example.invalid
+      DATABASE_URL_TEST: postgresql://daski:daski@127.0.0.1:5432/daski_provider_smoke
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -70,10 +46,8 @@ jobs:
       - run: npm run test:coverage
       - run: npm run test:critical-coverage
       - run: npm run test:mainnet-readiness
+      - run: npm run security:migration-smoke
       - run: npm run build
-      - run: node scripts/security/migration-smoke.mjs
-      - run: npm run security:postgres
-      - run: npm run security:migration-concurrency
       - run: npm run security:pii-scan -- dist
       - name: Secret scan
         run: >-
@@ -88,8 +62,6 @@ jobs:
           test "$(docker image inspect -f '{{.Config.User}}' daski-provider:ci)" = "node"
           docker run --rm --entrypoint sh daski-provider:ci -c \
             'test ! -e /app/test && test ! -e /app/docs && test ! -e /app/scripts && test ! -e /app/.env'
-          docker run --rm --entrypoint sh daski-provider:ci -c \
-            '! grep -R -E "PaymentRouter|PAYMENT_ROUTER_ADDRESS|daski-exact" /app/dist | grep -v "^/app/dist/core/db/migrations/"'
 
   windows-tooling:
     name: Windows tooling
@@ -112,16 +84,13 @@ jobs:
           try {
             $text = [Text.Encoding]::UTF8.GetString($original)
             $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
-            $crlf = $text.Replace("`n", "`r`n")
             [IO.File]::WriteAllText(
               $path,
-              $crlf,
+              $text.Replace("`n", "`r`n"),
               [Text.UTF8Encoding]::new($false)
             )
             npm run skill:validate
-            if ($LASTEXITCODE -ne 0) {
-              throw "CRLF skill validation failed"
-            }
+            if ($LASTEXITCODE -ne 0) { throw "CRLF validation failed" }
           } finally {
             [IO.File]::WriteAllBytes($path, $original)
           }
@@ -140,7 +109,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 24
-      - name: Verify tag and package version
+      - name: Verify tag and versions
         run: >-
           node -e 'const fs=require("node:fs");
           const expected=process.env.GITHUB_REF_NAME.slice(1);

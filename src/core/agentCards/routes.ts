@@ -1,20 +1,14 @@
 import { Router } from "express";
-import { getServiceBySlug } from "../db/queries/services.js";
-import { getSkillsByServiceId } from "../db/queries/skills.js";
+import { getService } from "../serviceRegistry/registry.js";
 import { generateAgentCard } from "./generator.js";
 
 export const agentCardRouter = Router();
 
-agentCardRouter.get("/:serviceSlug.json", async (req, res) => {
-  const slug = req.params.serviceSlug;
-
-  const service = await getServiceBySlug(slug);
-  if (!service || !service.is_active) {
-    return res.status(404).json({ error: "Service not found" });
+agentCardRouter.get("/:serviceSlug.json", (req, res) => {
+  const service = getService(String(req.params.serviceSlug));
+  if (!service) {
+    res.status(404).json({ error: "service_not_found" });
+    return;
   }
-
-  const skills = await getSkillsByServiceId(service.id);
-  const card = generateAgentCard(service, skills);
-
-  res.json(card);
+  res.json(generateAgentCard(service));
 });

@@ -1,385 +1,250 @@
 # Integrating an existing API or MCP product
 
-Most Daski providers already have a working product. The provider starter is
-the controlled adapter between Daski's order protocol and that product; it is
-not a replacement API gateway and should not expose the product generically.
+Most providers already have a working product. This repository is a controlled
+adapter between Daski's paid-order protocol and one small, reviewed part of
+that product. It should not replace or publicly proxy the product.
 
-## The integration boundary
+## First: choose the starter
 
-```text
-buyer agent
-    │
-    ▼
-Daski gateway ── signed quote/dispatch/lifecycle/evidence
-    │
-    ▼
-provider core ── payment, identity, replay, ownership, durability
-    │
-    ▼
-ServiceModule ── typed product operations and product policy
-    │
-    ├── fixed API client ── your existing HTTPS API
-    └── fixed MCP client ── your existing MCP server
-```
-
-Core establishes authority. The service validates, prices, and fulfills one
-declared operation. The upstream API or MCP server remains a supplier from the
-provider's perspective, even when your organization owns it.
-
-Never accept a buyer-selected upstream URL, host, MCP server, HTTP method,
-route, tool name, header set, or credential. Define an explicit mapping from a
-Daski skill id to one reviewed product operation.
-
-## Complete the mapping worksheet
-
-Write this down before copying the dummy. Include one row per buyer-visible
-operation.
-
-| Product fact | Daski decision | Questions to answer |
+| Product behavior | Minimal `provider` | `provider-full` |
 | --- | --- | --- |
-| Product boundary | Service | Is this one coherent product, lifecycle, supplier, jurisdiction, and support contract? |
-| Endpoint or MCP tool | Skill | What single action and result should a buyer understand? |
-| Request schema | Required/optional fields | Can the buyer validate every type, bound, conditional rule, and normalization before paying? |
-| Price source | Fixed or dynamic quote | Is the exact atomic-USDC amount known? Does an upstream quote need a supplier-cost ceiling? |
-| Execution mode | Immediate, durable job, or input-required | Does the product return a result, a job id, or request more data? |
-| Product object | Daski asset | Is a durable object provisioned? What is its collision-safe canonical identifier and lifecycle? |
-| Existing-object operation | Owner action | Is it a read, reversible mutation, or destructive mutation? |
-| Retry behavior | Idempotency and journal policy | Can an external write be repeated safely? How is ambiguous success reconciled? |
-| Cancellation | Adapter cancellation | What can be stopped before and after each irreversible boundary? |
-| Output | Artifact/evidence | What bounded, non-secret result proves completion? |
-| Data | Protection and retention | Which fields identify people, contain secrets, or require encrypted storage/redaction? |
-| Availability | Readiness | Which credentials, upstream probes, workers, or webhooks must be healthy? |
+| Fixed price known before purchase | Required | Supported |
+| Automated terminal response in at most 50 seconds | Required | Supported |
+| One-shot JSON/text/public artifact | Supported | Supported |
+| Product job continues after HTTP response | Not supported | Supported |
+| Dynamic price depends on buyer input/product lookup | Not supported | Supported |
+| Later buyer input, approval, or cancellation | Not supported | Supported |
+| Durable private asset and owner-only actions | Not supported | Supported |
+| Human review, email, admin, or protected-data workflow | Not supported | Supported |
+| Ambiguous mutation reconciled after restart | Not supported | Supported |
+| Multiple active execution replicas/workers | Not supported | Supported |
 
-If several product operations have unrelated outcomes, suppliers, risk,
-jurisdictions, or lifecycle, use separate services. If they are verbs on one
-coherent product, use multiple skills in one service.
+Use [provider-full](https://github.com/daski-io/provider-full) if any
+not-supported row is part of the product contract. Do not simulate a lifecycle
+by returning `completed` while work is still running.
 
-## Place code with the service
+## Vocabulary
 
-A product-backed service commonly grows beyond the dummy like this:
+- **Provider**: your organization and the Daski-facing runtime/identity.
+- **Supplier**: the upstream API, MCP server, or product, even if your
+  organization owns it.
+- **Service**: one coherent product boundary visible in discovery.
+- **Skill**: one buyer-visible fixed operation.
+- **Outcome**: the reviewed Daski listing/payment coordinate for a skill.
+
+One product may map to several skills, but each skill must map to one fixed
+operation. Avoid a generic `call-api` or `call-tool` skill.
+
+## Complete this mapping worksheet
+
+Record the answers in the service's tracked docs and tests:
+
+| Question | Required answer |
+| --- | --- |
+| Buyer outcome | What is finished when the adapter returns `completed`? |
+| Fixed price | Exact positive atomic USDC amount (USDC has 6 decimals) |
+| Input | Field names, types, required/optional status, bounds, and conditional rules |
+| Product operation | One configured API endpoint/method or MCP server/tool |
+| Authentication | Provider-held credential source; never buyer supplied |
+| Execution bound | Product timeout safely below 50 seconds |
+| Idempotency | Stable product key derived from verified task/order context |
+| Ambiguity | Authoritative read that proves happened/did-not-happen immediately |
+| Output | Small stable artifact schema and safe public message |
+| Failure | Stable error codes and what is definitive versus ambiguous |
+| Readiness | What proves the product dependency can accept work |
+| Environments | Separate fake/sandbox/Testnet/live credentials and side effects |
+
+If there is no immediate authoritative ambiguity check for a mutating
+operation, the fit test fails even when the normal response is fast.
+
+## API integration pattern
+
+Keep configuration, client, validation, and adapter separate:
 
 ```text
-src/services/report-builder/
-  adapter.ts                 skill dispatch and fulfillment
-  config.ts                  strict product credentials/mode
-  validation.ts              deterministic buyer-input validation
-  clients/
-    productApi.ts            or productMcp.ts
-  skills/                    focused execution functions
-  workers/                   durable job/webhook reconciliation, if needed
-  readiness.ts               live product invariants, if needed
-  migrations.ts              service-owned state only, if needed
-  docs/                      public service and skill contracts
-  tests/                     service-owned unit/adversarial tests
-  index.ts                   ServiceModule assembly
+src/services/report/
+  adapter.ts
+  client.ts
+  config.ts
+  manifest.ts
+  validation.ts
+  docs/
+  tests/
 ```
 
-Use core tables and facets before adding a new service table. Core already
-provides transactions, tasks, assets, artifacts, durable jobs, reviews,
-supplier-operation journaling, email, and retention foundations.
+Pin the configured base URL to one reviewed origin/base path and append only a
+constant operation path:
 
-## API-backed products
-
-### Pin the product origin
-
-Keep the reviewed API base in code, not in buyer input. If environments use
-different product origins, admit only an explicit closed set and fail closed
-for an unknown value. Credentials belong in service configuration.
-
-Use the provider's endpoint and outbound HTTP boundaries:
-
-```typescript
+```ts
+import { boundedFetch } from "../../core/security/outboundHttp.js";
 import {
   appendReviewedOperation,
   reviewedEndpoint,
 } from "../../core/security/reviewedEndpoint.js";
-import { boundedFetch } from "../../core/security/outboundHttp.js";
 
-const PRODUCT_API = "https://api.product.invalid/v1";
-const base = reviewedEndpoint(PRODUCT_API, PRODUCT_API);
+const REVIEWED_BASE = "https://api.example.com/v1";
 
 export async function createReport(
-  request: CreateReportRequest,
-  apiKey: string,
-): Promise<CreateReportResponse> {
-  const endpoint = appendReviewedOperation(base, "reports");
-  const response = await boundedFetch(endpoint, {
+  configuredBase: string,
+  token: string,
+  request: { topic: string },
+): Promise<{ reportId: string; summary: string }> {
+  const base = reviewedEndpoint(configuredBase, REVIEWED_BASE);
+  const url = appendReviewedOperation(base, "reports");
+  const response = await boundedFetch(url, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${apiKey}`,
+      authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      "idempotency-key": request.idempotencyKey,
     },
-    body: JSON.stringify(request.body),
+    body: JSON.stringify(request),
   }, {
-    timeoutMs: 15_000,
-    maxResponseBytes: 256_000,
+    timeoutMs: 20_000,
+    maxResponseBytes: 64_000,
     allowedContentTypes: ["application/json"],
-    publicTarget: { allowQueryOrFragment: true },
+    publicTarget: {},
   });
-
-  if (!response.ok) throw classifyProductFailure(response.status);
-  return parseCreateReportResponse(response.json());
+  if (!response.ok) throw new Error("product request failed");
+  return parseProductResponse(response.json());
 }
 ```
 
-The example origin is intentionally non-routable; replace it with the one
-reviewed product origin. Validate the response with a closed schema before it
-affects state, pricing, artifacts, or logs. Do not surface upstream response
-text as a public error.
+The parser must validate exact response shape, type, and bounds. Do not include
+raw response text in an exception. For a private network product, add a
+deliberately reviewed private-target client rather than disabling the public
+SSRF checks globally.
 
-### Authentication
+The adapter checks `context.signal` before and after the product call and uses
+a product timeout comfortably below the core deadline. Do not rely on the
+50-second outer timeout to clean up an unbounded socket or SDK call.
 
-- Parse the API credential in the service's `config.ts`.
-- Never accept it from a Daski request or place it in a manifest, skill doc,
-  artifact, log, model prompt, or error.
-- Use separate, environment-scoped credentials. Prefer a sandbox or fake on
-  Testnet when the product provides one.
-- Add a Mainnet gate that rejects mock, sandbox, and charged-test credentials
-  or modes.
-- Prefer a narrowly scoped product service account rather than an operator or
-  customer credential.
+### API rules
 
-### Product environments and chargeable Testnet campaigns
+- Fixed origin and base path from provider configuration.
+- Fixed method and relative path in code.
+- Provider credential injected at runtime.
+- No redirects unless a specific safe redirect policy is implemented and
+  tested.
+- Explicit content type, timeout, response-size, and concurrency bounds.
+- Strict request and response schemas.
+- Stable idempotency header/key for every mutation.
+- No raw product payloads in logs, errors, or terminal artifacts.
 
-Daski Testnet controls the marketplace payment and chain environment. It does
-not make an upstream API or MCP call harmless. Some products have no sandbox,
-and a test account may still create durable records, contact people, consume
-inventory, or charge the provider.
+## MCP integration pattern
 
-Keep the product environment as an explicit, closed service mode such as
-`mock`, `sandbox`, `charged-test`, or `live`:
+The provider is the MCP client; the buyer does not directly control that
+client. Add the product's supported MCP SDK to your fork and wrap it behind a
+small service-local client:
 
-- Mainnet must require `live` and reject every non-live mode.
-- Non-mainnet deployments must reject `live` unless a separately reviewed
-  policy deliberately permits it.
-- Persist the selected account/mode with every durable upstream object, job,
-  callback, catalog snapshot, and external identifier. Never reinterpret an
-  identifier under different credentials after a deployment-mode change.
-- Switching modes parks incompatible work. It does not delete it, relabel it,
-  or prove that an ambiguous upstream mutation failed.
+```ts
+const TOOL_BY_SKILL = {
+  summarize: "create_summary",
+} as const;
 
-If a Testnet exercise can cause real upstream cost or side effects, put it
-behind a durable campaign envelope. At minimum, bind and freeze:
-
-- a new campaign id for each reviewed boundary revision;
-- the exact admitted payer wallet and skill or operation set;
-- a small cumulative operation/count cap;
-- an aggregate supplier-cost cap represented in exact integer minor units;
-- the upstream account/mode identity; and
-- an audit record for each admitted transaction.
-
-Serialize admission and spend reservation against the campaign row so
-concurrent transactions cannot exceed a cap. A retry must reuse its original
-campaign, payer, mode, and reserved amount. Changing any frozen boundary
-requires a new campaign id rather than editing the durable campaign.
-
-The emergency stop should disable new/resumed upstream mutations while
-preserving journals, reservations, callbacks, and identifiers for later
-reconciliation. Retain only non-sensitive certification evidence: deployment
-revision, campaign id, public Testnet transaction ids, bounded caps, durable
-task ids, timestamps, outcomes, and redacted defects.
-
-### Timeouts, responses, and retries
-
-- Set a total timeout and maximum response size per operation.
-- Reject redirects unless the exact destination is separately reviewed.
-- Admit only expected content types and schemas.
-- Map upstream failures to stable internal classes: retryable, rejected,
-  provider configuration, ambiguous, or terminal.
-- Bound retry counts and use the supplier circuit breaker.
-- A timeout after sending a mutation is ambiguous, not proof of failure.
-
-## MCP-backed products
-
-Treat MCP as an upstream supplier interface, not as a buyer-selectable routing
-layer. Define a narrow internal client around the exact tools your service
-uses:
-
-```typescript
-interface ProductMcpClient {
-  createReport(input: CreateReportInput): Promise<CreateReportResult>;
-  getReportJob(jobId: string): Promise<ReportJobState>;
-  cancelReportJob(jobId: string): Promise<CancelResult>;
+async function runReviewedTool(
+  skillId: keyof typeof TOOL_BY_SKILL,
+  input: { text: string },
+  signal: AbortSignal,
+) {
+  const tool = TOOL_BY_SKILL[skillId];
+  return mcpClient.callTool(
+    { name: tool, arguments: { text: input.text } },
+    { signal, timeout: 20_000 },
+  );
 }
 ```
 
-The implementation may use your reviewed MCP SDK and transport, but it must:
+Adapt the exact call signature to the SDK you select, but preserve the
+boundary:
 
-- connect to a fixed, authenticated server controlled by configuration;
-- allowlist the mapped tool names in code;
-- build tool arguments from already validated skill fields;
-- validate tool result content with explicit schemas;
-- bound connection time, response size, concurrency, and redirects;
-- keep credentials and protected tool content out of logs and public errors;
-- journal consequential tool calls before dispatch; and
-- preserve and reconcile upstream job or mutation ids.
+- the server and transport are fixed in provider configuration;
+- tool names are an exhaustive code mapping, not buyer strings;
+- tool arguments are reconstructed from validated fields;
+- discovery cannot silently add buyer-visible operations;
+- output is schema-checked and size-bounded;
+- auth, stderr, server logs, and protocol metadata never become artifacts; and
+- cancellation/timeout is connected to `context.signal`.
 
-If the MCP transport is HTTP-based, route it through the reviewed outbound
-boundary or prove equivalent origin pinning, DNS/SSRF protection, redirect
-rejection, and response bounds in the service tests. Do not rely on the MCP
-server's advertised tool list as runtime authorization.
+For remote MCP, apply the same reviewed HTTPS origin and SSRF rules as an API.
+For a local stdio server, pin the executable/arguments at deployment and do not
+construct shell commands from buyer input. If the MCP tool starts an async job
+or requires sampling/elicitation later, use `provider-full`.
 
-One Daski skill can map to several fixed internal product calls when that is
-necessary to produce one outcome, but the buyer must not control the sequence
-or select arbitrary tools.
+## Adapter responsibilities
 
-## Synchronous and job-based products
+The adapter receives verified context only after rail admission:
 
-### Immediate result
+```ts
+{
+  taskId, orderId, payer, serviceSlug, skillId, signal
+}
+```
 
-Return `completed` with bounded artifacts when the product response is
-definitive. Provision an `asset` only when the operation creates the durable
-object for the first time.
+It must:
 
-### Product job
+1. reject an unexpected skill id;
+2. parse the request again with service-owned validation;
+3. stop promptly when `signal` is aborted;
+4. call exactly one reviewed product operation;
+5. map a known product response to a small terminal result; and
+6. map known definitive errors to stable safe error codes.
 
-When the product returns a job id:
+It must not verify payment, accept caller identity from input, modify global
+rail state, leak product details, return a non-terminal state, or continue work
+after returning.
 
-1. persist the id and request fingerprint before returning `working`;
-2. enqueue a durable polling or reconciliation job;
-3. declare the worker id in service readiness;
-4. update progress through conditional transitions;
-5. persist a definitive result before completing the Daski task; and
-6. park ambiguous or dead-letter states for review rather than losing them.
+Implement `ServiceModule.readiness(signal)` as a bounded, read-only product
+probe. It must return false (without leaking the cause) when the configured
+API/MCP dependency cannot accept work and honor the three-second abort signal.
+Core uses this result both for `/health/ready` and paid-route admission.
 
-Do not keep a product job id only in memory. A provider restart must resume the
-same job without repeating the original mutation.
+## Idempotency and ambiguous mutations
 
-### Webhook completion
+Read-only and naturally convergent operations are simplest. For a mutation,
+send a stable upstream idempotency key such as a versioned hash/encoding of the
+verified `orderId`, service, skill, and operation kind.
 
-Authenticate the webhook, enforce a bounded body, store an idempotency key,
-and correlate it to the previously journaled product operation. A webhook is
-untrusted input; it does not replace reconciliation against product truth when
-the mutation outcome is ambiguous.
+Use `runSupplierOperation` when the mutation needs a local intent journal. It
+persists intent before execution, returns an already confirmed result on
+replay, and invokes `reconcile` for a dangling/ambiguous attempt. The
+reconciliation function must read authoritative product state and return:
 
-## Idempotency and ambiguity
+- the confirmed result when the operation happened;
+- `null` only when it definitively did not happen and is safe to execute; or
+- `SupplierOutcomeAmbiguousError` when neither can be proven.
 
-| Upstream behavior | Provider pattern |
-| --- | --- |
-| Pure read | Bounded retry may be safe; still apply timeout and circuit breaker |
-| Convergent set-to-desired-state write | Stable desired state can make retry safe after authoritative read-back |
-| Native idempotency key | Persist one stable key and response; prove repeated calls cannot duplicate effects |
-| Non-convergent mutation | Journal intent before the call and reconcile after any ambiguous response |
-| Unknown/undocumented behavior | Treat as non-convergent until tests and product guarantees prove otherwise |
+In this minimal runtime an unresolved ambiguous result becomes a terminal
+failure; there is no background reconciliation loop. Therefore use the journal
+only when the product can resolve within the synchronous deadline. Otherwise
+use `provider-full`.
 
-An HTTP 500, lost connection, MCP transport error, or worker crash can occur
-after the product committed a mutation. Never equate transport failure with
-business failure.
+## Output and data boundary
 
-## Pricing and product quotes
+Prefer small JSON/text results. A URL artifact must be public and
+non-sensitive; do not return bearer-token URLs or treat an unprotected URL as
+ownership. If results are private, retained, re-downloadable, mutable, or need
+owner-only operations, model them as assets in `provider-full`.
 
-`quote()` runs before payment and must revalidate the full buyer request.
+This starter does not persist request bodies, but your product still receives
+them. Minimize data, document retention in provider terms/privacy, and never
+send protected data to an upstream dependency that was not reviewed for it.
 
-- Fixed prices use atomic USDC; `1000000` is 1 USDC.
-- A dynamic price must be an exact integer derived from validated input.
-- Bound any upstream price request like a fulfillment request.
-- If fulfillment will spend externally, attach a `supplierCostCeiling` that
-  commits the maximum supplier cost and currency.
-- Define what happens when a product quote expires or changes before dispatch.
-- Never return a successful paid quote while a required field or material
-  upstream cost is unknown.
+## Testing the integration
 
-## Assets and existing-object operations
+Use a fake client and cover:
 
-Map a product object to a Daski asset only when buyers retain an ongoing
-ownership relationship. Define:
+1. every field boundary and unknown field;
+2. exact skill-to-operation mapping;
+3. no buyer-controlled endpoint/tool/credential path;
+4. timeout and abort behavior;
+5. response type/size failures;
+6. safe error and log redaction;
+7. duplicate execution/idempotency;
+8. definitive failure versus ambiguous result;
+9. authoritative reconciliation, if mutating; and
+10. completed and failed terminal artifacts.
 
-- a stable asset type;
-- a canonical, collision-safe identifier;
-- initial, active, suspended, and terminal states that actually exist;
-- which skill provisions the asset; and
-- which owner-only actions can read or mutate it.
-
-Ownership is always derived from the wallet-authorized payer. Do not accept an
-owner wallet or bearer token in service input.
-
-Classify an action as destructive when it deletes, publishes, transfers,
-releases, revokes, cancels, or irreversibly changes meaningful control. Such an
-action needs the signed action catalog and delayed second wallet authorization.
-Do not add a product-specific signature scheme.
-
-## Cancellation
-
-Document and test cancellation at each boundary:
-
-1. before any product call;
-2. after intent is persisted but before dispatch;
-3. after an idempotent or convergent write;
-4. after an ambiguous response;
-5. after an irreversible external commitment; and
-6. while a product job or human step is active.
-
-Refuse cancellation explicitly when the product cannot safely cancel. Do not
-claim a reversal, refund, or deletion that product truth does not support.
-
-## Protected data and artifacts
-
-Collect the minimum product fields required for the chosen skill. For each
-protected field decide:
-
-- whether it needs storage at all;
-- the encryption purpose and rotation sink;
-- whether it can appear in product calls, prompts, operator reviews, or email;
-- the safe public artifact projection; and
-- retention and legal-hold behavior.
-
-Product responses are not automatically safe artifacts. Return only bounded,
-buyer-appropriate fields. Keep API keys, MCP authentication, upstream debug
-payloads, personal data, and internal ids out unless the public skill contract
-specifically requires and protects them.
-
-## Readiness
-
-A real service must make `/health/ready` fail closed when it cannot fulfill
-admitted work. Typical service checks include:
-
-- required credentials are present and valid for the selected product mode;
-- the configured mock, sandbox, charged-test, or live product environment
-  matches Testnet/Mainnet and any durable campaign boundary;
-- required durable workers are alive;
-- product schema or capability version is supported;
-- webhook/callback configuration is current;
-- circuit breaker or dependency outage makes new work unsafe; and
-- any custody, compliance, or human queue requirement is available.
-
-Avoid expensive supplier calls on every health request. Use bounded cached
-probes or worker-maintained evidence appropriate to the product.
-
-## Test the adapter in isolation
-
-Use a controlled fake API server or fake MCP transport inside the service test
-suite. It must not use real product credentials or a shared product account.
-Cover:
-
-- exact skill-to-operation mapping and rejection of unknown operations;
-- request and response schema boundaries;
-- auth header/transport construction without logging the credential;
-- timeout, size, content-type, redirect, and origin enforcement;
-- success, rejection, retryable, terminal, and provider-config failures;
-- idempotency, ambiguity, reconciliation, and concurrent attempts;
-- job restart and webhook replay;
-- cancellation around irreversible boundaries;
-- artifact/redaction boundaries; and
-- mock/sandbox/charged-test/live readiness, including Mainnet refusal of every
-  non-live mode.
-
-Keep these tests under `src/services/<slug>/tests/`. Do not retain a
-provider-specific product fixture in the upstream generic starter.
-
-## Integration completion checklist
-
-- Every buyer-visible operation maps to one explicit skill.
-- No buyer input controls an upstream endpoint, server, method, or tool.
-- Quote and execute share deterministic validation.
-- Product origins and tool names are fixed and reviewed.
-- Requests and responses are bounded and schema-validated.
-- External mutations are journaled and ambiguous outcomes reconcile product
-  truth.
-- Product jobs survive provider restarts.
-- Assets and actions use wallet-bound ownership.
-- Protected data is minimized, encrypted, redacted, and retained deliberately.
-- Readiness proves the product mode and required workers.
-- Co-located tests exercise API/MCP failure and adversarial paths.
-- The final service/skill/outcome/action contract is sent through Daski
-  Testnet onboarding.
+Then run one deliberately bounded Testnet journey through the real Daski
+gateway and the product sandbox. Record only safe evidence: commit/image
+digest, check codes, public chain coordinates, non-sensitive request ids, and
+redacted results.

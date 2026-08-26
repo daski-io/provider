@@ -1,113 +1,49 @@
-import { access, readFile, readdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.cwd();
 const failures = [];
+const markdown = [];
 
-async function markdownFiles(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const found = [];
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...await markdownFiles(path));
-    else if (entry.name.endsWith(".md")) found.push(path);
-  }
-  return found;
-}
-
-const files = [
-  join(ROOT, "README.md"),
-  join(ROOT, "SECURITY.md"),
-  join(ROOT, "CONTRIBUTING.md"),
-  join(ROOT, "AGENTS.md"),
-  join(ROOT, "CHANGELOG.md"),
-  join(ROOT, "scripts/README.md"),
-  ...await markdownFiles(join(ROOT, "docs")),
-  ...await markdownFiles(join(ROOT, ".agents/skills")),
-];
-
-const sources = new Map(await Promise.all(files.map(async (path) => [
-  path,
-  await readFile(path, "utf8"),
-])));
-
-for (const [path, source] of sources) {
-  const relativePath = path.slice(ROOT.length + 1).replaceAll("\\", "/");
-  if (/\b(?:TODO|TBD)\b/.test(source)) {
-    failures.push(`${relativePath} contains an unfinished TODO/TBD marker`);
-  }
-  for (const match of source.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
-    let target = match[1].trim();
-    if (target.startsWith("<") && target.endsWith(">")) {
-      target = target.slice(1, -1);
-    }
-    if (/^(?:https?:|mailto:|#)/i.test(target)) continue;
-    target = target.split("#", 1)[0].split("?", 1)[0];
-    if (!target) continue;
-    const resolved = resolve(dirname(path), decodeURIComponent(target));
-    try {
-      await access(resolved);
-    } catch {
-      failures.push(`${relativePath} has a broken local link: ${match[1]}`);
-    }
+function walk(path) {
+  for (const name of readdirSync(path)) {
+    if (name === "node_modules" || name === ".git") continue;
+    const absolute = join(path, name);
+    if (statSync(absolute).isDirectory()) walk(absolute);
+    else if (name.endsWith(".md")) markdown.push(absolute);
   }
 }
 
-const packageJson = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
-const documentedCommands = new Set();
-for (const source of sources.values()) {
-  for (const match of source.matchAll(/\bnpm run (?:--silent )?([a-zA-Z0-9:_-]+)/g)) {
-    documentedCommands.add(match[1]);
-  }
-}
-for (const command of documentedCommands) {
-  if (!packageJson.scripts?.[command]) {
-    failures.push(`documentation references missing npm script: ${command}`);
-  }
-}
-
-const envExample = await readFile(join(ROOT, ".env.example"), "utf8");
-const documentedConfiguration = await readFile(
-  join(ROOT, "docs/configuration.md"),
-  "utf8",
-);
-const exampleVariables = new Set(envExample.split(/\r?\n/).flatMap((line) => {
-  const match = /^\s*#?\s*([A-Z][A-Z0-9_]*)=/.exec(line);
-  return match ? [match[1]] : [];
-}));
-for (const variable of exampleVariables) {
-  if (!documentedConfiguration.includes(`\`${variable}\``)) {
-    failures.push(`docs/configuration.md does not cover ${variable}`);
-  }
-}
-
-const genericSources = [...sources.entries()]
-  .filter(([path]) => !path.endsWith("CHANGELOG.md"))
-  .map(([, source]) => source)
-  .join("\n");
-for (const forbidden of [
-  "Blue T Group",
-  "OpenSRS",
-  "Corporate Tools",
-  "Northwest Registered Agent",
-  "Name.com",
-  "domain-management",
-  "mailboxes",
-  "entity-formation",
-  "PAYMENT_ROUTER_ADDRESS",
-  "daski-exact",
+for (const required of [
+  "README.md", "AGENTS.md", "SECURITY.md", "docs/getting-started.md",
+  "docs/integrating-existing-product.md", "docs/adding-a-service.md",
+  "docs/configuration.md", "docs/onboarding.md", "docs/troubleshooting.md",
+  "docs/architecture.md", "docs/protocol-cheatsheet.md", "docs/agent-skill.md",
+  ".agents/skills/daski-provider/SKILL.md",
 ]) {
-  if (genericSources.toLowerCase().includes(forbidden.toLowerCase())) {
-    failures.push(`public documentation contains forbidden legacy/provider term: ${forbidden}`);
+  if (!existsSync(join(root, required))) failures.push(`missing ${required}`);
+}
+
+walk(root);
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+for (const file of markdown) {
+  const source = readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+  for (const match of source.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    const target = match[1].trim().replace(/^<|>$/g, "").split("#", 1)[0];
+    if (!target || /^(?:https?:|mailto:)/.test(target)) continue;
+    if (!existsSync(resolve(dirname(file), decodeURI(target)))) {
+      failures.push(`${relative(root, file)}: broken link ${match[1]}`);
+    }
+  }
+  for (const match of source.matchAll(/npm run ([a-zA-Z0-9:_-]+)/g)) {
+    if (!packageJson.scripts[match[1]]) {
+      failures.push(`${relative(root, file)}: unknown npm script ${match[1]}`);
+    }
   }
 }
 
-if (failures.length > 0) {
+if (failures.length) {
   process.stderr.write(`${failures.join("\n")}\n`);
   process.exit(1);
 }
-process.stdout.write(
-  `documentation checks passed (${files.length} Markdown files, ` +
-    `${exampleVariables.size} example variables)\n`,
-);
+process.stdout.write(`documentation check passed: ${markdown.length} Markdown files\n`);

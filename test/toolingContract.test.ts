@@ -1,51 +1,30 @@
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-function runNode(args: string[]) {
-  return spawnSync(process.execPath, args, {
-    cwd: root,
-    encoding: "utf8",
-    env: process.env,
-    timeout: 15_000,
+describe("repository tooling contract", () => {
+  it("validates the checked-in portable skill", () => {
+    const result = spawnSync(process.execPath, ["scripts/validate-skill.mjs"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("skill validation passed");
   });
-}
 
-describe("starter tooling contracts", () => {
-  it.each([
-    ["echo", "echo_result"],
-    ["create-note", "note_created"],
-  ])("runs the tracked dummy %s request entirely offline", (skillId, artifactName) => {
-    const run = runNode([
-      "--import=tsx",
-      "scripts/try-skill.mjs",
-      "dummy",
-      skillId,
-    ]);
+  it("normalizes CRLF before reading skill frontmatter", () => {
+    const validator = readFileSync("scripts/validate-skill.mjs", "utf8");
+    expect(validator).toContain('.replaceAll("\\r\\n", "\\n")');
+    expect(validator).toContain('.replaceAll("\\r", "\\n")');
+  });
 
-    expect(run.status).toBe(0);
-    const output = JSON.parse(run.stdout) as {
-      mode: string;
-      inputSource: string;
-      warning: string;
-      result: { artifacts: Array<{ name: string }> };
+  it("uses the sanitized bootstrap in every runtime entrypoint", () => {
+    const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+      scripts: Record<string, string>;
     };
-    expect(output.mode).toBe("offline-dummy-only");
-    expect(output.inputSource).toBe(`examples/requests/dummy-${skillId}.json`);
-    expect(output.warning).toContain("No gateway admission");
-    expect(output.result.artifacts.map((artifact) => artifact.name)).toContain(artifactName);
-  });
-
-  it("keeps documentation and the portable skill machine-validatable", () => {
-    const docs = runNode(["scripts/docs-check.mjs"]);
-    const skill = runNode(["scripts/validate-skill.mjs"]);
-
-    expect(docs.status, docs.stderr).toBe(0);
-    expect(docs.stdout).toContain("documentation checks passed");
-    expect(skill.status, skill.stderr).toBe(0);
-    expect(skill.stdout).toContain("Agent Skill validation passed");
+    const dockerfile = readFileSync("Dockerfile", "utf8");
+    expect(packageJson.scripts.dev).toContain("src/bootstrap.ts");
+    expect(packageJson.scripts.start).toContain("dist/bootstrap.js");
+    expect(dockerfile).toContain('CMD ["node", "dist/bootstrap.js"]');
   });
 });

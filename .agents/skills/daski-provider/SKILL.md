@@ -1,129 +1,141 @@
 ---
 name: daski-provider
-description: Adapt an existing API or MCP product into a Daski provider starter or fork, diagnose provider setup, and prepare provider Testnet or Mainnet onboarding. Use for provider-side ServiceModule, skill, readiness, and onboarding work; do not use for Daski buyer integrations or unrelated marketplace applications.
+description: Build or diagnose a minimal fixed-price synchronous Daski provider from an existing API or MCP product, choose between provider and provider-full, and prepare provider Testnet or Mainnet onboarding. Use for provider-side service integration and onboarding; do not use for Daski buyer clients or unrelated API/MCP gateways.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "0.1.0"
 ---
 
 # Daski provider
 
-Help a provider expose an existing product through the Daski provider without
-weakening the provider's protocol, payment, ownership, or operational
-boundaries. Repository documentation is authoritative; this skill routes the
-work and preserves the non-obvious stopping rules.
+Help a provider expose an existing product through Daski without weakening the
+payment, replay, identity, network, or product boundary. Repository
+documentation is authoritative; this skill routes work and preserves hard
+stops. It is harness-agnostic and assumes no Claude-, Codex-, or IDE-specific
+capability.
 
 ## Establish context
 
-1. Locate the provider repository and read its `AGENTS.md` completely before
-   acting. Follow a closer repository instruction if one exists.
-2. Inspect the working tree and preserve unrelated changes. Determine whether
-   the request is explanation, diagnosis, implementation, onboarding, or
-   release preparation; do not infer mutation authority from a read-only task.
-3. Determine the intended stage: offline dummy, local, Testnet, or Mainnet.
-   Default implementation and onboarding work to Testnet.
-4. Read only the repository guides needed for the task:
+1. Locate the repository and read `AGENTS.md` completely before acting. Follow
+   any closer repository instruction.
+2. Inspect the working tree and preserve unrelated changes. Distinguish a
+   request to review/diagnose from authorization to edit, deploy, sign, spend,
+   migrate external state, release, or push.
+3. Identify the intended stage. Default implementation to offline/local work
+   followed by Testnet; never default to Mainnet.
+4. Read only the authoritative guides needed:
 
-   - setup or first boot: `docs/getting-started.md` and
-     `docs/configuration.md`;
-   - existing API or MCP product: `docs/integrating-existing-product.md`;
-   - service implementation: `docs/adding-a-service.md`, then
-     `docs/daski-skill-creation-best-practices.md` and `SECURITY.md`;
-   - Daski admission: `docs/onboarding.md`;
-   - errors: `docs/troubleshooting.md`;
-   - architecture or protocol changes: `docs/architecture.md` and
+   - setup: `docs/getting-started.md` and `docs/configuration.md`;
+   - API/MCP mapping: `docs/integrating-existing-product.md`;
+   - implementation: `docs/adding-a-service.md` and `SECURITY.md`;
+   - admission: `docs/onboarding.md`;
+   - diagnosis: `docs/troubleshooting.md`;
+   - protocol changes: `docs/architecture.md` and
      `docs/protocol-cheatsheet.md`.
 
-Do not substitute remembered Daski behavior for the checked-out repository's
-contracts.
+Do not substitute remembered Daski behavior for the checked-out contracts.
+
+## Choose the starter before editing
+
+Use this `provider` repository only when every operation is:
+
+- fixed-price;
+- fully automated;
+- one-shot and terminal within 50 seconds;
+- free of later buyer input, cancellation, or owner action;
+- free of durable private asset/lifecycle management; and
+- able to resolve an ambiguous external mutation within the same execution.
+
+If any condition fails—or the product needs dynamic quotes, jobs, retries after
+restart, multiple execution replicas, human review, email, admin, direct A2A,
+protected-data workflows, assets, or actions—stop and recommend
+`https://github.com/daski-io/provider-full`. Do not recreate full-starter
+features inside the minimal core.
 
 ## Understand the existing product
 
-Gather only facts that affect the adapter. Ask for missing facts when they
-would materially change the implementation:
+Gather only adapter-relevant facts:
 
-- buyer-visible operations and inputs/outputs;
-- API endpoints or MCP tools, authentication, and fixed upstream origins;
-- synchronous versus job-based completion, polling, webhooks, and cancellation;
-- external mutations, idempotency, ambiguous outcomes, and reconciliation;
-- pricing inputs and any supplier-spend ceiling;
-- provisioned assets, lifecycle, ownership, and consequential actions;
-- protected or human-party data, retention, and redaction;
-- supplier sandbox/live separation and operational readiness signals.
+- buyer-visible outcome and exact input/output bounds;
+- fixed atomic-USDC price;
+- fixed API endpoint/method or MCP server/transport/tool;
+- provider-held authentication and environment separation;
+- product timeout, response-size, and concurrency bounds;
+- mutation idempotency and immediate authoritative reconciliation;
+- terminal artifact schema and safe error codes; and
+- product readiness and Testnet side effects/costs.
 
-Produce a mapping from product operations to one Daski service and focused
-skills before writing code. Never expose an arbitrary API endpoint, MCP server
-URL, method, or tool name selected by the buyer. Map an explicit allowlist to
-typed service operations.
+Map product operations to focused Daski skills. Never expose an arbitrary URL,
+HTTP method, path, header, MCP server, tool name, schema, or credential chosen
+by the buyer. The upstream product is the supplier even when provider-owned.
 
-## Implement within the provider boundary
+## Implement an authorized integration
 
-When the user authorizes implementation:
+1. Copy `src/services/dummy` to `src/services/<service-slug>`; keep product
+   configuration, client, validation, adapter, docs, and tests there.
+2. Define stable service/skill ids, strict request bounds, a fixed price, and
+   terminal artifact/error schemas. Reject unknown fields.
+3. Map each skill to one hard-coded reviewed API/MCP operation. Use bounded
+   outbound helpers, endpoint pinning, explicit time/size/concurrency limits,
+   strict response parsing, and redacted errors. Never call raw `fetch` from a
+   service or construct a shell command from buyer input.
+4. Revalidate in the adapter, honor `context.signal`, and return only
+   `completed` or `failed` before the execution budget expires.
+5. Use a stable product idempotency key for mutations. Journal intent before a
+   non-convergent call and reconcile authoritative product state after
+   ambiguity. If reconciliation cannot finish synchronously, stop and use
+   `provider-full`; never guess or blindly retry.
+6. Register the service only in `src/providerServices.ts`. Keep the exact
+   reviewed outcome set in `src/providerLaunchPolicy.ts`; coordinate schema,
+   id, price, capacity, deadline, payee, or origin changes with Daski.
+7. Keep service tests in `src/services/<slug>/tests/`; use a fake product
+   client and never call live systems from unit tests.
+8. Remove dummy before Mainnet. Keep core product-neutral.
 
-1. Start from `src/services/dummy` and keep all product behavior, configuration,
-   clients, workers, docs, migrations, and tests in
-   `src/services/<service-slug>/`.
-2. Validate buyer input before quoting and again before executing. Return exact
-   atomic-USDC prices or structured field errors.
-3. Use reviewed outbound-network helpers, fixed supplier origins, bounded
-   requests/responses, strict schemas, and stable public error codes. Do not
-   call supplier-controlled destinations directly.
-4. Journal non-convergent external mutations before dispatch. Reconcile
-   authoritative supplier state after timeouts or ambiguous responses; never
-   guess or blindly retry.
-5. Derive ownership from the wallet-authorized payer. Use the standard action
-   catalog and delayed second authorization for destructive actions; do not
-   create service-local authorization.
-6. Declare workers, live supplier invariants, protected-data sinks, asset
-   identifiers, and readiness through the existing `ServiceModule` facets only
-   when the product needs them.
-7. Register the service only in `src/providerServices.ts`. Keep reviewed paid
-   outcome and action ids exact in `src/providerLaunchPolicy.ts` and coordinate
-   changes with Daski onboarding.
-8. Keep service-owned tests under `src/services/<service-slug>/tests/`. Update
-   manifest, docs, validation, code, migrations, and adversarial tests together.
-9. Remove the dummy before Mainnet and keep the core free of product-specific
-   or supplier-specific exceptions.
+PostgreSQL is required for paid runtime replay/idempotency, evidence,
+rate-limit, and terminal-result state. Do not replace it with process memory.
+The offline `npm run try-skill -- dummy echo` path is intentionally database-
+and network-free.
 
 ## Diagnose and verify
 
-Use the repository's commands rather than recreating their logic:
+Use repository commands rather than recreating their logic:
 
-- offline learning: `npm run try-skill -- dummy echo`;
-- local checks: `npm run doctor`;
-- Testnet checks: `npm run doctor -- --stage=testnet`;
+- offline: `npm run try-skill -- dummy echo "hello"`;
+- local: `npm run doctor`;
+- Testnet: `npm run doctor -- --stage=testnet`;
 - Mainnet machine checks: `npm run doctor -- --stage=mainnet`;
-- automation output: add `--json`;
-- opt-in read-only public/RPC probes: add `--live`.
+- automation: add `--json`.
 
-Run targeted service tests first, then the documented typecheck, lint,
-architecture, unit, coverage, readiness, documentation, skill, audit, build,
-and disposable-database gates appropriate to the change. Never point smoke,
-migration, or security scripts at a shared Testnet or production database.
+Run targeted service tests, then the documented typecheck, test typecheck,
+lint, architecture, docs, skill, unit, coverage, Mainnet-readiness, audit, and
+build gates appropriate to the change. Database smoke checks must target only
+an explicit disposable database.
 
-Report stable doctor codes and missing variable names, not secret values. A
-successful build or doctor run proves technical checks only; it does not prove
-Daski admission.
+Report stable doctor codes and missing variable names, never secret values. A
+passing build/doctor proves technical checks only, not Daski admission.
 
-## Hard stops and authority
+## Hard stops
 
-- Never fabricate, edit, resign, or weaken validation of Daski-issued signed
-  outcome, servicing-admission, or asset-action artifacts.
-- Never expose secrets, protected inputs, supplier account data, private policy,
-  or raw runtime output in code, docs, logs, prompts, or chat.
-- Do not run provider registration, chain writes, deployments, supplier
-  mutations, database migrations, or releases without authorization for that
-  exact environment and action.
-- Testnet is mandatory before Mainnet. Mainnet is not self-service: stop until
-  the provider has explicit Daski whitelisting requested through the Daski
-  Discord and the coordinated release review is complete. No local flag,
-  signed artifact, test result, or code change grants whitelisting.
-- Do not make readiness permissive to unblock a fixture or deployment.
-- If required Daski coordinates or artifacts are missing, finish all safe local
-  work, list the exact missing inputs, and stop at that external boundary.
+- Never fabricate, edit, recompress, combine, resign, or weaken validation of
+  Daski-issued bindings.
+- Never expose secrets, wallet keys, signed envelopes, buyer/product protected
+  data, supplier account details, raw product output, or private policy in code,
+  docs, logs, prompts, or chat.
+- Do not call a live product, run a migration against shared data, register an
+  identity, sign an offer, fund a wallet, send a chain transaction, deploy,
+  push, tag, release, or change Mainnet without explicit authority for that
+  action and environment.
+- Testnet precedes Mainnet. Mainnet requires explicit Daski whitelisting through
+  Discord and a coordinated release; no repository flag, artifact, or test can
+  grant it.
+- Never make readiness/admission permissive to unblock a fixture or deployment.
+- When Daski-owned inputs are missing, complete safe local work, list each
+  missing input, and stop at the handoff.
 
 ## Handoff
 
-State the product-to-service mapping, files changed, checks run, doctor stage
-and codes, missing Daski or supplier inputs, and the next safe action. Clearly
-separate locally complete work from Testnet admission and Mainnet approval.
+State the starter decision, product-to-skill mapping, files changed, gates run,
+doctor stage/codes, remaining provider/product/Daski inputs, and next safe
+action. Clearly separate local completion, Testnet admission, and Mainnet
+approval.

@@ -13,113 +13,6 @@ export interface SignedEnvelope<T, V extends 1 | 2 = 1> {
   signature: Hex;
 }
 
-export interface WalletActionAuthorizationV1 {
-  payer: Hex;
-  providerAgentId: string;
-  serviceId: Hex;
-  providerControlProfileHash: Hex;
-  servicingAdmissionHash: Hex;
-  actionCatalogHash: Hex;
-  actionCatalogSchemaHash: Hex;
-  actionDefinitionHash: Hex;
-  actionCatalogEpoch: number;
-  actionHash: Hex;
-  methodHash: Hex;
-  absoluteResourceUriHash: Hex;
-  requestHash: Hex;
-  audienceHash: Hex;
-  nonce: Hex;
-  issuedAt: number;
-  validBefore: number;
-}
-
-export interface ProviderWalletActionGrantV1 {
-  payer: Hex;
-  providerAgentId: string;
-  serviceId: Hex;
-  actionHash: Hex;
-  methodHash: Hex;
-  absoluteResourceUriHash: Hex;
-  requestHash: Hex;
-  walletAuthorizationHash: Hex;
-  providerControlProfileHash: Hex;
-  servicingAdmissionHash: Hex;
-  servicingProfileEpoch: number;
-  actionCatalogHash: Hex;
-  actionCatalogSchemaHash: Hex;
-  actionCatalogEpoch: number;
-  actionDefinitionHash: Hex;
-  gatewayAudienceHash: Hex;
-  providerAudienceHash: Hex;
-  grantNonce: Hex;
-}
-
-export interface ProviderAssetSummaryV1 {
-  providerAssetId: string;
-  serviceSlug: string;
-  type: string;
-  identifier: string;
-  status: string;
-  createdAt: string;
-  expiresAt: string | null;
-}
-
-export interface ProviderAssetQueryResponseV1 {
-  providerAgentId: string;
-  payer: Hex;
-  assets: ProviderAssetSummaryV1[];
-  nextCursor: string | null;
-  responseNonce: Hex;
-  requestHash: Hex;
-  walletAuthorizationHash: Hex;
-  grantHash: Hex;
-  providerControlProfileHash: Hex;
-  servicingAdmissionHash: Hex;
-  servicingProfileEpoch: number;
-}
-
-export interface ProviderAssetActionResponseV1 {
-  providerAgentId: string;
-  payer: Hex;
-  actionExecutionId: Hex;
-  status: "completed" | "failed";
-  responseNonce: Hex;
-  requestHash: Hex;
-  walletAuthorizationHash: Hex;
-  grantHash: Hex;
-  providerControlProfileHash: Hex;
-  servicingAdmissionHash: Hex;
-  servicingProfileEpoch: number;
-  actionCatalogHash: Hex;
-  actionCatalogSchemaHash: Hex;
-  actionCatalogEpoch: number;
-  actionDefinitionHash: Hex;
-  result: Record<string, unknown> | null;
-  errorClass: string | null;
-}
-
-export interface ProviderAssetActionStageResponseV1 {
-  providerAgentId: string;
-  payer: Hex;
-  actionExecutionId: Hex;
-  status: "staged" | "canceled";
-  effectSummary: Record<string, unknown>;
-  confirmationHash: Hex;
-  earliestExecutionAt: number;
-  stageValidBefore: number;
-  responseNonce: Hex;
-  requestHash: Hex;
-  walletAuthorizationHash: Hex;
-  grantHash: Hex;
-  providerControlProfileHash: Hex;
-  servicingAdmissionHash: Hex;
-  servicingProfileEpoch: number;
-  actionCatalogHash: Hex;
-  actionCatalogSchemaHash: Hex;
-  actionCatalogEpoch: number;
-  actionDefinitionHash: Hex;
-}
-
 export interface StandardRailDispatchV2 {
   environment: string;
   chainId: number;
@@ -165,38 +58,17 @@ export interface StandardRailDispatchV2 {
   validBefore: number;
 }
 
-export interface StandardRailReceiptV2 {
-  orderId: string;
-  state: "RELEASE_FINAL";
-  payer: Hex;
-  providerAgentId: string;
-  outcomeId: string;
-  bindingProfile: "stock-fixed-v1" | "recipe-bound-v1";
-  activeRailProfileHash: Hex;
+export interface QuoteV1 {
   listingManifestHash: Hex;
   providerOfferHash: Hex;
-  quoteHash: Hex;
+  providerQuoteHash: Hex;
   canonicalRequestHash: Hex;
-  orderNonce: Hex;
-  authorizationKey: Hex;
-  paymentPayloadHash: Hex;
   grossAmount: string;
-  providerNetAmount: string;
-  daskiCommissionAmount: string;
-  facilitatorConfirmationHash: Hex;
-  settlementTxHash: Hex;
-  depositBlockNumber: string;
-  depositBlockHash: Hex;
-  depositTransactionIndex: number;
-  depositLogIndex: number;
-  depositEvidenceHash: Hex;
-  releaseTxHash: Hex;
-  releaseBlockNumber: string;
-  releaseBlockHash: Hex;
-  releaseTransactionIndex: number;
-  releaseLogIndex: number;
-  releaseSequence: string;
-  releaseEvidenceHash: Hex;
+  token: Hex;
+  splitter: Hex;
+  orderNonce: Hex;
+  issuedAt: number;
+  validBefore: number;
 }
 
 export interface DispatchStatusQueryV1 {
@@ -212,7 +84,7 @@ export interface ProviderOutcomeOfferV1 {
   skillId: string;
   providerAgentId: string;
   providerPayee: Hex;
-  pricingMode: "fixed" | "dynamic";
+  pricingMode: "fixed";
   fixedGrossAmount: string;
   quotePolicyHash: Hex;
   capacityPolicyHash: Hex;
@@ -222,19 +94,6 @@ export interface ProviderOutcomeOfferV1 {
   issuedAt: number;
   validBefore: number;
   offerNonce: Hex;
-}
-
-export interface QuoteV1 {
-  listingManifestHash: Hex;
-  providerOfferHash: Hex;
-  providerQuoteHash: Hex;
-  canonicalRequestHash: Hex;
-  grossAmount: string;
-  token: Hex;
-  splitter: Hex;
-  orderNonce: Hex;
-  issuedAt: number;
-  validBefore: number;
 }
 
 export interface StandardEvidenceBundleV2 {
@@ -268,10 +127,10 @@ export interface ProviderOutcomeConfig {
   skillId: string;
   listingManifestHash: Hex;
   providerOfferHash: Hex;
-  pricingMode: "fixed" | "dynamic";
+  pricingMode: "fixed";
   fixedGrossAmount: string;
-  quoteMaximumLifetimeSeconds: number;
-  quoteMinimumPaymentWindowSeconds: number;
+  quoteMaximumLifetimeSeconds: 0;
+  quoteMinimumPaymentWindowSeconds: 0;
   providerControlProfileHash: Hex;
   activeRailProfileHash: Hex;
   customerIdentityPolicyId: "none";
@@ -314,7 +173,7 @@ export interface ProviderOutcomeConfig {
   bindingProfile: "stock-fixed-v1" | "recipe-bound-v1";
   requestSchema: {
     type: "object";
-    properties: Record<string, { type?: string }>;
+    properties: Record<string, Record<string, unknown>>;
     required?: string[];
     additionalProperties: false;
   };

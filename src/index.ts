@@ -1,131 +1,84 @@
+import { base, baseSepolia } from "viem/chains";
+import { startProviderIdentityMonitor } from "./core/chain/providerIdentity.js";
+import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
 import {
-  pool,
   checkDatabase,
   closeMigrationPool,
-  configureStandardRuntimePrivileges,
+  configureRuntimePrivileges,
+  failInterruptedTransactions,
+  pool,
   runMigrations,
   verifyDatabaseRoleSeparation,
 } from "./core/db/pool.js";
-import {
-  setServiceStatuses,
-} from "./core/health.js";
+import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { startServer, stopServer } from "./core/server.js";
-import { startEmailIngressWorker, stopEmailIngressWorker } from "./core/email/inboundWorker.js";
-import { startAuthSecurityCleanup, stopAuthSecurityCleanup } from "./core/auth/securityMaintenance.js";
-import { startRetentionWorker, stopRetentionWorker } from "./core/db/retention.js";
-import { registerService, getAllServices } from "./core/serviceRegistry/registry.js";
-import { validateEmailAgentTools } from "./core/agents/emailAgent/toolRegistry.js";
-import { validateOperatorAgentTools } from "./core/agents/operatorAgent/tools.js";
 import {
-  startOperatorEscalationWorker,
-  stopOperatorEscalationWorker,
-} from "./core/agents/operatorAgent/escalationWorker.js";
-import { providerServices } from "./providerServices.js";
-import { providerLaunchPolicy } from "./providerLaunchPolicy.js";
-import {
-  installProviderScreening,
-  startProviderScreeningWorkers,
-} from "./providerScreening.js";
-import { logInfo, logError, errorExtra } from "./core/logger.js";
-import {
-  startProviderIdentityMonitor,
-  stopProviderIdentityMonitor,
-} from "./core/chain/providerIdentity.js";
+  getAllServices,
+  getSkill,
+  registerService,
+} from "./core/serviceRegistry/registry.js";
 import { loadProviderStandardRailConfig } from "./core/standardRail/config.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
-import { startStandardTaskWatchdog } from "./core/standardRail/taskWatchdog.js";
-import { base, baseSepolia } from "viem/chains";
-import {
-  startServiceRegistrationReconciler,
-  stopServiceRegistrationReconciler,
-} from "./core/chain/serviceRegistrar.js";
-import {
-  startProviderWriteReconciler,
-  stopProviderWriteReconciler,
-} from "./core/chain/providerWriteReconciler.js";
-import { enforceInitialChainReadiness } from "./core/startupChainGate.js";
-import { loadProviderWalletConfig } from "./core/standardRail/walletConfig.js";
-import { startReputationOutcomeWorker } from "./core/standardRail/reputationOutcome.js";
-import { startStandardReviewResolutionWorker } from "./core/standardRail/reviewResolutionWorker.js";
+import { providerLaunchPolicy } from "./providerLaunchPolicy.js";
+import { configuredServices } from "./providerServices.js";
 
 let shuttingDown = false;
-let serviceWorkerStops: Array<() => void | Promise<void>> = [];
-let screeningWorkerStops: Array<() => void | Promise<void>> = [];
-let stopStandardRailReadiness: (() => void) | null = null;
-let stopStandardTaskWatchdog: (() => void) | null = null;
-let stopReputationOutcomeWorker: (() => void) | null = null;
-let stopStandardReviewResolutionWorker: (() => Promise<void>) | null = null;
+let stopIdentity: (() => void) | null = null;
+let stopRail: (() => void) | null = null;
 
 async function main(): Promise<void> {
-  logInfo("Config loaded", {
-    port: config.PORT,
+  logInfo("Starting Daski minimal provider", {
     chainId: config.CHAIN_ID,
     chainMode: config.CHAIN_MODE,
   });
   if (!(await checkDatabase())) throw new Error("Database unreachable");
   await runMigrations();
-  await configureStandardRuntimePrivileges();
-  await verifyDatabaseRoleSeparation();
-
-  await installProviderScreening();
-  for (const module of providerServices) {
-    await registerService(module);
-  }
-  await configureStandardRuntimePrivileges();
+  await configureRuntimePrivileges();
   await verifyDatabaseRoleSeparation();
   await closeMigrationPool();
-  validateEmailAgentTools();
-  validateOperatorAgentTools();
 
-  const standardRailConfig = loadProviderStandardRailConfig(providerLaunchPolicy);
-  const walletConfig = await loadProviderWalletConfig(
-    standardRailConfig,
-    providerLaunchPolicy,
-  );
-  stopStandardRailReadiness = await startStandardRailReadiness(
-    standardRailConfig,
+  for (const service of configuredServices(config.CHAIN_ID)) registerService(service);
+  const standard = loadProviderStandardRailConfig(providerLaunchPolicy);
+  validateComposition(standard);
+
+  const interrupted = await failInterruptedTransactions();
+  if (interrupted > 0) {
+    logWarn("Marked interrupted synchronous executions as failed", { count: interrupted });
+  }
+
+  await verifyRuntimeChainTrust();
+  stopIdentity = await startProviderIdentityMonitor();
+  stopRail = await startStandardRailReadiness(
+    standard,
     config.CHAIN_ID === 8453 ? base : baseSepolia,
   );
-  stopStandardTaskWatchdog = startStandardTaskWatchdog(standardRailConfig);
-  stopReputationOutcomeWorker = startReputationOutcomeWorker(standardRailConfig);
-  stopStandardReviewResolutionWorker = startStandardReviewResolutionWorker(
-    standardRailConfig,
-    walletConfig,
-  );
-  const { checkedAt: registrationCheckedAt } = await enforceInitialChainReadiness();
-
-  const services = getAllServices();
-  const checkedAt = registrationCheckedAt.toISOString();
-  setServiceStatuses(Object.fromEntries(services.map((module) => [
-    module.manifest.slug,
-    {
-      active: true,
-      tokenId: config.PROVIDER_AGENT_ID.toString(),
-      registrationVerified: true,
-      standardRailVerified: true,
-      standardRailVerifiedAt: checkedAt,
-    },
-  ])));
-
-  startEmailIngressWorker();
-  startOperatorEscalationWorker();
-  startAuthSecurityCleanup();
-  startRetentionWorker();
-  startProviderIdentityMonitor();
-  startProviderWriteReconciler();
-  startServiceRegistrationReconciler();
-
-  serviceWorkerStops = [];
-  screeningWorkerStops = startProviderScreeningWorkers();
-  for (const module of services) {
-    const stop = module.operations?.startWorkers?.();
-    if (typeof stop === "function") serviceWorkerStops.push(stop);
-  }
-  await startServer(standardRailConfig, walletConfig);
+  await startServer(standard);
 
   process.on("SIGTERM", () => void shutdown("SIGTERM", 0));
   process.on("SIGINT", () => void shutdown("SIGINT", 0));
+}
+
+function validateComposition(
+  standard: ReturnType<typeof loadProviderStandardRailConfig>,
+): void {
+  const configured = new Set<string>();
+  for (const outcome of standard.outcomes.values()) {
+    const skill = getSkill(outcome.serviceSlug, outcome.skillId);
+    if (!skill) {
+      throw new Error(`Outcome ${outcome.outcomeId} references an unknown service skill`);
+    }
+    if (skill.fixedPriceAtomic !== outcome.fixedGrossAmount) {
+      throw new Error(`Outcome ${outcome.outcomeId} price differs from its service manifest`);
+    }
+    configured.add(`${outcome.serviceSlug}/${outcome.skillId}`);
+  }
+  const installed = getAllServices().flatMap((service) =>
+    service.skills.map((skill) => `${service.manifest.slug}/${skill.id}`));
+  if (configured.size !== installed.length
+    || installed.some((key) => !configured.has(key))) {
+    throw new Error("Every installed skill must have exactly one reviewed outcome");
+  }
 }
 
 async function shutdown(reason: string, exitCode: number): Promise<void> {
@@ -134,23 +87,8 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
   logInfo(`Shutting down after ${reason}`);
   try {
     await stopServer();
-    stopProviderIdentityMonitor();
-    stopServiceRegistrationReconciler();
-    await stopProviderWriteReconciler();
-    stopStandardRailReadiness?.();
-    stopStandardRailReadiness = null;
-    stopStandardTaskWatchdog?.();
-    stopStandardTaskWatchdog = null;
-    stopReputationOutcomeWorker?.();
-    stopReputationOutcomeWorker = null;
-    await stopStandardReviewResolutionWorker?.();
-    stopStandardReviewResolutionWorker = null;
-    await stopAuthSecurityCleanup();
-    await stopRetentionWorker();
-    await stopEmailIngressWorker();
-    await stopOperatorEscalationWorker();
-    await Promise.allSettled(serviceWorkerStops.map((stop) => Promise.resolve(stop())));
-    await Promise.allSettled(screeningWorkerStops.map((stop) => Promise.resolve(stop())));
+    stopIdentity?.();
+    stopRail?.();
     await closeMigrationPool();
     await pool.end();
   } catch (error) {
@@ -165,7 +103,6 @@ process.on("unhandledRejection", (reason) => {
   logError("Fatal unhandled promise rejection", errorExtra(reason));
   void shutdown("unhandledRejection", 1);
 });
-
 process.on("uncaughtException", (error) => {
   logError("Fatal uncaught exception", errorExtra(error));
   void shutdown("uncaughtException", 1);

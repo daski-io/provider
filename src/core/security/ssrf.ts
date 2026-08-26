@@ -1,11 +1,9 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-// SSRF guard for outbound URLs the provider fetches on behalf of buyers
-// (push-notification webhooks today; potentially other webhook surfaces
-// later). Both the registration handler and the delivery worker call
-// this so a TOCTOU / DNS-rebinding flip between set time and dispatch
-// time can't bypass the check.
+// SSRF guard for reviewed outbound product targets. Callers use the returned
+// addresses to pin the connection so DNS rebinding between validation and
+// request dispatch cannot bypass the check.
 
 export type ValidatePublicUrlResult =
   // `addresses` are the validated public IP(s) the host resolved to (or the
@@ -17,10 +15,9 @@ export type ValidatePublicUrlResult =
 
 interface ValidateOptions {
   /// `true` permits http:// in addition to https://. Default: false.
-  /// Set via PUSH_NOTIFICATION_ALLOW_HTTP for local-dev round-trips
-  /// against a non-TLS gateway.
+  /// Use only for explicit loopback development policies.
   allowHttp?: boolean;
-  /** Webhook registrations should reject signed/query-secret URLs. */
+  /** Set false when the reviewed target must not contain query secrets. */
   allowQueryOrFragment?: boolean;
   /** Total DNS resolution budget. Defaults to three seconds. */
   dnsTimeoutMs?: number;

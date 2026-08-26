@@ -1,124 +1,37 @@
-import type { AssetRow } from "../db/queries/assets.js";
-import type { ScreeningSubject } from "../screening/types.js";
 import type { Hex } from "viem";
 
-export interface AdapterArtifact {
+export interface ServiceArtifact {
   name: string;
   data?: Record<string, unknown>;
   url?: string;
   mimeType?: string;
-  /** Emit a synthetic task-scoped challenge alongside the URL. */
-  accessAction?: "document-download";
 }
 
-export interface AdapterResult {
-  status: "working" | "completed" | "failed" | "input-required";
-  message?: string;
-  /** Internal signal that a consumed task-input authorization needs a fresh challenge. */
-  retryInputAuthorization?: true;
-  artifacts?: AdapterArtifact[];
-  /** First-time provisioning only; existing assets are mutated in place. */
-  asset?: {
-    assetType: string;
-    assetIdentifier: string;
-    assetData: Record<string, unknown>;
-    expiresAt?: Date;
-    /** Protected screening profile persisted atomically with a newly created asset. */
-    screeningSubjects?: ScreeningSubject[];
-  };
-  error?: string;
-  failureClass?: "retryable" | "terminal";
-  autoRefundContext?: {
-    class: "dispatch" | "precommit";
-    supplier: string;
-    kind:
-      | "transient"
-      | "supplier_rejected"
-      | "provider_config"
-      | "ambiguous"
-      | "unclassified";
-    attempts: number;
-  };
-}
-
-export interface TaskContext {
-  id: string;
-  service_id: string;
-  skill_id: string;
-  status: string;
-  supplierMutationStarted?: boolean;
-  supplierCostCeiling?: SupplierCostCeiling;
-}
-
-interface TaskInputAuthorizationBase {
-  requestHash: Hex;
-}
-
-export type TaskInputAuthorizationContext = TaskInputAuthorizationBase & {
-  payer: Hex;
-  standardOrderId: string;
-};
-
-/**
- * Immutable supplier-spend ceiling committed by a paid provider quote and
- * carried into fulfillment. Decimal strings avoid floating-point drift.
- */
-export interface SupplierCostCeiling {
-  kind: "supplier-cost-ceiling-v1";
-  supplier: string;
-  currency: string;
-  maximumAmount: string;
-}
-
-export type QuoteResult =
+export type ServiceResult =
   | {
-      ok: true;
-      amount: bigint;
-      currency: "USDC";
-      notes?: string[];
-      supplierCostCeiling?: SupplierCostCeiling;
+      status: "completed";
+      message?: string;
+      artifacts?: ServiceArtifact[];
     }
   | {
-      ok: false;
-      errors: QuoteError[];
+      status: "failed";
+      message?: string;
+      errorCode: string;
     };
 
-export interface QuoteError {
-  field: string;
-  code: string;
-  message: string;
-}
-
-export class CancellationRefusedError extends Error {
-  constructor(reason: string) {
-    super(reason);
-    this.name = "CancellationRefusedError";
-  }
-}
-
-export class CancellationCleanupError extends Error {
-  constructor(reason: string, readonly cause?: unknown) {
-    super(reason);
-    this.name = "CancellationCleanupError";
-  }
+export interface TaskContext {
+  taskId: string;
+  orderId: string;
+  payer: Hex;
+  serviceSlug: string;
+  skillId: string;
+  /** Aborted when the provider's synchronous execution budget expires. */
+  signal: AbortSignal;
 }
 
 export interface FulfillmentAdapter {
   execute(
-    skillId: string,
-    task: TaskContext,
-    data: Record<string, unknown>,
-    assetContext?: AssetRow,
-  ): Promise<AdapterResult>;
-  handleInput(
-    task: TaskContext,
-    inputText: string,
-    data: Record<string, unknown>,
-    authorization: TaskInputAuthorizationContext,
-  ): Promise<AdapterResult>;
-  cancel(task: TaskContext): Promise<void>;
-  quote(
-    skillId: string,
-    serviceArgs: Record<string, unknown>,
-  ): Promise<QuoteResult>;
+    context: TaskContext,
+    input: Record<string, unknown>,
+  ): Promise<ServiceResult>;
 }

@@ -1,32 +1,36 @@
 import type { Chain } from "viem";
-import { failWorker, heartbeatWorker, setWorkerStatus } from "../health.js";
+import { CHAIN_MODE_MOCK } from "../chain/client.js";
+import { setRailStatus } from "../health.js";
+import { logWarn } from "../logger.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { ProviderEvidenceVerifier } from "./evidence.js";
-
-const WORKER = "standard-rail-evidence";
 
 export async function startStandardRailReadiness(
   config: ProviderStandardRailConfig,
   chain: Chain,
 ): Promise<() => void> {
+  if (CHAIN_MODE_MOCK) {
+    setRailStatus(true);
+    return () => undefined;
+  }
   const verifier = new ProviderEvidenceVerifier(config, chain);
-  let verificationInFlight = false;
-  const verifyEvidence = async () => {
-    if (verificationInFlight) return;
-    verificationInFlight = true;
+  await verifier.verifyReadiness();
+  setRailStatus(true);
+  let inFlight = false;
+  const refresh = async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       await verifier.verifyLiveReadiness();
-      heartbeatWorker(WORKER, 90);
+      setRailStatus(true);
     } catch {
-      failWorker(WORKER);
+      setRailStatus(false);
+      logWarn("Standard-rail readiness verification failed");
     } finally {
-      verificationInFlight = false;
+      inFlight = false;
     }
   };
-  setWorkerStatus(WORKER, false, 90);
-  await verifier.verifyReadiness();
-  heartbeatWorker(WORKER, 90);
-  const timer = setInterval(() => void verifyEvidence(), 30_000);
+  const timer = setInterval(() => void refresh(), 30_000);
   timer.unref();
   return () => clearInterval(timer);
 }

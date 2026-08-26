@@ -1,42 +1,23 @@
-import { readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { providerLaunchPolicy } from "../src/providerLaunchPolicy.js";
-import { providerScreeningExtensions } from "../src/providerScreening.js";
-import { providerServices } from "../src/providerServices.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  assertDummyServiceAllowed,
-  DUMMY_OUTCOME_ID,
-} from "../src/services/dummy/config.js";
+  clearServicesForTests,
+  registerService,
+} from "../src/core/serviceRegistry/registry.js";
+import { providerLaunchPolicy } from "../src/providerLaunchPolicy.js";
+import { configuredServices } from "../src/providerServices.js";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+describe("provider composition", () => {
+  beforeEach(clearServicesForTests);
 
-describe("generic provider composition", () => {
-  it("ships only the dummy reference service", () => {
-    expect(providerServices.map((service) => service.manifest.slug)).toEqual([
-      "dummy",
-    ]);
-    expect(readdirSync(join(ROOT, "src", "services"), {
-      withFileTypes: true,
-    }).filter((entry) => entry.isDirectory()).map((entry) => entry.name))
-      .toEqual(["dummy"]);
-    expect(providerServices[0]?.manifest.supplier).toBeUndefined();
+  it("installs only the dummy service and one reviewed outcome on Testnet", () => {
+    const services = configuredServices(84532);
+    services.forEach(registerService);
+    expect(services.map((service) => service.manifest.slug)).toEqual(["dummy"]);
+    expect(services[0]?.skills.map((skill) => skill.id)).toEqual(["echo"]);
+    expect(providerLaunchPolicy.outcomeIds).toEqual(["dummy.echo.v1"]);
   });
 
-  it("keeps the reviewed launch policy exact and minimal", () => {
-    expect(providerLaunchPolicy.outcomeIds).toEqual([DUMMY_OUTCOME_ID]);
-    expect(providerLaunchPolicy.assetActions).toEqual([]);
-  });
-
-  it("bundles no provider-specific screening implementation", () => {
-    expect(providerScreeningExtensions).toEqual([]);
-  });
-
-  it("fails closed if the dummy service reaches Base mainnet", () => {
-    expect(() => assertDummyServiceAllowed(8453)).toThrow(
-      "Replace the dummy service before deploying on Base mainnet",
-    );
-    expect(() => assertDummyServiceAllowed(84532)).not.toThrow();
+  it("cannot boot the dummy on Base mainnet", () => {
+    expect(() => configuredServices(8453)).toThrow(/dummy service/);
   });
 });

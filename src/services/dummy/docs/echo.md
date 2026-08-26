@@ -1,33 +1,11 @@
-# echo
+# Echo
 
-Free connectivity check: returns your message back as an artifact,
-completing immediately. Direct open calls require no payment, ownership, or
-wallet authorization. Gateway-mediated calls still use the normal signed
-provider request flow.
+Returns the submitted `message` in an `echo_result` JSON artifact.
 
-## Required fields
+- Input: `message`, required string, 1–500 Unicode code points.
+- Price: 10,000 atomic USDC units (0.01 USDC).
+- Fulfillment: automated, synchronous, one-shot.
+- Result: terminal `completed` or `failed`; no polling or follow-up input.
 
-| Field | Type | Constraints |
-| --- | --- | --- |
-| `message` | string | 1–500 Unicode code points |
-
-## Example request
-
-```json
-{
-  "message": "hello daski"
-}
-```
-
-## Output
-
-Artifact `echo_result`:
-
-```json
-{ "message": "<your message>", "processedAt": "<ISO timestamp>" }
-```
-
-## Errors
-
-Missing or over-length `message` fails the task with a field-level error
-(also surfaced for free during quote validation).
+This is a protocol example, not a real marketplace product, and cannot run on
+Base mainnet.

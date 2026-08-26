@@ -34,10 +34,8 @@ function securityHeaders() {
     ].join("; "));
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    // Keep referrers off cross-origin requests while preserving the source
-    // origin on same-origin form POSTs. Firefox serializes the Origin header
-    // as `null` under `no-referrer`, which makes legitimate admin forms fail
-    // the CORS and CSRF origin checks before their handlers run.
+    // Avoid cross-origin referrer disclosure while retaining a useful,
+    // standards-compatible policy for same-origin provider requests.
     res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader(
       "Permissions-Policy",

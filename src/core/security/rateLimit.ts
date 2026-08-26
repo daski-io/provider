@@ -1,15 +1,8 @@
-import type { Request, Response, NextFunction } from "express";
-import { isIP } from "node:net";
-import { pool } from "../db/pool.js";
 import { createHmac } from "node:crypto";
+import { isIP } from "node:net";
+import type { NextFunction, Request, Response } from "express";
 import { config } from "../config.js";
-
-export interface RateLimitConfig {
-  capacity: number;
-  perMinute: number;
-  namespace: string;
-  bypassIps?: string[];
-}
+import { pool } from "../db/pool.js";
 
 interface IpRange {
   version: 4 | 6;
@@ -19,9 +12,7 @@ interface IpRange {
 
 function normalizeIp(value: string): string {
   let ip = value.trim().replace(/^\[|\]$/g, "").split("%", 1)[0];
-  if (ip.toLowerCase().startsWith("::ffff:") && isIP(ip.slice(7)) === 4) {
-    ip = ip.slice(7);
-  }
+  if (ip.toLowerCase().startsWith("::ffff:") && isIP(ip.slice(7)) === 4) ip = ip.slice(7);
   return ip;
 }
 
@@ -29,10 +20,12 @@ function parseIp(value: string): { version: 4 | 6; value: bigint } | null {
   const ip = normalizeIp(value);
   const version = isIP(ip);
   if (version === 4) {
-    const parts = ip.split(".").map(Number);
     return {
       version: 4,
-      value: parts.reduce((acc, part) => (acc << 8n) | BigInt(part), 0n),
+      value: ip.split(".").map(Number).reduce(
+        (total, part) => (total << 8n) | BigInt(part),
+        0n,
+      ),
     };
   }
   if (version !== 6) return null;
@@ -40,36 +33,31 @@ function parseIp(value: string): { version: 4 | 6; value: bigint } | null {
   if (halves.length > 2) return null;
   const parseHalf = (half: string): number[] => {
     if (!half) return [];
-    const groups = half.split(":");
-    const out: number[] = [];
-    for (const group of groups) {
-      if (group.includes(".")) {
-        const v4 = parseIp(group);
-        if (!v4 || v4.version !== 4) return [];
-        out.push(Number((v4.value >> 16n) & 0xffffn), Number(v4.value & 0xffffn));
-      } else {
-        out.push(Number.parseInt(group, 16));
-      }
-    }
-    return out;
+    return half.split(":").flatMap((group) => {
+      if (!group.includes(".")) return [Number.parseInt(group, 16)];
+      const v4 = parseIp(group);
+      if (!v4 || v4.version !== 4) return [Number.NaN];
+      return [Number((v4.value >> 16n) & 0xffffn), Number(v4.value & 0xffffn)];
+    });
   };
-  const left = parseHalf(halves[0]);
+  const left = parseHalf(halves[0]!);
   const right = parseHalf(halves[1] ?? "");
   const omitted = 8 - left.length - right.length;
-  if (omitted < 0 || (halves.length === 1 && omitted !== 0)) return null;
   const groups = [...left, ...Array.from({ length: omitted }, () => 0), ...right];
-  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
-    return null;
-  }
+  if (
+    omitted < 0 || (halves.length === 1 && omitted !== 0)
+    || groups.length !== 8
+    || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)
+  ) return null;
   return {
     version: 6,
-    value: groups.reduce((acc, group) => (acc << 16n) | BigInt(group), 0n),
+    value: groups.reduce((total, group) => (total << 16n) | BigInt(group), 0n),
   };
 }
 
 function parseRange(value: string): IpRange {
-  const [address, rawPrefix] = value.trim().split("/");
-  const parsed = parseIp(address);
+  const [rawAddress, rawPrefix] = value.trim().split("/");
+  const parsed = parseIp(rawAddress ?? "");
   if (!parsed) throw new Error(`invalid IP/CIDR '${value}'`);
   const bits = parsed.version === 4 ? 32 : 128;
   const prefix = rawPrefix === undefined ? bits : Number(rawPrefix);
@@ -90,10 +78,8 @@ export function isIpInRanges(ip: string, ranges: string[]): boolean {
   return ranges.some((raw) => {
     const range = parseRange(raw);
     if (range.version !== parsed.version) return false;
-    const bits = range.version === 4 ? 32 : 128;
-    const shift = BigInt(bits - range.prefix);
-    const network = shift === 0n ? parsed.value : (parsed.value >> shift) << shift;
-    return network === range.network;
+    const shift = BigInt((range.version === 4 ? 32 : 128) - range.prefix);
+    return (shift === 0n ? parsed.value : (parsed.value >> shift) << shift) === range.network;
   });
 }
 
@@ -101,57 +87,44 @@ export function requestClientIp(req: Request): string {
   return normalizeIp(req.ip || req.socket.remoteAddress || "unknown");
 }
 
-export function makeRateLimiter(cfg: RateLimitConfig) {
-  if (!(cfg.capacity > 0) || !(cfg.perMinute > 0)) {
-    throw new Error(`invalid rate limit configuration for '${cfg.namespace}'`);
+export function makeRateLimiter(options: {
+  namespace: string;
+  capacity: number;
+  perMinute: number;
+  bypassIps?: string[];
+}) {
+  if (options.capacity <= 0 || options.perMinute <= 0) {
+    throw new Error(`Invalid rate limiter: ${options.namespace}`);
   }
-  const bypass = cfg.bypassIps ?? [];
-  // Parse once at boot so malformed operator CIDRs fail before serving.
+  const bypass = options.bypassIps ?? [];
   bypass.forEach(parseRange);
-
-  return async function rateLimit(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const ip = requestClientIp(req);
     if (isIpInRanges(ip, bypass)) return next();
-    // Persist only a keyed, namespace-bound identifier. Raw client IPs are
-    // transient routing data and do not belong in the shared bucket table.
-    const identity = createHmac("sha256", config.ADMIN_TOKEN)
-      .update(`${cfg.namespace}\0${ip}`, "utf8")
+    const identity = createHmac("sha256", config.RATE_LIMIT_HASH_KEY)
+      .update(`${options.namespace}\0${ip}`)
       .digest("hex");
-    const key = `${cfg.namespace}:${identity}`;
     try {
       const result = await pool.query(
-        `INSERT INTO rate_limit_buckets (bucket_key, tokens, last_refill, expires_at)
-         VALUES ($1, $2::double precision - 1, now(), now() + interval '10 minutes')
+        `INSERT INTO rate_limit_buckets (bucket_key,tokens,last_refill,expires_at)
+         VALUES ($1,$2::double precision-1,now(),now()+interval '10 minutes')
          ON CONFLICT (bucket_key) DO UPDATE
-           SET tokens = LEAST(
-                 $2::double precision,
+           SET tokens=LEAST($2::double precision,
                  rate_limit_buckets.tokens
-                   + EXTRACT(EPOCH FROM (now() - rate_limit_buckets.last_refill))
-                     * ($3::double precision / 60.0)
-               ) - 1,
-               last_refill = now(),
-               expires_at = now() + interval '10 minutes'
-         WHERE LEAST(
-                 $2::double precision,
+                 + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
+                   * ($3::double precision/60.0))-1,
+               last_refill=now(),expires_at=now()+interval '10 minutes'
+         WHERE LEAST($2::double precision,
                  rate_limit_buckets.tokens
-                   + EXTRACT(EPOCH FROM (now() - rate_limit_buckets.last_refill))
-                     * ($3::double precision / 60.0)
-               ) >= 1
+                 + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
+                   * ($3::double precision/60.0))>=1
          RETURNING tokens`,
-        [key, cfg.capacity, cfg.perMinute],
+        [`${options.namespace}:${identity}`, options.capacity, options.perMinute],
       );
-      if (result.rows.length === 0) {
-        const retryAfterSec = Math.max(1, Math.ceil(60 / cfg.perMinute));
-        res.setHeader("Retry-After", String(retryAfterSec));
-        res.status(429).json({
-          error: "rate_limit_exceeded",
-          retryAfter: retryAfterSec,
-          namespace: cfg.namespace,
-        });
+      if (result.rowCount !== 1) {
+        const retryAfter = Math.max(1, Math.ceil(60 / options.perMinute));
+        res.setHeader("Retry-After", String(retryAfter));
+        res.status(429).json({ error: "rate_limit_exceeded", retryAfter });
         return;
       }
       next();

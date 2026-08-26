@@ -1,11 +1,13 @@
 import { pool } from "../db/pool.js";
 import { inTransaction } from "../db/queryable.js";
+import type { Queryable } from "../db/queryable.js";
 import type { AssetStatus } from "../db/queries/assets.js";
 import { recordMandatoryAudit } from "../events/emitter.js";
 
 /** Commit a service-owned admin asset mutation and its audit as one unit. */
 export async function commitAdminAssetMutation(args: {
   assetId: string;
+  additionalMutation?: (db: Queryable) => Promise<void>;
   serviceId: string;
   actor: string;
   expectedStatus?: AssetStatus;
@@ -36,6 +38,7 @@ export async function commitAdminAssetMutation(args: {
     if (result.rows.length !== 1) {
       throw new Error(`Asset '${args.assetId}' changed before the admin action completed`);
     }
+    await args.additionalMutation?.(db);
     await recordMandatoryAudit(db, {
       assetId: args.assetId,
       serviceId: args.serviceId,

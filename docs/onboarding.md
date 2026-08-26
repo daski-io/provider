@@ -31,7 +31,7 @@ id, and a skill id is not necessarily the paid outcome id.
 | Legal identity, website, terms, privacy, support, and public HTTPS origin | Current marketplace legal links and onboarding contact |
 | Service manifest, skill docs, request schemas, examples, pricing behavior, lifecycle, actions, and tests | Taxonomy/service-type review and listing/admission decision |
 | Dedicated provider wallet and intended ERC-8004 identity | Current registries, index coordinates, signer bindings, and registration expectations |
-| Product sandbox/live modes, credentials, readiness, operations, and incident contacts | Testnet gateway origin and standard-rail environment bindings |
+| Product mock/sandbox/charged-test/live modes, credentials, readiness, operations, and incident contacts | Testnet gateway origin and standard-rail environment bindings |
 | Provider payee/custody facts and any externally controlled wallets | Reviewed outcome definitions, control profile, evidence coordinates, and signed release artifacts |
 | Deployed provider and successful end-to-end Testnet evidence | Mainnet whitelist and coordinated release approval |
 
@@ -56,8 +56,9 @@ Send a concise, versioned packet before expecting signed configuration:
 8. provisioned asset types, identifiers, lifecycle, and ownership behavior;
 9. each proposed owner action, including destructive and replay
    classifications;
-10. product API/MCP origin/tool mapping, sandbox/live separation, idempotency,
-    ambiguity reconciliation, and readiness evidence;
+10. product API/MCP origin/tool mapping, mock/sandbox/charged-test/live
+    separation, any bounded Testnet campaign, idempotency, ambiguity
+    reconciliation, and readiness evidence;
 11. protected data, retention, redaction, compliance/custody dependencies, and
     human review boundaries; and
 12. provider payee, provider-controlled wallets, capacity/deadlines, and the
@@ -81,8 +82,15 @@ Replace the dummy with the product-backed `ServiceModule`, co-located docs and
 tests, service configuration, clients, migrations, workers, and readiness
 facets actually required by the product.
 
-Keep a supplier sandbox or explicit fake for tests. Mainnet must be incapable
-of selecting it.
+Keep a supplier sandbox or explicit fake for automated tests. Mainnet must be
+incapable of selecting any non-live product mode.
+
+If Testnet must use a real upstream account, identify every possible charge,
+external record, message, and human side effect before enabling it. Require an
+explicit charged-test mode and a durable campaign that freezes the admitted
+payer/skills, small count limit, aggregate supplier-cost cap, and upstream
+account identity. See
+[Integrating an existing product](integrating-existing-product.md#product-environments-and-chargeable-testnet-campaigns).
 
 ### 3. Submit and review the packet
 
@@ -180,8 +188,9 @@ Through the Daski gateway, test at least:
 12. ambiguous supplier/product response and authoritative reconciliation; and
 13. readiness failure/recovery for required product dependencies and workers.
 
-Keep Testnet identities, product accounts, and spend bounded. Reconcile an
-ambiguous payment or mutation before retrying.
+Keep Testnet identities, product accounts, and spend bounded. When upstream
+effects are real, retain the durable campaign binding and its non-sensitive
+audit evidence. Reconcile an ambiguous payment or mutation before retrying.
 
 ### 11. Capture safe evidence
 
@@ -238,7 +247,7 @@ Before requesting the final release:
 
 - remove `src/services/dummy` and its launch outcome;
 - use Base chain id 8453 and `NODE_ENV=production`;
-- refuse mock/sandbox product modes in every service;
+- refuse mock, sandbox, and charged-test product modes in every service;
 - use canonical reviewed contracts and USDC;
 - use verified database TLS and distinct migration/runtime roles;
 - verify trusted proxies, narrow CIDRs, and edge request limiting;

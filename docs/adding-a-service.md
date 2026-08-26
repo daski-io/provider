@@ -316,11 +316,56 @@ Only add a facet when your product needs it:
 - `security.protectedAssetIdentifiers`: encrypt sensitive identifiers while
   preserving lookup;
 - `protocol.routes`: service-specific HTTP routes under the core boundary;
-- `protocol.inboundEmail`: bounded recipient interception;
+- `protocol.inboundEmail`: bounded recipient interception with the trust
+  boundary below;
 - `agents`: bounded tools with explicit authority;
 - `screening`: subject extraction and required provider-policy scopes;
 - `admin`: service controls with mandatory audit/transaction behavior; and
 - `assets`: canonical identifier and ownership lookup behavior.
+
+### Inbound email trust boundary
+
+Webhook authentication proves that the HTTP request passed the configured
+Postmark boundary. It does not authenticate the person or organization named
+in an email's `From`, `Reply-To`, headers, or body.
+
+Core evaluates the unique Postmark SPF, aligned-DKIM, and SpamAssassin signals
+once at ingress and persists fail-closed verdicts on `InboundEmailRow`:
+
+- `postmark_sender_authenticated` is true only for complete passing SPF and
+  aligned-DKIM signals; and
+- `postmark_spam_safe` is true only for a complete non-spam verdict below the
+  admitted score threshold.
+
+Missing, incomplete, or duplicate verdict headers produce `false`. A service
+must consume these booleans rather than reinterpret raw `Authentication-Results`
+or other message-controlled headers. Even a true verdict is not business
+authorization: normalize and pin the expected participant or use a
+service-owned sender/domain allowlist before correspondence can affect state.
+Email alone must never authorize payment, ownership, a destructive asset
+action, or an arbitrary recipient/body supplied to an outbound relay.
+
+Keep `match(recipient)` deterministic and bounded. Exactly one active service
+may match a recipient, and `handle(row)` must be idempotent because webhook and
+worker delivery can repeat. Treat bodies, links, and attachments as untrusted.
+The starter does not persist or relay inbound attachments; adding that
+capability requires explicit request/count/byte limits, encrypted storage,
+content handling policy, malware controls or isolated human review, retention,
+and replay tests. Postmark's SpamAssassin processing does not scan attachment
+content.
+
+### Atomic service-owned admin state
+
+When a service admin action must change both a core asset and service-owned
+database state, use `commitAdminAssetMutation`. Its optional
+`additionalMutation(db)` callback receives the same transaction used for the
+asset update and mandatory audit. If the callback or audit fails, all database
+changes roll back.
+
+The callback is for short, deterministic database writes through the supplied
+`Queryable`. Do not perform supplier, network, model, email, or other
+irreversible work while holding the transaction. Journal and reconcile those
+effects through the normal service workflow.
 
 Pre-execution model review is advisory policy, not input validation or
 authorization. Choose `onError: "escalate"` for a fail-closed skill. Project

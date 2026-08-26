@@ -23,6 +23,8 @@ export interface InboundEmailRow {
   body_text: string | null;
   body_html: string | null;
   headers: Record<string, unknown> | null;
+  postmark_sender_authenticated: boolean;
+  postmark_spam_safe: boolean;
   in_reply_to: string | null;
   thread_root: string | null;
   customer_id: string | null;
@@ -130,6 +132,8 @@ export async function insertInboundEmail(args: {
   body_text?: string | null;
   body_html?: string | null;
   headers?: Record<string, unknown> | null;
+  postmark_sender_authenticated: boolean;
+  postmark_spam_safe: boolean;
   in_reply_to?: string | null;
   thread_root?: string | null;
   service_id?: string | null;
@@ -144,11 +148,12 @@ export async function insertInboundEmail(args: {
   const result = await pool.query(
     `INSERT INTO emails_inbound (
        id, message_id, rfc_message_id, from_address, to_address, subject,
-       body_text, body_html, headers, in_reply_to, thread_root,
+       body_text, body_html, headers,
+       postmark_sender_authenticated, postmark_spam_safe, in_reply_to, thread_root,
        thread_root_hash, to_address_hash,
        customer_id, service_id, transaction_id,
        classification, classification_reason, processing_mode, processing_service_slug
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
      ON CONFLICT (message_id) DO NOTHING
      RETURNING *`,
     [
@@ -163,6 +168,8 @@ export async function insertInboundEmail(args: {
       args.headers
         ? JSON.stringify(encryptString(JSON.stringify(args.headers), emailContext("inbound", id, "headers")))
         : null,
+      args.postmark_sender_authenticated,
+      args.postmark_spam_safe,
       encryptOptionalEmailValue(args.in_reply_to, "inbound", id, "in_reply_to"),
       encryptOptionalEmailValue(args.thread_root, "inbound", id, "thread_root"),
       args.thread_root ? protectedLookupHash(args.thread_root, "email-thread") : null,

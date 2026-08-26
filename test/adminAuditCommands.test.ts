@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Queryable } from "../src/core/db/queryable.js";
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -117,6 +118,61 @@ describe("transactional admin audit commands", () => {
       }],
     })).rejects.toThrow("audit unavailable");
 
+    expect(mocks.query).toHaveBeenLastCalledWith("ROLLBACK");
+    expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
+  });
+
+  it("runs service-owned state changes and the audit on the asset transaction", async () => {
+    const additionalMutation = vi.fn(async (db: Queryable) => {
+      expect(db.query).toBe(mocks.query);
+      await db.query(
+        "UPDATE service_asset_state SET active = false WHERE asset_id = $1",
+        ["asset-1"],
+      );
+    });
+
+    await commitAdminAssetMutation({
+      assetId: "asset-1",
+      serviceId: "service-1",
+      actor: "0xoperator",
+      expectedStatus: "active",
+      status: "suspended",
+      additionalMutation,
+      event: {
+        type: "item.suspended",
+        message: "Item suspended.",
+      },
+    });
+
+    expect(additionalMutation).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenCalledWith(
+      "UPDATE service_asset_state SET active = false WHERE asset_id = $1",
+      ["asset-1"],
+    );
+    expect(mocks.recordMandatoryAudit).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenLastCalledWith("COMMIT");
+  });
+
+  it("rolls back the asset mutation when service-owned state fails", async () => {
+    const additionalMutation = vi.fn().mockRejectedValueOnce(
+      new Error("service state unavailable"),
+    );
+
+    await expect(commitAdminAssetMutation({
+      assetId: "asset-1",
+      serviceId: "service-1",
+      actor: "0xoperator",
+      expectedStatus: "active",
+      status: "suspended",
+      additionalMutation,
+      event: {
+        type: "item.suspended",
+        message: "Item suspended.",
+      },
+    })).rejects.toThrow("service state unavailable");
+
+    expect(additionalMutation).toHaveBeenCalledOnce();
+    expect(mocks.recordMandatoryAudit).not.toHaveBeenCalled();
     expect(mocks.query).toHaveBeenLastCalledWith("ROLLBACK");
     expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
   });

@@ -133,10 +133,52 @@ text as a public error.
 - Parse the API credential in the service's `config.ts`.
 - Never accept it from a Daski request or place it in a manifest, skill doc,
   artifact, log, model prompt, or error.
-- Use a separate sandbox credential on Testnet.
-- Add a Mainnet gate that rejects sandbox/test credentials and modes.
+- Use separate, environment-scoped credentials. Prefer a sandbox or fake on
+  Testnet when the product provides one.
+- Add a Mainnet gate that rejects mock, sandbox, and charged-test credentials
+  or modes.
 - Prefer a narrowly scoped product service account rather than an operator or
   customer credential.
+
+### Product environments and chargeable Testnet campaigns
+
+Daski Testnet controls the marketplace payment and chain environment. It does
+not make an upstream API or MCP call harmless. Some products have no sandbox,
+and a test account may still create durable records, contact people, consume
+inventory, or charge the provider.
+
+Keep the product environment as an explicit, closed service mode such as
+`mock`, `sandbox`, `charged-test`, or `live`:
+
+- Mainnet must require `live` and reject every non-live mode.
+- Non-mainnet deployments must reject `live` unless a separately reviewed
+  policy deliberately permits it.
+- Persist the selected account/mode with every durable upstream object, job,
+  callback, catalog snapshot, and external identifier. Never reinterpret an
+  identifier under different credentials after a deployment-mode change.
+- Switching modes parks incompatible work. It does not delete it, relabel it,
+  or prove that an ambiguous upstream mutation failed.
+
+If a Testnet exercise can cause real upstream cost or side effects, put it
+behind a durable campaign envelope. At minimum, bind and freeze:
+
+- a new campaign id for each reviewed boundary revision;
+- the exact admitted payer wallet and skill or operation set;
+- a small cumulative operation/count cap;
+- an aggregate supplier-cost cap represented in exact integer minor units;
+- the upstream account/mode identity; and
+- an audit record for each admitted transaction.
+
+Serialize admission and spend reservation against the campaign row so
+concurrent transactions cannot exceed a cap. A retry must reuse its original
+campaign, payer, mode, and reserved amount. Changing any frozen boundary
+requires a new campaign id rather than editing the durable campaign.
+
+The emergency stop should disable new/resumed upstream mutations while
+preserving journals, reservations, callbacks, and identifiers for later
+reconciliation. Retain only non-sensitive certification evidence: deployment
+revision, campaign id, public Testnet transaction ids, bounded caps, durable
+task ids, timestamps, outcomes, and redacted defects.
 
 ### Timeouts, responses, and retries
 
@@ -292,8 +334,9 @@ specifically requires and protects them.
 A real service must make `/health/ready` fail closed when it cannot fulfill
 admitted work. Typical service checks include:
 
-- required credential is present and valid for sandbox/live mode;
-- the configured product environment matches Testnet/Mainnet;
+- required credentials are present and valid for the selected product mode;
+- the configured mock, sandbox, charged-test, or live product environment
+  matches Testnet/Mainnet and any durable campaign boundary;
 - required durable workers are alive;
 - product schema or capability version is supported;
 - webhook/callback configuration is current;
@@ -318,7 +361,8 @@ Cover:
 - job restart and webhook replay;
 - cancellation around irreversible boundaries;
 - artifact/redaction boundaries; and
-- sandbox/live readiness, including Mainnet refusal of fakes.
+- mock/sandbox/charged-test/live readiness, including Mainnet refusal of every
+  non-live mode.
 
 Keep these tests under `src/services/<slug>/tests/`. Do not retain a
 provider-specific product fixture in the upstream generic starter.

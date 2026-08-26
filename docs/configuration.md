@@ -225,14 +225,17 @@ service that owns them. Recommended rules:
 - credentials are required only when the service is installed;
 - base endpoints are fixed or selected from a closed reviewed set;
 - booleans use strict parsing;
-- Testnet uses a supplier sandbox or explicit fake;
-- Mainnet refuses sandbox/fake modes and asserts live readiness;
+- Testnet prefers a supplier sandbox or explicit fake;
+- a chargeable Testnet account uses an explicit non-live mode plus durable
+  payer, operation-count, and aggregate-spend campaign limits;
+- Mainnet refuses mock, sandbox, and charged-test modes and asserts live
+  readiness;
 - values never appear in public manifests, docs, errors, logs, prompts, or
   test fixtures; and
 - an invalid service configuration fails before traffic is accepted.
 
-Use [Integrating an existing product](integrating-existing-product.md) for API
-and MCP-specific configuration boundaries.
+Use [Integrating an existing product](integrating-existing-product.md) for API,
+MCP, and chargeable-Testnet configuration boundaries.
 
 ## Validate without disclosing values
 

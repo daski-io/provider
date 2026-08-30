@@ -122,7 +122,7 @@ src/installRuntimeBundle.ts       verified Daski-assisted catalog importer
 src/core/gatewayRegistration/     runtime commitment and catalog primitives
 test/                              core and cross-service tests
 docs/                              installation, integration, and onboarding
-.agents/skills/daski-provider/    portable agent entrypoint
+.agents/skills/daski-provider/    portable agent skill and routed references
 scripts/                           local diagnostics and verification
 compose.yaml                       loopback-only development PostgreSQL
 Dockerfile                         hosting-neutral production image
@@ -211,7 +211,9 @@ not the provider quickstart.
 
 Coding agents should read `AGENTS.md`, then the portable
 `.agents/skills/daski-provider/SKILL.md`. Repository documentation is
-authoritative; the skill is a short workflow router, not a second manual.
+authoritative after checkout. The separately packaged skill also includes
+focused references for starter selection, product mapping, full-provider work,
+and onboarding so it remains useful before a repository is cloned.
 
 ## Staying current
 

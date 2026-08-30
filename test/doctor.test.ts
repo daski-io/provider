@@ -21,6 +21,7 @@ const environment = {
   USDC_ADDRESS: `0x${"33".repeat(20)}`,
   RATE_LIMIT_HASH_KEY: secret,
   STANDARD_RAIL_GATEWAY_SIGNER: `0x${"44".repeat(20)}`,
+  STANDARD_RAIL_GATEWAY_ORIGIN: "https://gateway.example.invalid",
   STANDARD_RAIL_GATEWAY_AUDIENCE: "https://gateway.example.invalid",
   STANDARD_RAIL_PROVIDER_AUDIENCE: "https://provider.example.invalid",
   REPUTATION_STORAGE_ADDRESS: `0x${"55".repeat(20)}`,
@@ -28,7 +29,8 @@ const environment = {
   EAS_RUNTIME_CODE_HASH: `0x${"77".repeat(32)}`,
   EAS_OUTCOME_SCHEMA_UID: `0x${"88".repeat(32)}`,
   SANCTIONS_ORACLE_ADDRESS: `0x${"99".repeat(20)}`,
-  STANDARD_RAIL_OUTCOMES_JSON: "present-for-doctor",
+  STANDARD_RAIL_GLOBAL_POLICY_JSON: "present-for-doctor",
+  STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH: `0x${"aa".repeat(32)}`,
 };
 
 describe("doctor", () => {

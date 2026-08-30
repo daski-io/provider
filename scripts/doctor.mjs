@@ -63,9 +63,11 @@ function diagnostics(stage) {
   if (stage !== "local") {
     const rail = missing([
       "STANDARD_RAIL_GATEWAY_SIGNER", "STANDARD_RAIL_GATEWAY_AUDIENCE",
-      "STANDARD_RAIL_PROVIDER_AUDIENCE", "REPUTATION_STORAGE_ADDRESS",
+      "STANDARD_RAIL_GATEWAY_ORIGIN", "STANDARD_RAIL_PROVIDER_AUDIENCE",
+      "REPUTATION_STORAGE_ADDRESS",
       "EAS_ADDRESS", "EAS_RUNTIME_CODE_HASH", "EAS_OUTCOME_SCHEMA_UID",
-      "SANCTIONS_ORACLE_ADDRESS", "STANDARD_RAIL_OUTCOMES_JSON",
+      "SANCTIONS_ORACLE_ADDRESS", "STANDARD_RAIL_GLOBAL_POLICY_JSON",
+      "STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH",
     ]);
     checks.push(check(
       "STANDARD_RAIL_ARTIFACTS",
@@ -74,6 +76,12 @@ function diagnostics(stage) {
         ? "Standard-rail bindings are present."
         : `Missing Daski-issued bindings: ${rail.join(", ")}.`,
       "Complete Testnet onboarding and copy the reviewed values exactly.",
+    ));
+    checks.push(check(
+      "RUNTIME_BUNDLE_REQUIRED",
+      "warn",
+      "Doctor does not mutate or inspect the runtime catalog.",
+      "Install the Daski-issued bundle with npm run daski:install-runtime -- --file <path>.",
     ));
   }
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));

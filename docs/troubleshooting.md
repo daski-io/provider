@@ -17,6 +17,7 @@ Doctor performs no mutations or network calls. Do not paste `.env` to support.
 | `ENV_FILE` | `.env` is absent. | Copy `.env.example` to `.env`; never commit it. |
 | `CONFIG_REQUIRED` | Required common variables are missing or obvious placeholders. | Use `docs/configuration.md` and fill only provider-owned values; obtain Daski-owned values through onboarding. |
 | `STANDARD_RAIL_ARTIFACTS` | A Testnet/Mainnet rail binding is missing. | Install one complete reviewed Daski set; do not invent or mix values. |
+| `RUNTIME_BUNDLE_REQUIRED` | Doctor deliberately does not inspect or mutate the runtime catalog. | Install each Daski-issued service bundle with `npm run daski:install-runtime -- --file <path>`. |
 | `DEPENDENCIES_INSTALLED` | `node_modules` is absent. | Run `npm ci` with Node 24. |
 | `MAINNET_RUNTIME` | Mainnet production, chain, database TLS/roles, proxy, or edge posture is incomplete. | Complete the Mainnet checklist in `docs/onboarding.md`. |
 | `DUMMY_SERVICE_REMOVED` | The Testnet-only dummy is still present. | Replace and remove it before Mainnet. |
@@ -44,20 +45,33 @@ Common causes:
 Fix the named field. Do not catch `ConfigurationError`, add a fallback secret,
 or relax validation.
 
-## Standard-rail artifact is malformed or differs from launch policy
+## Global policy or runtime bundle is rejected
 
-`STANDARD_RAIL_OUTCOMES_JSON` is gzip-compressed base64 JSON, issued/reviewed
-as one artifact. It must contain exactly the outcome ids in
-`src/providerLaunchPolicy.ts`, with no duplicates or extras.
+`STANDARD_RAIL_GLOBAL_POLICY_JSON` contains gateway-signed global rail
+envelopes. The runtime-bundle file contains provider intent, gateway
+preparation, exact skill contracts, activation evidence, and runtime
+commitments for one service. Both are issued/reviewed as one coordinated set.
 
-Do not decode/edit/recompress it. Confirm you copied the complete value without
-whitespace truncation and that it belongs to the same environment, chain,
-provider wallet/audience, service/skill, schema, price, and release. Request a
-new consistent artifact when code changed.
+Do not decode/edit/resign either artifact to make it pass. Confirm that the
+complete values belong to the same environment, chain, gateway origin/audience,
+provider wallet/identity, service build, schema, price, and release. A changed
+contract hash, mismatched signer, expired envelope, duplicate skill, or
+splitter-provenance mismatch is a hard failure and requires a new bundle.
 
-If boot says an outcome references an unknown skill or its price differs from
-the manifest, update the service contract through onboarding; do not make one
-side silently accept the other.
+Run the importer only against the intended provider database:
+
+```bash
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
+```
+
+An identical bundle is an idempotent no-op. If boot warns that an installed
+paid skill has no promoted runtime listing, the service is not purchasable yet;
+install the reviewed bundle rather than weakening exact-set checks.
+
+If boot logs `listing commitment drift`, this build's published skill contract
+changed after the installed bundle was issued. The process stays online so
+Daski can read the new AgentCard, but the gateway may quarantine the service.
+Request, review, and install a replacement bundle before accepting purchases.
 
 ## PostgreSQL is unreachable
 
@@ -89,7 +103,7 @@ or invalid. Check structured application logs by event/error class, then verify:
 - PostgreSQL connectivity;
 - chain/RPC network and reviewed code hashes;
 - provider wallet/agent ownership binding;
-- outcome/evidence coordinates and finality;
+- runtime-listing/evidence coordinates and finality;
 - public origin/audience agreement; and
 - product readiness if your service adds a dependency check.
 

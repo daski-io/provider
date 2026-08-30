@@ -30,7 +30,7 @@ export interface StandardRailDispatchV2 {
   listingManifestHash: Hex;
   providerOfferHash: Hex;
   quoteHash: Hex;
-  bindingProfile: "stock-fixed-v1" | "recipe-bound-v1";
+  bindingProfile: "stock-fixed-v1" | "recipe-bound-v1" | "recipe-bound-v2";
   canonicalRequestHash: Hex;
   orderNonce: Hex;
   buyerIdentityProofHash: Hex;
@@ -76,24 +76,6 @@ export interface DispatchStatusQueryV1 {
   dispatchHash: Hex;
   issuedAt: number;
   validBefore: number;
-}
-
-export interface ProviderOutcomeOfferV1 {
-  listingManifestHash: Hex;
-  outcomeId: string;
-  skillId: string;
-  providerAgentId: string;
-  providerPayee: Hex;
-  pricingMode: "fixed";
-  fixedGrossAmount: string;
-  quotePolicyHash: Hex;
-  capacityPolicyHash: Hex;
-  deadlinePolicyHash: Hex;
-  deliveryCommitment: Hex;
-  termsHash: Hex;
-  issuedAt: number;
-  validBefore: number;
-  offerNonce: Hex;
 }
 
 export interface StandardEvidenceBundleV2 {
@@ -170,7 +152,7 @@ export interface ProviderOutcomeConfig {
   commissionBps: number;
   maxOpenOrders: number;
   dispatchDeadlineSeconds: number;
-  bindingProfile: "stock-fixed-v1" | "recipe-bound-v1";
+  bindingProfile: "stock-fixed-v1" | "recipe-bound-v1" | "recipe-bound-v2";
   requestSchema: {
     type: "object";
     properties: Record<string, Record<string, unknown>>;

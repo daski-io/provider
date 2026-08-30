@@ -12,15 +12,19 @@ import {
   verifyDatabaseRoleSeparation,
 } from "./core/db/pool.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
+import { logListingCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
 import {
   getAllServices,
   getSkill,
   registerService,
 } from "./core/serviceRegistry/registry.js";
-import { loadProviderStandardRailConfig } from "./core/standardRail/config.js";
+import {
+  loadProviderStandardRailConfig,
+  type ProviderStandardRailConfig,
+} from "./core/standardRail/config.js";
+import { deriveProviderLaunchPolicy } from "./core/standardRail/launchPolicy.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
-import { providerLaunchPolicy } from "./providerLaunchPolicy.js";
 import { configuredServices } from "./providerServices.js";
 
 let shuttingDown = false;
@@ -38,9 +42,19 @@ async function main(): Promise<void> {
   await verifyDatabaseRoleSeparation();
   await closeMigrationPool();
 
-  for (const service of configuredServices(config.CHAIN_ID)) registerService(service);
-  const standard = loadProviderStandardRailConfig(providerLaunchPolicy);
+  const services = configuredServices(config.CHAIN_ID);
+  for (const service of services) registerService(service);
+  const standard = await loadProviderStandardRailConfig(
+    deriveProviderLaunchPolicy(services),
+    process.env,
+    { warn: (message) => logWarn(message) },
+  );
   validateComposition(standard);
+  void logListingCommitmentDrift({
+    gatewayOrigin: standard.gatewayOrigin,
+    baseUrl: config.BASE_URL,
+    services,
+  });
 
   const interrupted = await failInterruptedTransactions();
   if (interrupted > 0) {
@@ -60,7 +74,7 @@ async function main(): Promise<void> {
 }
 
 function validateComposition(
-  standard: ReturnType<typeof loadProviderStandardRailConfig>,
+  standard: ProviderStandardRailConfig,
 ): void {
   const configured = new Set<string>();
   for (const outcome of standard.outcomes.values()) {
@@ -73,11 +87,12 @@ function validateComposition(
     }
     configured.add(`${outcome.serviceSlug}/${outcome.skillId}`);
   }
-  const installed = getAllServices().flatMap((service) =>
-    service.skills.map((skill) => `${service.manifest.slug}/${skill.id}`));
-  if (configured.size !== installed.length
-    || installed.some((key) => !configured.has(key))) {
-    throw new Error("Every installed skill must have exactly one reviewed outcome");
+  const installedPaid = new Set(getAllServices().flatMap((service) =>
+    service.skills
+      .filter((skill) => BigInt(skill.fixedPriceAtomic) > 0n)
+      .map((skill) => `${service.manifest.slug}/${skill.id}`)));
+  if ([...configured].some((key) => !installedPaid.has(key))) {
+    throw new Error("Runtime catalog contains an uninstalled paid skill");
   }
 }
 
@@ -109,6 +124,7 @@ process.on("uncaughtException", (error) => {
 });
 
 main().catch((error) => {
-  logError("Startup failed", errorExtra(error));
+  const cause = error instanceof Error ? error.message : String(error);
+  logError(`Startup failed: ${cause}`, errorExtra(error));
   void shutdown("startup failure", 1);
 });

@@ -6,7 +6,6 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { encodeGzipBase64Json } from "../src/core/standardRail/compressedJson.js";
 import type { ProviderOutcomeConfig } from "../src/core/standardRail/types.js";
 
 export const hash = (byte: string) => `0x${byte.repeat(64)}` as Hex;
@@ -123,6 +122,5 @@ export function standardEnvironment(): NodeJS.ProcessEnv {
     STANDARD_RAIL_GATEWAY_AUDIENCE: "https://gateway.example",
     STANDARD_RAIL_PROVIDER_AUDIENCE: "https://provider.example",
     STANDARD_RAIL_GATEWAY_SIGNER: "0x4444444444444444444444444444444444444444",
-    STANDARD_RAIL_OUTCOMES_JSON: encodeGzipBase64Json([standardOutcome()]),
   };
 }

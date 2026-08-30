@@ -30,8 +30,9 @@ execution recovery. Those belong in
 
 `src/core` defines the service-neutral runtime and the `ServiceModule`
 contract. `src/services/<slug>` implements a product. `src/providerServices.ts`
-is the only installed-service list; `src/providerLaunchPolicy.ts` is the exact
-reviewed outcome allowlist.
+is the only installed-service list. Paid skills are derived from those
+manifests; the append-only runtime catalog supplies the Daski-reviewed listing
+commitments used at boot and dispatch.
 
 Dependencies point inward:
 
@@ -45,6 +46,20 @@ service A -X-> service B
 
 Static gates check that boundary, reject unreachable production modules, and
 reject full-starter directories/routes/dependencies.
+
+## Assisted registration boundary
+
+The minimal starter intentionally does not create an ERC-8004 service, call a
+gateway registration API, deploy a splitter, or send a chain transaction.
+Daski onboarding supplies one `ProviderRuntimeBundleSetV1` per service plus a
+matching signed global rail policy. `npm run daski:install-runtime -- --file`
+verifies the provider and gateway signatures, exact local AgentCard contract,
+fixed price, runtime commitment, chain/policy domains, and splitter provenance,
+then promotes all skill versions atomically.
+
+AgentCards publish a null service id before import and the catalog service id
+after import. A new contract, price, service id, or runtime commitment requires
+a newly reviewed bundle; catalog history is never rewritten.
 
 ## Dispatch state machine
 
@@ -89,7 +104,8 @@ The baseline creates only:
 - `provider_transactions`;
 - `standard_evidence_admissions`;
 - `supplier_operations`; and
-- `rate_limit_buckets`.
+- `rate_limit_buckets`; and
+- `provider_runtime_listing_versions`.
 
 `_migrations` is created by the migration runner. Migrations are checksummed
 and serialized with a PostgreSQL advisory lock. Production can use a privileged

@@ -68,8 +68,17 @@ Use `categoryFamily`, coordinated `serviceType`, and jurisdictions honestly.
 Do not put credentials, internal endpoints, account ids, or private product
 policy in a manifest or skill document.
 
-The Daski-issued outcome request schema and the adapter validation must match.
-Schema drift fails boot or dispatch rather than being tolerated.
+Marketplace search matches exact words in service/skill names, descriptions,
+and skill tags; examples and schemas are not searched. Include truthful common
+product names and synonyms a buyer will type, without advertising inputs or
+outcomes the schema cannot support. Presentation copy is outside the hashed
+skill contract, so a copy-only correction does not require a new runtime
+listing.
+
+The manifest's closed input/result schemas become the published skill contract.
+The adapter validation must match them. Contract drift changes the
+`skillContractHash` and requires a newly reviewed runtime bundle; it is never
+silently tolerated.
 
 ## 4. Parse service configuration
 
@@ -118,16 +127,28 @@ Map anticipated failures to stable provider error codes. Public messages must
 not reveal product internals. Unexpected exceptions are converted by core to
 `service_execution_failed`.
 
-## 7. Register the service and outcome
+## 7. Compose and onboard the service
 
 Replace the dummy import in `src/providerServices.ts`. Keep this as the only
 installed-service list.
 
-Update `src/providerLaunchPolicy.ts` only with the exact outcome id coordinated
-with Daski. The Daski-issued `STANDARD_RAIL_OUTCOMES_JSON` must contain exactly
-the same outcome set, service/skill pair, request schema, fixed price, capacity,
-deadline, token, payee, and security bindings. Never hand-edit an issued
-artifact to make it match code.
+Paid skills are derived from the installed manifests; there is no second
+hand-maintained outcome allowlist. Give Daski the deployed AgentCard and the
+review packet described in `docs/onboarding.md`. Daski supplies one runtime
+bundle for each service and matching global policy configuration.
+
+After copying those values into the deployment secret manager, install the
+bundle from a protected local path:
+
+```bash
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
+```
+
+The command does not accept partial or hand-edited listings. It requires the
+exact installed paid-skill set for that service and verifies the local contract
+hash, fixed price, provider intent, gateway signatures, runtime commitment, and
+splitter provenance before writing. A service-contract or price change needs a
+new bundle; never edit the catalog or an issued file.
 
 ## 8. Co-locate service evidence
 
@@ -157,7 +178,7 @@ Run the gates in `README.md`, then search the release diff for `dummy`, test
 credentials, product account data, and raw captured output. The Mainnet doctor
 fails while `src/services/dummy` exists.
 
-Submit the checked-in manifest, schema, docs, tests, fixed price, and operation
+Submit the checked-in manifest, schemas, docs, tests, fixed price, and operation
 mapping as the technical portion of the onboarding packet. Treat later changes
 to ids, schema, price, deadline, capacity, origin, payee, or behavior as a
-coordinated artifact revision.
+coordinated contract and runtime-bundle revision.

@@ -18,7 +18,7 @@
     "build": "npm run clean && tsc && npm run copy-assets",
     "copy-assets": "node scripts/copy-assets.mjs",
     "start": "node --env-file-if-exists=.env dist/bootstrap.js",
-    "standard-rail:sign-offer": "node --env-file-if-exists=.env dist/core/standardRail/offerCli.js",
+    "daski:install-runtime": "node --env-file-if-exists=.env --import=tsx src/installRuntimeBundle.ts",
     "dev:db:up": "docker compose up -d postgres",
     "dev:db:stop": "docker compose stop postgres",
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",

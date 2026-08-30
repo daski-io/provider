@@ -41,6 +41,9 @@ if (
   !packageJson.scripts.dev.includes("src/bootstrap.ts")
   || !packageJson.scripts.start.includes("dist/bootstrap.js")
 ) failures.push("runtime entrypoints must use bootstrap");
+if (!packageJson.scripts["daski:install-runtime"]?.includes("src/installRuntimeBundle.ts")) {
+  failures.push("minimal provider must expose the reviewed runtime-bundle installer");
+}
 
 for (const path of [
   "src/core/admin", "src/core/email", "src/core/a2a", "src/core/llm",
@@ -48,6 +51,17 @@ for (const path of [
   "src/providerScreening.ts", "src/rotateProtectedData.ts",
 ]) {
   if (existsSync(join(root, path))) failures.push(`full-only path is present: ${path}`);
+}
+const gatewayRegistrationFiles = files(join(root, "src/core/gatewayRegistration"))
+  .map(projectPath);
+for (const path of gatewayRegistrationFiles) {
+  if (!["src/core/gatewayRegistration/runtimeCatalog.ts",
+    "src/core/gatewayRegistration/runtimeCommitment.ts",
+    "src/core/gatewayRegistration/commitmentDrift.ts",
+    "src/core/gatewayRegistration/commitmentDriftBoot.ts",
+    "src/core/gatewayRegistration/types.ts"].includes(path)) {
+    failures.push(`full registration surface is present: ${path}`);
+  }
 }
 
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
@@ -120,7 +134,7 @@ const byPath = new Set(sourceFiles.map((file) => resolve(file)));
 const reachable = new Set();
 const queue = [
   "src/bootstrap.ts",
-  "src/core/standardRail/offerCli.ts",
+  "src/installRuntimeBundle.ts",
   "src/core/security/outboundHttp.ts",
   "src/core/security/reviewedEndpoint.ts",
   "src/core/suppliers/operationJournal.ts",

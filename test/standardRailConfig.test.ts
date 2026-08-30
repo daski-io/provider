@@ -1,105 +1,125 @@
 import { describe, expect, it } from "vitest";
+import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { recipeNonce } from "../src/core/standardRail/canonical.js";
-import {
-  decodeGzipBase64Json,
-  encodeGzipBase64Json,
-} from "../src/core/standardRail/compressedJson.js";
 import { loadProviderStandardRailConfig } from "../src/core/standardRail/config.js";
-import { signProviderOutcomeOffer } from "../src/core/standardRail/offer.js";
 import {
   compileProviderSchema,
   validateProviderRequest,
 } from "../src/core/standardRail/schema.js";
 import {
+  buildGlobalPolicyFixture,
+  buildRuntimeHeadFixture,
+  encodeGlobalPolicy,
+  testGatewaySigner,
+} from "./runtimeCatalogFixture.js";
+import {
   hash,
   providerWalletKey,
   standardEnvironment,
-  standardOutcome,
 } from "./standardRailOutcomeFixture.js";
 
-const policy = { outcomeIds: ["dummy.echo.v1"] } as const;
+const policy = {
+  paidSkills: [{ serviceSlug: "dummy", skillId: "echo" }],
+} as const;
+
+async function catalogEnvironment() {
+  const env = standardEnvironment();
+  const globalPolicy = await buildGlobalPolicyFixture();
+  env.STANDARD_RAIL_GATEWAY_SIGNER = testGatewaySigner;
+  env.STANDARD_RAIL_GATEWAY_ORIGIN = "https://gateway.example";
+  env.STANDARD_RAIL_GLOBAL_POLICY_JSON = encodeGlobalPolicy(globalPolicy);
+  env.STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH = hash("3");
+  const head = buildRuntimeHeadFixture({
+    globalPolicy,
+    serviceSlug: "dummy",
+    skillId: "echo",
+    agentWallet: privateKeyToAccount(providerWalletKey).address,
+    pricing: { USDC: { type: "one-time", fixed_amount: "10000" } },
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", minLength: 1, maxLength: 500 },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+  });
+  return { env, globalPolicy, head };
+}
 
 describe("minimal standard-rail configuration", () => {
-  it("loads one fixed-price recipe-bound outcome", () => {
-    const config = loadProviderStandardRailConfig(policy, standardEnvironment());
-    expect([...config.outcomes.keys()]).toEqual(["dummy.echo.v1"]);
-    expect(config.outcomes.get("dummy.echo.v1")).toMatchObject({
+  it("loads one fixed-price recipe-bound runtime listing", async () => {
+    const { env, head } = await catalogEnvironment();
+    const config = await loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [head],
+    });
+    expect([...config.outcomes.keys()]).toEqual(["echo"]);
+    expect(config.outcomes.get("echo")).toMatchObject({
+      serviceSlug: "dummy",
+      skillId: "echo",
       pricingMode: "fixed",
       fixedGrossAmount: "10000",
-      bindingProfile: "recipe-bound-v1",
+      bindingProfile: "recipe-bound-v2",
+      listingManifestHash: head.runtimeCommitmentHash,
     });
     expect(config.providerAuthorityKey).toBe(config.terminalAttestationKey);
   });
 
-  it("rejects dynamic pricing and launch-set drift", () => {
-    const env = standardEnvironment();
-    env.STANDARD_RAIL_OUTCOMES_JSON = encodeGzipBase64Json([{
-      ...standardOutcome(),
-      pricingMode: "dynamic",
-      fixedGrossAmount: "0",
-      quoteMaximumLifetimeSeconds: 120,
-      quoteMinimumPaymentWindowSeconds: 30,
-    }]);
-    expect(() => loadProviderStandardRailConfig(policy, env)).toThrow(/fixed/);
-    expect(() => loadProviderStandardRailConfig(
-      { outcomeIds: ["another-outcome"] },
-      standardEnvironment(),
-    )).toThrow(/providerLaunchPolicy/);
-  });
-
-  it("requires compressed, duplicate-key-free outcome JSON", () => {
-    const env = standardEnvironment();
-    env.STANDARD_RAIL_OUTCOMES_JSON = JSON.stringify([standardOutcome()]);
-    expect(() => loadProviderStandardRailConfig(policy, env)).toThrow(/malformed/);
-    expect(decodeGzipBase64Json(standardEnvironment().STANDARD_RAIL_OUTCOMES_JSON!))
-      .toContain("dummy.echo.v1");
-  });
-
-  it("pins splitter CREATE2 provenance and credential-free HTTPS RPCs", () => {
-    const env = standardEnvironment();
-    env.STANDARD_RAIL_OUTCOMES_JSON = encodeGzipBase64Json([{
-      ...standardOutcome(),
-      splitterCreationCode: "0x6001",
-    }]);
-    expect(() => loadProviderStandardRailConfig(policy, env)).toThrow(/provenance/);
-    const fallback = standardEnvironment();
-    fallback.BASE_RPC_FALLBACK_URLS = "https://fallback.example";
-    expect(loadProviderStandardRailConfig(policy, fallback).evidenceRpcUrls).toEqual([
-      "https://rpc.example/",
-      "https://fallback.example/",
+  it("boots before onboarding with a stable missing-listing warning", async () => {
+    const { env } = await catalogEnvironment();
+    const warnings: string[] = [];
+    const config = await loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [],
+      warn: (message) => warnings.push(message),
+    });
+    expect(config.outcomes.size).toBe(0);
+    expect(warnings).toEqual([
+      "installed paid skill dummy:echo has no promoted runtime listing yet — " +
+        "not purchasable until registration",
     ]);
   });
 
-  it("signs only fixed provider offers", async () => {
-    const signed = await signProviderOutcomeOffer({
-      artifactType: "ProviderOutcomeOfferV1",
-      schemaVersion: 1,
-      environment: "testnet",
-      chainId: 84532,
-      audience: "https://gateway.example",
-      signerKeyId: "provider",
-      issuedAt: 100,
-      validBefore: 200,
-      payload: {
-        listingManifestHash: hash("1"),
-        outcomeId: "dummy.echo.v1",
-        skillId: "echo",
-        providerAgentId: "1",
-        providerPayee: "0x1111111111111111111111111111111111111111",
-        pricingMode: "fixed",
-        fixedGrossAmount: "10000",
-        quotePolicyHash: hash("2"),
-        capacityPolicyHash: hash("3"),
-        deadlinePolicyHash: hash("4"),
-        deliveryCommitment: hash("5"),
-        termsHash: hash("6"),
-        issuedAt: 100,
-        validBefore: 200,
-        offerNonce: hash("7"),
-      },
-    }, providerWalletKey);
-    expect(signed.signature).toMatch(/^0x[0-9a-f]{130}$/);
+  it("rejects non-fixed pricing and catalog heads for foreign skills", async () => {
+    const { env, globalPolicy } = await catalogEnvironment();
+    const nonFixed = buildRuntimeHeadFixture({
+      globalPolicy,
+      serviceSlug: "dummy",
+      skillId: "echo",
+      agentWallet: privateKeyToAccount(providerWalletKey).address,
+    });
+    await expect(loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [nonFixed],
+    })).rejects.toThrow(/fixed pricing/);
+
+    const foreign = buildRuntimeHeadFixture({
+      globalPolicy,
+      serviceSlug: "foreign",
+      skillId: "echo",
+      agentWallet: privateKeyToAccount(providerWalletKey).address,
+      pricing: { USDC: { type: "one-time", fixed_amount: "10000" } },
+    });
+    await expect(loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [foreign],
+    })).rejects.toThrow(/not an installed paid skill/);
+  });
+
+  it("pins catalog provenance and credential-free HTTPS RPCs", async () => {
+    const { env, head } = await catalogEnvironment();
+    env.BASE_RPC_FALLBACK_URLS = "https://fallback.example";
+    const config = await loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [head],
+    });
+    expect(config.evidenceRpcUrls).toEqual([
+      "https://rpc.example/",
+      "https://fallback.example/",
+    ]);
+
+    const invalid = structuredClone(head);
+    invalid.runtimeCommitmentHash = hash("9");
+    await expect(loadProviderStandardRailConfig(policy, env, {
+      headsOverride: [invalid],
+    })).rejects.toThrow(/runtime commitment hash/);
   });
 
   it("requires closed input schemas and rejects extra input", () => {
@@ -118,7 +138,7 @@ describe("minimal standard-rail configuration", () => {
       type: "object",
       properties: { nested: { type: "object", properties: {} } },
       additionalProperties: false,
-    })).toThrow(/close object/);
+    })).toThrow(/close or bound object/);
   });
 
   it("keeps the interoperable recipe nonce vector", () => {

@@ -80,3 +80,27 @@ CREATE TABLE rate_limit_buckets (
 );
 
 CREATE INDEX rate_limit_buckets_expiry ON rate_limit_buckets (expires_at);
+
+-- Daski-assisted onboarding installs verified immutable runtime bundles here.
+-- Promotion supersedes the current head without rewriting history.
+CREATE TABLE provider_runtime_listing_versions (
+  id UUID PRIMARY KEY,
+  gateway_origin TEXT NOT NULL,
+  service_id BYTEA NOT NULL CHECK (octet_length(service_id) = 32),
+  skill_id TEXT NOT NULL CHECK (length(skill_id) BETWEEN 1 AND 96),
+  listing_id UUID NOT NULL,
+  listing_key BYTEA NOT NULL CHECK (octet_length(listing_key) = 32),
+  payment_required BOOLEAN NOT NULL,
+  runtime_commitment_hash BYTEA NOT NULL CHECK (
+    octet_length(runtime_commitment_hash) = 32
+  ),
+  runtime_commitment JSONB NOT NULL,
+  bundle JSONB NOT NULL,
+  promoted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  superseded_at TIMESTAMPTZ,
+  UNIQUE (gateway_origin, service_id, skill_id, runtime_commitment_hash)
+);
+
+CREATE UNIQUE INDEX provider_runtime_listing_heads
+  ON provider_runtime_listing_versions(gateway_origin, service_id, skill_id)
+  WHERE superseded_at IS NULL;

@@ -36,7 +36,7 @@ canonical home of the portable Daski provider agent skill.
 | --- | --- |
 | Discovery, AgentCards, and skill documents | Public service and skill descriptions |
 | Gateway signature, audience, quote, request, payment, and evidence checks | Strict product input validation |
-| Fixed-price reviewed outcome bindings | One fixed API or MCP operation per skill |
+| Daski-issued runtime listing catalog and fixed payment bindings | One fixed API or MCP operation per skill |
 | PostgreSQL replay/idempotency ledger and terminal results | Product credentials and response mapping |
 | Provider terminal attestations and status lookup | Product-specific tests and safe error codes |
 | HTTP limits, rate limits, outbound-network controls, health, and logging | Product dependency readiness and operations |
@@ -89,13 +89,13 @@ npm run doctor -- --stage=testnet
 
 `doctor` is read-only, emits stable check codes, and never prints secret
 values. A copied `.env.example` is intentionally not bootable: Daski supplies
-a mutually consistent set of Testnet signer, contract, outcome, and evidence
-bindings during onboarding.
+a mutually consistent Testnet runtime bundle plus signer, contract, policy,
+and evidence bindings during onboarding.
 
 ## How an order reaches your product
 
-1. The provider publishes your service, skill, schema, fixed atomic-USDC
-   price, and legal/support metadata.
+1. The provider publishes your service, skill, closed schemas, fixed
+   atomic-USDC price, and legal/support metadata as a hashable contract.
 2. Daski creates the fixed quote from the reviewed listing. This starter has
    no provider-side dynamic quote endpoint.
 3. The gateway admits payment and sends a short-lived signed dispatch with the
@@ -118,7 +118,8 @@ succeeded.
 src/core/                         service-neutral Daski and security boundary
 src/services/dummy/               Testnet-only reference service, docs, tests
 src/providerServices.ts           installed service composition
-src/providerLaunchPolicy.ts       exact reviewed outcome allowlist
+src/installRuntimeBundle.ts       verified Daski-assisted catalog importer
+src/core/gatewayRegistration/     runtime commitment and catalog primitives
 test/                              core and cross-service tests
 docs/                              installation, integration, and onboarding
 .agents/skills/daski-provider/    portable agent entrypoint
@@ -141,9 +142,10 @@ then follow [Adding a service](docs/adding-a-service.md). In short:
 3. replace its manifest, schema, validation, adapter, docs, and tests;
 4. map each skill to a hard-coded, reviewed product operation;
 5. install it in `src/providerServices.ts`;
-6. coordinate the exact outcome id and fixed price with Daski;
-7. remove `dummy`; and
-8. complete an end-to-end Testnet purchase before requesting Mainnet review.
+6. coordinate the published contract and fixed price with Daski;
+7. install the exact Daski-issued runtime bundle;
+8. remove `dummy`; and
+9. complete an end-to-end Testnet purchase before requesting Mainnet review.
 
 ## Build and verify
 
@@ -174,6 +176,19 @@ stable public HTTPS `BASE_URL`, PostgreSQL 16+, runtime-injected secrets,
 outbound Base RPC/product access, and one active application replica. Route
 traffic only when `/health/ready` passes; `/health/live` proves only that the
 process exists.
+
+This minimal starter does not self-register or submit chain transactions.
+Daski onboarding supplies a reviewed runtime bundle and matching global policy.
+After configuring the supplied values, install the bundle once per service:
+
+```bash
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
+```
+
+The importer verifies signatures, domains, provider intent, the exact local
+skill-contract hashes and prices, runtime commitments, and splitter provenance
+before an atomic append-only catalog promotion. Keep the file out of Git and
+ordinary support messages.
 
 Develop locally while pointing the provider and gateway at reviewed Base
 Sepolia contracts. A fully private local payment topology also needs contracts,

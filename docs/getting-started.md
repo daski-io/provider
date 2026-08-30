@@ -11,7 +11,7 @@ full boot.
 | --- | --- | --- |
 | Offline | Dummy adapter and unit gates | Node.js 24 |
 | Local | Product code plus loopback PostgreSQL | Docker or PostgreSQL 16+ |
-| Testnet | Public provider, Daski gateway, Base Sepolia paid order | HTTPS origin, wallet, Daski-issued bindings |
+| Testnet | Public provider, Daski gateway, Base Sepolia paid order | HTTPS origin, wallet, Daski-issued policy and runtime bundle |
 | Mainnet | Reviewed production listing on Base | Successful Testnet and Daski whitelist |
 
 Before starting, confirm every operation is fixed-price, automated, one-shot,
@@ -153,8 +153,7 @@ Follow [Adding a service](adding-a-service.md):
 2. replace its manifest, schema, validation, adapter, docs, and tests;
 3. add product-specific configuration/client modules in that folder;
 4. install the module in `src/providerServices.ts`;
-5. coordinate its outcome id and fixed price in
-   `src/providerLaunchPolicy.ts`; and
+5. verify its published v2 AgentCard contract and fixed price; and
 6. remove the dummy before Mainnet.
 
 `npm run try-skill` remains intentionally dummy-only. Add product unit tests
@@ -169,13 +168,14 @@ support, and wallet/payee.
 
 Daski then supplies or confirms one consistent Base Sepolia set: gateway
 origin/signer, provider audience, contract coordinates, identity binding,
-fixed outcome configuration, chain evidence policy, and related hashes. Copy
-it exactly. Do not generate, edit, combine across revisions, or resign
+signed global rail policy, one runtime bundle per service, and related hashes.
+Copy it exactly. Do not generate, edit, combine across revisions, or resign
 Daski-issued configuration.
 
 This minimal starter intentionally contains no chain-mutating registration
-helper. Register or update the provider identity only through the reviewed
-onboarding process and tooling Daski designates.
+helper. Daski's reviewed onboarding flow collects the provider-wallet
+authorization needed for the bundle. Register or update identity only through
+that designated flow.
 
 ## 9. Deploy and test end to end
 
@@ -193,8 +193,19 @@ Deploy exactly one active application replica with:
 - outbound access to reviewed Base RPCs and the fixed product dependency; and
 - health routing based on `/health/ready`.
 
-After installing the reviewed `.env`, run doctor again, boot the image, and
-inspect:
+After installing the reviewed `.env`, promote each Daski-issued service bundle
+into the deployment database from a protected operator environment:
+
+```bash
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
+```
+
+The command changes only the provider database. It verifies the exact local
+service contract, both trusted signers, runtime commitment, price, and splitter
+provenance before an atomic promotion; an identical retry is a no-op. It does
+not register identity, call the gateway/product, or send a chain transaction.
+
+Run doctor again, boot the image, and inspect:
 
 ```text
 /health/live

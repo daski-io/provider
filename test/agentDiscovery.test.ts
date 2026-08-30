@@ -23,6 +23,20 @@ describe("provider discovery", () => {
       standardRailOnly: true,
       dispatchMode: "one-shot",
       fulfillmentMode: "automated",
+      legal: { providerLegalName: "Test Provider" },
+    });
+    expect(card.extensions["https://daski.xyz/a2a/v2"]).toMatchObject({
+      schemaVersion: 1,
+      service: { slug: "dummy", lifecycle: "one-shot" },
+      skills: [{
+        skillId: "echo",
+        acceptingNewOrders: true,
+        contract: {
+          paymentRequired: true,
+          inputSchema: { additionalProperties: false },
+          resultSchema: { additionalProperties: false },
+        },
+      }],
     });
   });
 

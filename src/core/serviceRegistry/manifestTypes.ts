@@ -1,20 +1,18 @@
-export type CategoryFamily =
-  | "business-formation"
-  | "legal-ip"
-  | "compliance"
-  | "finance"
-  | "domains-web"
-  | "communications"
-  | "compute-ai"
-  | "data"
-  | "software-dev"
-  | "design-creative"
-  | "marketing-growth"
-  | "sales-support"
-  | "human-talent"
-  | "operations-admin"
-  | "logistics-physical"
-  | "other";
+/** Open normalized identifier; recommended values live in public docs. */
+export type CategoryFamily = string;
+
+export type ClosedJsonSchema = Record<string, unknown>;
+
+export interface SkillContractDefinition {
+  inputSchema: ClosedJsonSchema;
+  resultSchema: ClosedJsonSchema;
+  acceptingNewOrders?: boolean;
+  capacity?: { maxOpenOrders: number };
+  deadlines?: {
+    dispatchSeconds?: number;
+    fulfillmentSeconds?: number;
+  };
+}
 
 export interface ServiceManifest {
   slug: string;
@@ -28,7 +26,7 @@ export interface ServiceManifest {
   tags?: string[];
 }
 
-export interface SkillDefinition {
+export interface SkillDefinition extends SkillContractDefinition {
   id: string;
   name: string;
   description: string;

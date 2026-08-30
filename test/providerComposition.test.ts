@@ -3,7 +3,7 @@ import {
   clearServicesForTests,
   registerService,
 } from "../src/core/serviceRegistry/registry.js";
-import { providerLaunchPolicy } from "../src/providerLaunchPolicy.js";
+import { deriveProviderLaunchPolicy } from "../src/core/standardRail/launchPolicy.js";
 import { configuredServices } from "../src/providerServices.js";
 
 describe("provider composition", () => {
@@ -14,7 +14,9 @@ describe("provider composition", () => {
     services.forEach(registerService);
     expect(services.map((service) => service.manifest.slug)).toEqual(["dummy"]);
     expect(services[0]?.skills.map((skill) => skill.id)).toEqual(["echo"]);
-    expect(providerLaunchPolicy.outcomeIds).toEqual(["dummy.echo.v1"]);
+    expect(deriveProviderLaunchPolicy(services).paidSkills).toEqual([
+      { serviceSlug: "dummy", skillId: "echo" },
+    ]);
   });
 
   it("cannot boot the dummy on Base mainnet", () => {

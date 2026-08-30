@@ -54,10 +54,10 @@ responses in an agent prompt.
 3. Inventory exact product operation, input/output, auth, environment,
    idempotency, ambiguity, and data boundaries.
 4. Implement the service in its own folder with a fixed operation map.
-5. Update composition, launch policy, environment names, docs, and tests.
+5. Update composition, published contract, environment names, docs, and tests.
 6. Run local gates without contacting live systems.
-7. Produce a redacted review packet and list the Daski-owned Testnet inputs
-   still required.
+7. Produce a redacted review packet and list the Daski-owned Testnet policy and
+   runtime-bundle inputs still required.
 8. Stop before any external mutation, signing, deployment, registration,
    funding, Mainnet change, or push unless a human explicitly authorizes it.
 

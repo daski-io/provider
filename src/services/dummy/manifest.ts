@@ -1,12 +1,11 @@
-import type {
-  ServiceManifest,
-  SkillDefinition,
-} from "../../core/serviceRegistry/types.js";
+import type { ServiceManifest } from "../../core/serviceRegistry/types.js";
+import { defineSkills } from "../../core/serviceRegistry/types.js";
 import {
   DUMMY_PRICE_ATOMIC,
   DUMMY_SKILL_ID,
   DUMMY_SLUG,
 } from "./config.js";
+import { dummySkillContracts } from "./skillContracts.js";
 
 export const manifest: ServiceManifest = {
   slug: DUMMY_SLUG,
@@ -21,7 +20,7 @@ export const manifest: ServiceManifest = {
   tags: ["example", "testnet-only"],
 };
 
-export const skills: SkillDefinition[] = [{
+export const skills = defineSkills([{
   id: DUMMY_SKILL_ID,
   name: "Echo",
   description:
@@ -34,4 +33,4 @@ export const skills: SkillDefinition[] = [{
   fixedPriceAtomic: DUMMY_PRICE_ATOMIC,
   requiredFields: ["message"],
   tags: ["example", "synchronous"],
-}];
+}], dummySkillContracts);

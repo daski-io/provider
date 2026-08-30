@@ -28,7 +28,9 @@ provider-specific services or retired payment rails into this repository.
 - `src/services/<slug>/` owns one service's manifest, validation, adapter,
   product configuration/client, docs, and co-located tests.
 - `src/providerServices.ts` is the single installed-service composition.
-- `src/providerLaunchPolicy.ts` is the exact reviewed paid-outcome allowlist.
+- Paid-skill launch policy is derived from the installed manifests.
+- `src/installRuntimeBundle.ts` verifies and atomically promotes the
+  Daski-issued runtime catalog; this starter does not self-register.
 
 Core must never import from services. Services must never import sibling
 services. Product behavior must remain behind a typed service adapter. The
@@ -70,7 +72,7 @@ Daski supplies the reviewed Testnet artifacts.
    recommend `provider-full` if it does not.
 2. Inspect the closest types, implementation, docs, and tests.
 3. Make the smallest cohesive change; update contract, validation, adapter,
-   docs, composition, launch policy, and tests together.
+   docs, composition, catalog expectations, and tests together.
 4. Keep API/MCP targets in a fixed allowlist. Never pass through a buyer URL,
    HTTP method, MCP server, tool name, credential, or arbitrary headers.
 5. Run targeted tests, then all relevant repository gates.
@@ -104,8 +106,9 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   authorization material. Public errors are stable and generic.
 - Applied migrations are immutable and checksummed. This starter intentionally
   begins with one baseline migration; future changes are append-only.
-- Treat `providerLaunchPolicy` and fixed-price changes as coordinated Daski
-  onboarding changes. The signed outcome artifact must match exactly.
+- Treat published contract hashes and fixed-price changes as coordinated Daski
+  onboarding changes. Request and install a new signed runtime bundle; never
+  edit catalog rows or issued artifacts.
 - The dummy service is forbidden on Base Mainnet and must be removed before
   Mainnet review.
 

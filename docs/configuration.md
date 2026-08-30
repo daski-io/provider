@@ -5,7 +5,7 @@ hosting platform's secret manager, not in Git, images, logs, support bundles,
 or agent prompts.
 
 Configuration fails closed at startup. The Base chain, audiences, wallet,
-outcome, contracts, and hashes form one coordinated release set; do not mix
+runtime catalog, contracts, and hashes form one coordinated release set; do not mix
 Testnet/Mainnet or revisions.
 
 ## Provider and runtime
@@ -71,9 +71,11 @@ offers/terminal attestations and must be separated from product credentials.
 | --- | --- |
 | `STANDARD_RAIL_ENVIRONMENT` | Normally `testnet` or `mainnet`; must match every signed envelope. |
 | `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Used for dispatch and fixed quote verification. |
+| `STANDARD_RAIL_GATEWAY_ORIGIN` | Credential-free HTTPS origin that scopes the installed runtime catalog. Normally identical to `GATEWAY_BASE_URL`. |
 | `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
 | `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |
-| `STANDARD_RAIL_OUTCOMES_JSON` | Daski-issued gzip/base64 outcome configuration for the exact launch-policy set. Do not edit or re-encode. |
+| `STANDARD_RAIL_GLOBAL_POLICY_JSON` | Daski-issued JSON containing the signed chain-evidence, active-rail, and capability envelopes plus reviewed global code hashes. Preserve exactly. |
+| `STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH` | Reviewed bytes32 provider endpoint/control profile binding. |
 | `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Positive evidence-finality requirement; default 12, coordinated with Daski. |
 | `REPUTATION_STORAGE_ADDRESS` | Reviewed reputation contract. |
 | `EAS_ADDRESS` | Reviewed EAS contract. |
@@ -81,16 +83,23 @@ offers/terminal attestations and must be separated from product credentials.
 | `EAS_OUTCOME_SCHEMA_UID` | Reviewed reputation outcome schema UID. |
 | `SANCTIONS_ORACLE_ADDRESS` | Reviewed sanctions oracle used for fail-closed participant checks. |
 
-`STANDARD_RAIL_OUTCOMES_JSON` is not ordinary editable configuration. It pins
-the outcome/service/skill, request schema, fixed price, capacity/deadline,
-token/splitter provenance, commission/payee, controlled wallets, evidence
-policy, and provider attestation key. Ask Daski for a new full set after any
-reviewed contract change.
+The global policy and runtime bundle are not ordinary editable configuration.
+The policy pins gateway-signed chain and rail facts shared by listings. The
+bundle pins one service's exact skill contracts, fixed prices, capacity and
+deadlines, token/splitter provenance, commission/payee, provider intent, and
+runtime commitments. Ask Daski for a new consistent set after any reviewed
+contract change.
 
-The `standard-rail:sign-offer` command reads an unsigned
-`ProviderOutcomeOfferV1` JSON envelope from standard input after `npm run build`
-and writes the wallet-signed form. Run it only as part of the reviewed
-onboarding handoff; its output is a signed security artifact.
+The bundle is installed into the append-only PostgreSQL catalog, not placed in
+an environment variable:
+
+```bash
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
+```
+
+The path is local to the operator running the command. Keep both the bundle and
+global policy out of Git, images, prompts, and ordinary support messages. Run
+the importer once per service; an identical commitment is an idempotent no-op.
 
 ## HTTP and rate limiting
 

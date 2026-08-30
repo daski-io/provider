@@ -15,9 +15,9 @@ Start on Testnet. Mainnet is separately whitelisted through the
 | Supplier | The upstream API, MCP server, or product, even when provider-owned |
 | Service | One coherent public product boundary |
 | Skill | One buyer-visible fixed operation |
-| Outcome | Reviewed listing/payment coordinate for a skill |
+| Runtime listing | Reviewed listing/payment coordinate for a skill |
 | Gateway | Daski entrypoint that admits payment and signs provider calls |
-| Signed binding | Daski-issued/reviewed outcome, signer, audience, contract, and evidence configuration |
+| Signed binding | Daski-issued/reviewed runtime listing, signer, audience, contract, and evidence configuration |
 
 ## Choose the repository before review
 
@@ -38,7 +38,7 @@ requires renewed review.
 | Service/skill descriptions, exact input schema, fixed price, examples, artifacts, timing, and tests | Taxonomy and listing decision |
 | Fixed API/MCP operation mapping, product modes/credentials, idempotency, reconciliation, readiness, and operations | Gateway origin/signer and standard-rail environment |
 | Dedicated provider wallet, intended ERC-8004 identity, payee, and controlled-wallet facts | Current identity/evidence/contract coordinates and registration procedure |
-| Deployed candidate and successful end-to-end Testnet evidence | Reviewed outcome artifact and Mainnet whitelist decision |
+| Deployed candidate and successful end-to-end Testnet evidence | Reviewed global policy/runtime bundles and Mainnet whitelist decision |
 
 The provider owns product credentials and operation. Daski owns marketplace
 admission and its signed bindings. Do not invent a missing Daski value.
@@ -96,22 +96,30 @@ identity registration/binding procedure and tooling confirmed by Daski. Review
 the chain, contracts, signer, origin, wallet, and cost before authorizing any
 transaction.
 
-### 3. Receive one consistent binding set
+### 3. Receive and install one consistent binding set
 
 Install the reviewed Base Sepolia chain/identity coordinates, gateway signer
-and audiences, provider audience, outcome configuration, evidence/reputation
-contracts, and hashes exactly as supplied. Never combine fields from different
-revisions, hand-edit the compressed outcome artifact, or weaken validation.
+and audiences, provider audience, signed global rail policy,
+evidence/reputation contracts, control-profile hash, and one runtime bundle per
+service exactly as supplied. Never combine revisions, hand-edit an envelope or
+bundle, or weaken validation.
 
-The provider signs its reviewed outcome offer with:
+The reviewed Daski onboarding flow obtains provider-wallet authorization before
+issuing the completed bundle. Keep that authorization and the bundle out of Git
+and support messages. This repository does not register identity or send chain
+transactions.
+
+With the reviewed environment configured and PostgreSQL reachable, install each
+bundle from a protected operator path:
 
 ```bash
-npm run build
-npm run standard-rail:sign-offer -- < unsigned-offer.json > signed-offer.json
+npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
 ```
 
-Only run this as part of the onboarding handoff. Both input and output are
-security artifacts; keep them out of Git and ordinary support messages.
+The importer verifies signatures, exact local contract hashes and price,
+runtime commitments, global policy, and splitter provenance before one atomic
+catalog promotion. An identical retry is safe. Any mismatch requires a new
+bundle from Daski, not a local edit.
 
 ### 4. Run staged diagnostics
 
@@ -176,7 +184,7 @@ be machine-proven.
 
 Before Mainnet:
 
-- remove `src/services/dummy` and its launch outcome;
+- remove `src/services/dummy` and obtain a real-service runtime bundle;
 - use Base chain id `8453` with `NODE_ENV=production`;
 - use canonical reviewed contracts/USDC and a new Mainnet artifact set;
 - create separate Mainnet wallet, PostgreSQL, product account, RPC, origin,
@@ -191,7 +199,7 @@ Before Mainnet:
 ## Changes requiring renewed coordination
 
 Contact Daski before changing a reviewed origin/audience, gateway signer,
-provider identity/wallet/payee, service/skill/outcome id, request/artifact
-schema, fixed price, capacity, deadline, commission, contract/evidence binding,
-API/MCP operation, or fulfillment guarantee. Request one new complete artifact
-set and retest it on Testnet before promotion.
+provider identity/wallet/payee, service/skill/runtime-listing id,
+request/artifact schema, fixed price, capacity, deadline, commission,
+contract/evidence binding, API/MCP operation, or fulfillment guarantee. Request
+one new complete policy/bundle set and retest it on Testnet before promotion.

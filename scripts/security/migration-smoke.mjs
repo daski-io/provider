@@ -20,6 +20,7 @@ if (!/^provider_smoke_[a-f0-9]{32}$/.test(schema)) {
 }
 const quoted = `"${schema}"`;
 const expected = [
+  "provider_runtime_listing_versions",
   "provider_transactions",
   "rate_limit_buckets",
   "standard_evidence_admissions",

@@ -25,6 +25,9 @@ describe("repository tooling contract", () => {
     const dockerfile = readFileSync("Dockerfile", "utf8");
     expect(packageJson.scripts.dev).toContain("src/bootstrap.ts");
     expect(packageJson.scripts.start).toContain("dist/bootstrap.js");
+    expect(packageJson.scripts["daski:install-runtime"]).toContain(
+      "src/installRuntimeBundle.ts",
+    );
     expect(dockerfile).toContain('CMD ["node", "dist/bootstrap.js"]');
   });
 });

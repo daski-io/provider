@@ -9,7 +9,7 @@ validators.
 | --- | --- |
 | `/.well-known/agent.json` | Provider-level ERC-8004 discovery |
 | `/.well-known/agent-registration.json` | Registration metadata for reviewed onboarding tooling |
-| `/agent-cards/<slug>.json` | One service's capabilities and protocol endpoint |
+| `/agent-cards/<slug>.json` | One service's v1 metadata and hashable v2 service/skill contract |
 | `/skills/<slug>.md` | Service documentation |
 | `/skills/<slug>/<skill>.md` | Skill documentation |
 | `/llms.txt` | Agent-readable documentation index |
@@ -69,19 +69,21 @@ A controlled failure returns:
 Do not return pending states, access-bearing product credentials, raw upstream
 responses, or unbounded artifacts. Core caps the total encoded result at 1 MB.
 
-## Fixed outcome coordination
+## Runtime-listing coordination
 
 The following must agree exactly:
 
 - service and skill ids in the installed `ServiceModule`;
-- fixed atomic-USDC price in the skill manifest;
-- outcome id in `src/providerLaunchPolicy.ts`;
-- request schema, fixed price, capacity, deadline, token, payee, contract
-  provenance, and hashes in Daski-issued `STANDARD_RAIL_OUTCOMES_JSON`; and
+- closed request/result schemas, fixed atomic-USDC price, capacity, and
+  deadlines in the published v2 AgentCard contract;
+- the provider-authorized intent and Daski-signed runtime bundle installed in
+  `provider_runtime_listing_versions`;
+- token, payee, splitter/contract provenance, and hashes reproduced from the
+  runtime bundle plus `STANDARD_RAIL_GLOBAL_POLICY_JSON`; and
 - provider wallet, identity, public audience, environment, and chain.
 
-A mismatch is a boot or dispatch failure. Request a new coordinated artifact;
-never loosen exact-set validation or edit an issued artifact.
+A mismatch is an import, boot, or dispatch failure. Request a new coordinated
+bundle; never loosen validation or edit an issued artifact/catalog row.
 
 ## Terms
 
@@ -91,6 +93,6 @@ never loosen exact-set validation or edit an issued artifact.
 | Supplier | The upstream API, MCP server, or product, even if provider-owned |
 | Service | One coherent public product boundary |
 | Skill | One buyer-visible fixed operation |
-| Outcome | The reviewed listing/payment coordinate for a skill |
+| Runtime listing | The reviewed listing/payment coordinate for a skill |
 | Gateway | Daski entrypoint that admits payment and signs provider calls |
 | Payer | Wallet authorized and verified by the standard rail |

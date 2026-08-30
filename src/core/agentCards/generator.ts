@@ -1,10 +1,18 @@
 import { config } from "../config.js";
 import type { ServiceModule } from "../serviceRegistry/types.js";
 import type { AgentCard } from "./types.js";
+import type { Hex } from "viem";
+import {
+  buildContractExtension,
+  DASKI_CONTRACT_EXTENSION_URI,
+} from "./contractExtension.js";
 
 const DASKI_EXTENSION = "https://daski.xyz/a2a/v1";
 
-export function generateAgentCard(service: ServiceModule): AgentCard {
+export function generateAgentCard(
+  service: ServiceModule,
+  serviceId: Hex | null = null,
+): AgentCard {
   const slug = service.manifest.slug;
   return {
     name: service.manifest.name,
@@ -23,7 +31,12 @@ export function generateAgentCard(service: ServiceModule): AgentCard {
       extensions: [{
         uri: DASKI_EXTENSION,
         description:
-          "Daski standard-rail discovery, fixed pricing, and synchronous fulfillment metadata.",
+          "Daski marketplace service, pricing, legal, and support metadata.",
+        required: false,
+      }, {
+        uri: DASKI_CONTRACT_EXTENSION_URI,
+        description:
+          "Daski provider-driven service and skill contracts with closed schemas and fixed pricing.",
         required: false,
       }],
     },
@@ -53,6 +66,7 @@ export function generateAgentCard(service: ServiceModule): AgentCard {
         legal: {
           marketplaceTermsUrl: config.MARKETPLACE_TERMS_URL,
           marketplacePrivacyUrl: config.MARKETPLACE_PRIVACY_URL,
+          providerLegalName: config.PROVIDER_NAME,
           providerTermsUrl: config.PROVIDER_TERMS_URL,
           providerPrivacyUrl: config.PROVIDER_PRIVACY_URL,
         },
@@ -61,6 +75,8 @@ export function generateAgentCard(service: ServiceModule): AgentCard {
           responseSla: config.SUPPORT_RESPONSE_SLA,
         },
       },
+      [DASKI_CONTRACT_EXTENSION_URI]:
+        buildContractExtension(service, config.BASE_URL, serviceId),
     },
   };
 }

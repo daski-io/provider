@@ -1,8 +1,8 @@
 # Scripts
 
 Read a script before running it. The minimal starter intentionally contains no
-registration, deployment, database-reset, supplier-production, or Mainnet
-automation.
+self-registration, chain deployment, database-reset, supplier-production, or
+Mainnet automation.
 
 ## Safe local commands
 
@@ -16,14 +16,15 @@ automation.
 - `npm run copy-assets` copies service documentation to `dist`; `npm run build`
   invokes it automatically.
 
-## Signing
+## Reviewed runtime-bundle import
 
-After building, `npm run standard-rail:sign-offer` reads exactly one unsigned
-`ProviderOutcomeOfferV1` JSON envelope from standard input and writes its
-wallet-signed form. It uses `PROVIDER_WALLET_PRIVATE_KEY` and is therefore not a
-safe learning command. Use it only for the reviewed Daski onboarding handoff.
-Treat input/output as security artifacts and do not commit or paste them into
-support channels.
+`npm run daski:install-runtime -- --file <path>` is a controlled database
+mutation, not a learning command. It validates a Daski-issued bundle against
+the configured signers, policy, provider wallet, and exact local service
+contract before applying migrations and atomically promoting append-only
+runtime catalog versions. It does not call the gateway/product or send a chain
+transaction. Run it only with explicit authorization for the intended bundle
+and database; keep the artifact out of Git and support channels.
 
 ## Verification internals
 

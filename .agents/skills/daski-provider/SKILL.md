@@ -85,9 +85,10 @@ by the buyer. The upstream product is the supplier even when provider-owned.
    non-convergent call and reconcile authoritative product state after
    ambiguity. If reconciliation cannot finish synchronously, stop and use
    `provider-full`; never guess or blindly retry.
-6. Register the service only in `src/providerServices.ts`. Keep the exact
-   reviewed outcome set in `src/providerLaunchPolicy.ts`; coordinate schema,
-   id, price, capacity, deadline, payee, or origin changes with Daski.
+6. Register the service only in `src/providerServices.ts`. Paid skills derive
+   from those manifests. Coordinate schema, service/skill id, price, capacity,
+   deadline, payee, or origin changes with Daski and obtain a new runtime
+   bundle; never add a second hand-maintained outcome allowlist.
 7. Keep service tests in `src/services/<slug>/tests/`; use a fake product
    client and never call live systems from unit tests.
 8. Remove dummy before Mainnet. Keep core product-neutral.
@@ -118,7 +119,8 @@ passing build/doctor proves technical checks only, not Daski admission.
 ## Hard stops
 
 - Never fabricate, edit, recompress, combine, resign, or weaken validation of
-  Daski-issued bindings.
+  Daski-issued policy envelopes or runtime bundles. Never edit runtime-catalog
+  rows by hand.
 - Never expose secrets, wallet keys, signed envelopes, buyer/product protected
   data, supplier account details, raw product output, or private policy in code,
   docs, logs, prompts, or chat.
@@ -132,6 +134,13 @@ passing build/doctor proves technical checks only, not Daski admission.
 - Never make readiness/admission permissive to unblock a fixture or deployment.
 - When Daski-owned inputs are missing, complete safe local work, list each
   missing input, and stop at the handoff.
+
+For the minimal starter, Daski onboarding performs registration and supplies a
+completed bundle. Run `npm run daski:install-runtime -- --file <path>` only when
+the user explicitly authorizes installing that reviewed file into the intended
+provider database. The importer does not send chain transactions. In
+`provider-full`, use its repository-owned self-registration path instead; do
+not copy that subsystem into the minimal starter.
 
 ## Handoff
 

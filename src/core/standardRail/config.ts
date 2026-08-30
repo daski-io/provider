@@ -8,8 +8,13 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { assertExactKeys, assertNoDuplicateJsonKeys } from "./canonical.js";
-import { decodeGzipBase64Json } from "./compressedJson.js";
+import { assertExactKeys } from "./canonical.js";
+import { loadRuntimeListingHeads } from "../gatewayRegistration/runtimeCatalog.js";
+import {
+  loadStandardRailGlobalPolicy,
+  materializeCatalogOutcomes,
+  type StandardRailGlobalPolicy,
+} from "./catalogOutcomes.js";
 import type { ProviderOutcomeLaunchPolicy } from "./launchPolicy.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
@@ -17,6 +22,7 @@ export interface ProviderStandardRailConfig {
   environment: string;
   chainId: number;
   gatewayAudience: string;
+  gatewayOrigin: string;
   providerAudience: string;
   gatewayDispatchSigner: Address;
   gatewayQuoteSigner: Address;
@@ -26,6 +32,7 @@ export interface ProviderStandardRailConfig {
   terminalAttestationKey: Address;
   evidenceRpcUrls: readonly [string, ...string[]];
   outcomes: ReadonlyMap<string, ProviderOutcomeConfig>;
+  globalPolicy: StandardRailGlobalPolicy;
   finalityConfirmations: number;
   sanctionsOracleAddress: Address;
   reputationContract: Address;
@@ -56,10 +63,14 @@ const bytes32 = (value: string, name: string, nonzero = false): Hex => {
   return normalized as Hex;
 };
 
-export function loadProviderStandardRailConfig(
+export async function loadProviderStandardRailConfig(
   launchPolicy: ProviderOutcomeLaunchPolicy,
   env: NodeJS.ProcessEnv = process.env,
-): ProviderStandardRailConfig {
+  options: {
+    warn?: (message: string) => void;
+    headsOverride?: readonly import("../gatewayRegistration/runtimeCatalog.js").RuntimeListingHead[];
+  } = {},
+): Promise<ProviderStandardRailConfig> {
   const chainId = Number(need(env, "CHAIN_ID"));
   if (chainId !== 8453 && chainId !== 84532) throw new Error("CHAIN_ID must identify Base");
   const evidenceRpcUrls = [
@@ -73,31 +84,50 @@ export function loadProviderStandardRailConfig(
     return parsed.toString();
   }) as [string, ...string[]];
 
-  let parsedOutcomes: ProviderOutcomeConfig[];
-  try {
-    const json = decodeGzipBase64Json(need(env, "STANDARD_RAIL_OUTCOMES_JSON"));
-    assertNoDuplicateJsonKeys(json);
-    parsedOutcomes = JSON.parse(json) as ProviderOutcomeConfig[];
-    if (!Array.isArray(parsedOutcomes)) throw new Error();
-  } catch {
-    throw new Error("Standard-rail provider JSON configuration is malformed");
-  }
-  const outcomes = new Map(parsedOutcomes.map((outcome) => [outcome.outcomeId, outcome]));
-  const reviewed = new Set(launchPolicy.outcomeIds);
-  if (
-    reviewed.size !== launchPolicy.outcomeIds.length
-    || outcomes.size !== parsedOutcomes.length
-    || outcomes.size !== reviewed.size
-    || [...reviewed].some((id) => !id.trim() || !outcomes.has(id))
-  ) {
-    throw new Error("STANDARD_RAIL_OUTCOMES_JSON differs from providerLaunchPolicy");
-  }
-
   const providerAuthorityPrivateKey = privateKey(env, "PROVIDER_WALLET_PRIVATE_KEY");
   const providerAuthorityKey = privateKeyToAccount(providerAuthorityPrivateKey).address;
   const terminalAttestationPrivateKey = providerAuthorityPrivateKey;
   const terminalAttestationKey = providerAuthorityKey;
   const canonicalToken = getAddress(need(env, "USDC_ADDRESS"));
+  const environment =
+    env.STANDARD_RAIL_ENVIRONMENT?.trim() || (chainId === 8453 ? "mainnet" : "testnet");
+  const gatewaySigner = getAddress(need(env, "STANDARD_RAIL_GATEWAY_SIGNER"));
+  const gatewayOrigin = (() => {
+    const parsed = new URL(
+      env.STANDARD_RAIL_GATEWAY_ORIGIN?.trim() || need(env, "GATEWAY_BASE_URL"),
+    );
+    if (
+      parsed.protocol !== "https:" || parsed.username || parsed.password ||
+      parsed.pathname !== "/" || parsed.search || parsed.hash
+    ) throw new Error("STANDARD_RAIL_GATEWAY_ORIGIN must be a credential-free HTTPS origin");
+    return parsed.origin;
+  })();
+  const gatewayAudience = env.STANDARD_RAIL_GATEWAY_AUDIENCE?.trim() || gatewayOrigin;
+  const reviewedPaidSkills = new Set(launchPolicy.paidSkills.map((skill) =>
+    `${skill.serviceSlug}:${skill.skillId}`));
+  if (reviewedPaidSkills.size !== launchPolicy.paidSkills.length) {
+    throw new Error("Provider paid-skill launch policy is invalid");
+  }
+  const globalPolicy = await loadStandardRailGlobalPolicy({
+    environment,
+    chainId,
+    gatewayAudience,
+    gatewaySigner,
+    env,
+  });
+  const providerControlProfileHash = bytes32(
+    need(env, "STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH"),
+    "STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH",
+  );
+  const outcomes = materializeCatalogOutcomes({
+    heads: options.headsOverride ?? await loadRuntimeListingHeads(gatewayOrigin),
+    globalPolicy,
+    chainId,
+    providerControlProfileHash,
+    installedPaidSkills: reviewedPaidSkills,
+    warn: options.warn,
+  });
+  const parsedOutcomes = [...outcomes.values()];
   for (const outcome of parsedOutcomes) {
     validateOutcome(outcome, chainId);
     if (getAddress(outcome.providerTerminalAttestationKey) !== terminalAttestationKey) {
@@ -108,12 +138,13 @@ export function loadProviderStandardRailConfig(
     }
   }
   if (
+    parsedOutcomes.length > 0 &&
     new Set(parsedOutcomes.map((outcome) =>
       outcome.sanctionsOracleRuntimeCodeHash.toLowerCase())).size !== 1
   ) {
     throw new Error("All outcomes must pin one sanctions-oracle runtime code hash");
   }
-  if (new Set(parsedOutcomes.map((outcome) => JSON.stringify({
+  if (parsedOutcomes.length > 0 && new Set(parsedOutcomes.map((outcome) => JSON.stringify({
     tokenRuntimeCodeHash: outcome.tokenRuntimeCodeHash.toLowerCase(),
     tokenImplementationAddress: getAddress(outcome.tokenImplementationAddress).toLowerCase(),
     tokenImplementationRuntimeCodeHash: outcome.tokenImplementationRuntimeCodeHash.toLowerCase(),
@@ -127,12 +158,11 @@ export function loadProviderStandardRailConfig(
   if (!Number.isSafeInteger(finalityConfirmations) || finalityConfirmations < 1) {
     throw new Error("STANDARD_RAIL_FINALITY_CONFIRMATIONS must be positive");
   }
-  const gatewaySigner = getAddress(need(env, "STANDARD_RAIL_GATEWAY_SIGNER"));
   return {
-    environment: env.STANDARD_RAIL_ENVIRONMENT?.trim() || (chainId === 8453 ? "mainnet" : "testnet"),
+    environment,
     chainId,
-    gatewayAudience:
-      env.STANDARD_RAIL_GATEWAY_AUDIENCE?.trim() || need(env, "GATEWAY_BASE_URL"),
+    gatewayAudience,
+    gatewayOrigin,
     providerAudience:
       env.STANDARD_RAIL_PROVIDER_AUDIENCE?.trim() || need(env, "BASE_URL"),
     gatewayDispatchSigner: gatewaySigner,
@@ -143,6 +173,7 @@ export function loadProviderStandardRailConfig(
     terminalAttestationKey,
     evidenceRpcUrls,
     outcomes,
+    globalPolicy,
     finalityConfirmations,
     sanctionsOracleAddress: getAddress(need(env, "SANCTIONS_ORACLE_ADDRESS")),
     reputationContract: getAddress(need(env, "REPUTATION_STORAGE_ADDRESS")),
@@ -254,7 +285,9 @@ function validateOutcome(outcome: ProviderOutcomeConfig, chainId: number): void 
     || outcome.maximumLogPageEvents < 1 || outcome.maximumLogPageEvents > 100_000
     || !Number.isSafeInteger(outcome.dispatchDeadlineSeconds)
     || outcome.dispatchDeadlineSeconds < 30 || outcome.dispatchDeadlineSeconds > 86_400
-    || !["stock-fixed-v1", "recipe-bound-v1"].includes(outcome.bindingProfile)
+    || !["stock-fixed-v1", "recipe-bound-v1", "recipe-bound-v2"].includes(
+      outcome.bindingProfile,
+    )
     || !outcome.requestSchema || outcome.requestSchema.type !== "object"
     || outcome.requestSchema.additionalProperties !== false
     || !outcome.requestSchema.properties

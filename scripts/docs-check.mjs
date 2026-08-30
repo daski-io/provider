@@ -58,10 +58,10 @@ for (const file of markdown) {
 }
 
 const genericityFiles = [
-  ...markdown.filter((file) => !file.endsWith("CHANGELOG.md")),
+  ...markdown.filter((file) => file !== join(root, "CHANGELOG.md")),
   join(root, ".env.example"),
   join(root, "package.json"),
-  ...publicSources.filter((file) => !file.endsWith("scripts/docs-check.mjs")),
+  ...publicSources.filter((file) => file !== join(root, "scripts", "docs-check.mjs")),
 ];
 const genericSources = [...new Set(genericityFiles)]
   .map((file) => readFileSync(file, "utf8"))

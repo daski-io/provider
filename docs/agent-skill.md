@@ -19,6 +19,7 @@ manuals.
 .agents/skills/daski-provider/
   SKILL.md
   references/
+    daski-primer.md
     start-here.md
     integration-brief.md
     provider-full.md
@@ -29,6 +30,8 @@ manuals.
 rules, and hard stops. An agent reads a reference only when that phase or
 starter applies:
 
+- `daski-primer.md` gives a zero-context agent the marketplace, transaction,
+  trust-boundary, and vocabulary model;
 - `start-here.md` selects and acquires a repository;
 - `integration-brief.md` produces a safe product-to-skill mapping;
 - `provider-full.md` restores the full starter's durability, ownership, and

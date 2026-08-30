@@ -26,6 +26,7 @@ if (source.split("\n").length > 180) {
 }
 let packagedSource = source;
 const requiredReferences = [
+  "references/daski-primer.md",
   "references/start-here.md",
   "references/integration-brief.md",
   "references/provider-full.md",

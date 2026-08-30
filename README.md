@@ -211,9 +211,10 @@ not the provider quickstart.
 
 Coding agents should read `AGENTS.md`, then the portable
 `.agents/skills/daski-provider/SKILL.md`. Repository documentation is
-authoritative after checkout. The separately packaged skill also includes
-focused references for starter selection, product mapping, full-provider work,
-and onboarding so it remains useful before a repository is cloned.
+authoritative after checkout. The separately packaged skill also includes a
+zero-context Daski primer plus focused references for starter selection,
+product mapping, full-provider work, and onboarding, so it remains useful
+before a repository is cloned.
 
 ## Staying current
 

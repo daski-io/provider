@@ -18,6 +18,8 @@ registration, live product calls, database changes, pushes, or releases.
 
 Read only the references needed for the current task, completely when selected:
 
+- No prior Daski knowledge: read
+  [Daski primer](references/daski-primer.md) before the other references.
 - No checkout yet, uncertain starter, or first installation: read
   [Start here](references/start-here.md).
 - Mapping an API, MCP server, SDK, or internal product: read

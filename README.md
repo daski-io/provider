@@ -28,7 +28,24 @@ durability after a product is admitted.
 
 The two starters share the same Daski standard rail. They are alternatives,
 not layers: do not install one inside the other. This repository is the
-canonical home of the portable Daski provider agent skill.
+canonical home of the **Daski Provider integration skill for coding agents**.
+
+## Build with your coding agent
+
+Install the **Daski Provider integration skill for coding agents** to have a
+compatible coding agent evaluate an existing API, MCP server, SDK, or internal
+product, choose `provider` versus `provider-full`, implement one reviewed
+operation with fake-client tests, and prepare a Testnet handoff:
+
+```bash
+npx skills add daski-io/provider --skill daski-provider
+```
+
+Inspect the canonical [skill source](.agents/skills/daski-provider/SKILL.md)
+before installing, and use the [installation, invocation, and compatibility
+guide](docs/agent-skill.md) for scopes, host-specific commands, pinned releases,
+updates, and removal. Installing the skill does not authorize an agent to call
+a live product, deploy, register, sign, spend, push, tag, or release.
 
 ## What is included
 

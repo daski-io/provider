@@ -1,9 +1,12 @@
 ---
 name: daski-provider
-description: Choose, acquire, build, diagnose, and onboard the correct Daski provider starter for an existing API or MCP product. Use for provider-side service integration and Testnet/Mainnet preparation; do not use for Daski buyer clients or unrelated API/MCP gateways.
+description: Turn an existing API, MCP server, SDK, or internal product into a Daski provider integration so compatible agents can purchase one reviewed operation. Use when a service provider needs to choose the minimal or full starter, implement or diagnose the adapter, or prepare a Testnet handoff. Do not use for Daski buyer clients or unrelated gateways.
 license: MIT
+compatibility: Requires a coding agent with filesystem and shell access. Git and network access are needed to acquire a starter; after checkout, follow that repository's runtime requirements.
 metadata:
+  author: "daski-io"
   version: "0.1.0"
+  source: "https://github.com/daski-io/provider"
 ---
 
 # Daski provider

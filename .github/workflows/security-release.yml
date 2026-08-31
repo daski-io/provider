@@ -79,20 +79,27 @@ jobs:
       - name: Verify CRLF skill validation
         shell: pwsh
         run: |
-          $path = ".agents/skills/daski-provider/SKILL.md"
-          $original = [IO.File]::ReadAllBytes($path)
+          $paths = Get-ChildItem ".agents/skills/daski-provider" -Recurse -File -Filter "*.md"
+          $original = @{}
+          foreach ($path in $paths) {
+            $original[$path.FullName] = [IO.File]::ReadAllBytes($path.FullName)
+          }
           try {
-            $text = [Text.Encoding]::UTF8.GetString($original)
-            $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
-            [IO.File]::WriteAllText(
-              $path,
-              $text.Replace("`n", "`r`n"),
-              [Text.UTF8Encoding]::new($false)
-            )
+            foreach ($path in $paths) {
+              $text = [Text.Encoding]::UTF8.GetString($original[$path.FullName])
+              $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              [IO.File]::WriteAllText(
+                $path.FullName,
+                $text.Replace("`n", "`r`n"),
+                [Text.UTF8Encoding]::new($false)
+              )
+            }
             npm run skill:validate
             if ($LASTEXITCODE -ne 0) { throw "CRLF validation failed" }
           } finally {
-            [IO.File]::WriteAllBytes($path, $original)
+            foreach ($path in $paths) {
+              [IO.File]::WriteAllBytes($path.FullName, $original[$path.FullName])
+            }
           }
       - run: npm run test:run -- test/doctor.test.ts test/toolingContract.test.ts
 
@@ -129,9 +136,33 @@ jobs:
             HEAD:.agents/skills/daski-provider
           sha256sum "provider-${VERSION}.tar.gz" \
             daski-provider-agent-skill.zip > SHA256SUMS
+      - name: Inspect release package and checksums
+        shell: bash
+        run: |
+          expected=(
+            "daski-provider/"
+            "daski-provider/SKILL.md"
+            "daski-provider/references/"
+            "daski-provider/references/daski-primer.md"
+            "daski-provider/references/integration-brief.md"
+            "daski-provider/references/onboarding-handoff.md"
+            "daski-provider/references/provider-full.md"
+            "daski-provider/references/start-here.md"
+          )
+          diff -u \
+            <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort) \
+            <(unzip -Z1 daski-provider-agent-skill.zip | LC_ALL=C sort)
+          sha256sum --check SHA256SUMS
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
-          provider-*.tar.gz daski-provider-agent-skill.zip SHA256SUMS
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          prerelease=()
+          if [[ "$VERSION" == 0.* ]]; then
+            prerelease+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag --generate-notes "${prerelease[@]}" \
+            provider-*.tar.gz daski-provider-agent-skill.zip SHA256SUMS

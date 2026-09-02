@@ -19,13 +19,13 @@ describe("provider discovery", () => {
       pushNotifications: false,
     });
     expect(card.skills).toHaveLength(1);
-    expect(card.extensions["https://daski.xyz/a2a/v1"]).toMatchObject({
+    expect(card.extensions["https://daski.io/a2a/v1"]).toMatchObject({
       standardRailOnly: true,
       dispatchMode: "one-shot",
       fulfillmentMode: "automated",
       legal: { providerLegalName: "Test Provider" },
     });
-    expect(card.extensions["https://daski.xyz/a2a/v2"]).toMatchObject({
+    expect(card.extensions["https://daski.io/a2a/v2"]).toMatchObject({
       schemaVersion: 1,
       service: { slug: "dummy", lifecycle: "one-shot" },
       skills: [{

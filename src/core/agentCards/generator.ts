@@ -7,7 +7,7 @@ import {
   DASKI_CONTRACT_EXTENSION_URI,
 } from "./contractExtension.js";
 
-const DASKI_EXTENSION = "https://daski.xyz/a2a/v1";
+const DASKI_EXTENSION = "https://daski.io/a2a/v1";
 
 export function generateAgentCard(
   service: ServiceModule,

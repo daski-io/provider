@@ -3,7 +3,7 @@ import { config } from "../config.js";
 import { canonicalHash } from "../standardRail/canonical.js";
 import type { ServiceModule, SkillDefinition } from "../serviceRegistry/types.js";
 
-export const DASKI_CONTRACT_EXTENSION_URI = "https://daski.xyz/a2a/v2";
+export const DASKI_CONTRACT_EXTENSION_URI = "https://daski.io/a2a/v2";
 
 export interface PublishedSkillContract {
   skillId: string;

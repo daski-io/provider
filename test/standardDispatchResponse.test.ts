@@ -29,6 +29,7 @@ function row(overrides: Partial<ProviderTransaction> = {}): ProviderTransaction 
     payer: `0x${"11".repeat(20)}` as Hex,
     service_slug: "dummy",
     skill_id: "echo",
+    listing_manifest_hash: Buffer.alloc(32, 0x11),
     state: "completed",
     result,
     created_at: new Date(),

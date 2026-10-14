@@ -65,6 +65,12 @@ export const DEFAULT_MAX_OPEN_ORDERS = 10;
 export const DEFAULT_DISPATCH_DEADLINE_SECONDS = 300;
 export const DEFAULT_QUOTE_MAXIMUM_LIFETIME_SECONDS = 180;
 export const DEFAULT_QUOTE_MINIMUM_PAYMENT_WINDOW_SECONDS = 30;
+/**
+ * The gateway's sealed fulfillment window for a contract that declares none
+ * (30 days): it re-dispatches a paid order until its first release
+ * observation plus this window.
+ */
+export const DEFAULT_FULFILLMENT_SECONDS = 2_592_000;
 
 const hex32 = /^0x[0-9a-fA-F]{64}$/;
 
@@ -284,7 +290,10 @@ export function materializeOutcome(args: {
     throw new Error(`${label} fixed pricing amount is invalid`);
   }
   const capacity = (contract.capacity as { maxOpenOrders?: number } | undefined)?.maxOpenOrders;
-  const deadlines = contract.deadlines as { dispatchSeconds?: number } | undefined;
+  const deadlines = contract.deadlines as {
+    dispatchSeconds?: number;
+    fulfillmentSeconds?: number;
+  } | undefined;
   const intentPayload = bundle.intent.payload;
   if (intentPayload.serviceId.toLowerCase() !== head.serviceId.toLowerCase()) {
     throw new Error(`${label} intent serves a different service`);
@@ -339,6 +348,7 @@ export function materializeOutcome(args: {
     commissionBps: commitment.commissionBps,
     maxOpenOrders: capacity ?? DEFAULT_MAX_OPEN_ORDERS,
     dispatchDeadlineSeconds: deadlines?.dispatchSeconds ?? DEFAULT_DISPATCH_DEADLINE_SECONDS,
+    fulfillmentSeconds: deadlines?.fulfillmentSeconds ?? DEFAULT_FULFILLMENT_SECONDS,
     bindingProfile: "recipe-bound-v2",
     requestSchema,
     resultSchema,

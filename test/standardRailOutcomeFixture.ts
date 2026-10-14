@@ -88,6 +88,7 @@ export function standardOutcome(): ProviderOutcomeConfig {
     commissionBps: 500,
     maxOpenOrders: 10,
     dispatchDeadlineSeconds: 300,
+    fulfillmentSeconds: 900,
     bindingProfile: "recipe-bound-v1",
     requestSchema: {
       type: "object",

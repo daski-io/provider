@@ -26,7 +26,7 @@ import {
 } from "./gatewayLifecycleWire.js";
 import { nowSeconds, signGatewayEnvelope, type ProviderAnswer } from "./gatewayWire.js";
 import { echoResultSchema } from "./standardRailOutcomeFixture.js";
-import { echoService, railConfig } from "./standardRailServiceFixture.js";
+import { echoService, railConfig, railOutcome } from "./standardRailServiceFixture.js";
 
 const payerKey = `0x${"5a".repeat(32)}` as Hex;
 const payer = privateKeyToAccount(payerKey).address;
@@ -49,6 +49,7 @@ function task(id: string, orderId: string, overrides: Partial<ProviderTransactio
     payer,
     service_slug: "dummy",
     skill_id: "echo",
+    listing_manifest_hash: Buffer.from(railOutcome().listingManifestHash.slice(2), "hex"),
     state: "executing",
     result: null,
     result_hash: null,

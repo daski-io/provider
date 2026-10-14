@@ -108,7 +108,7 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
          execution_owner,execution_lease_token,execution_lease_expires_at
        ) VALUES ('task-pending','https://gateway.example','ord_00000000-0000-4000-8000-0000000000aa',
          decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex'),decode(repeat('33',32),'hex'),
-         '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('44',32),'hex'),
+         '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('11',32),'hex'),
          'executing',now() + interval '5 minutes',now() - interval '6 minutes',
          gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`,
     );

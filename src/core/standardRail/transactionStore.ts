@@ -17,6 +17,8 @@ export interface ProviderTransaction {
   payer: Hex;
   service_slug: string;
   skill_id: string;
+  /** The listing version (runtime commitment hash) the claim was admitted under. */
+  listing_manifest_hash: Buffer;
   state: "executing" | "completed" | "failed";
   result: ServiceResult | null;
   /**

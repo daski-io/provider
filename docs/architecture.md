@@ -67,6 +67,19 @@ AgentCards publish a null service id before import and the catalog service id
 after import. A new contract, price, service id, or runtime commitment requires
 a newly reviewed bundle; catalog history is never rewritten.
 
+Promotion only supersedes a head. New sales (quotes, intake, the outcome list)
+use heads; servicing uses every installed version, looked up by its runtime
+commitment hash (re-verified against its content) with the definition it was
+admitted with: schemas, price, deadlines, the fulfillment window (the
+gateway's 30-day default when a contract declares none) and the handler. A
+funded order paid against a superseded version is served exactly as it was
+sold. Answers about an order are signed with the provider wallet its version
+recorded, from a retained previous key after a rotation, and servicing calls
+may name a retained previous provider audience (`docs/configuration.md`).
+Boot and the importer refuse a build that cannot service every obligation:
+claims need their version's signing key, and versions whose quotes may still
+be dispatched also need their definition and handler.
+
 ## Dispatch state machine
 
 ```text

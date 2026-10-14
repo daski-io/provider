@@ -77,7 +77,7 @@ describePostgres("frozen terminal identity against PostgreSQL", () => {
            service_slug,skill_id,listing_manifest_hash,state,created_at
          ) VALUES ($1,'https://gateway.example',$2,$3,$4,decode(repeat('33',32),'hex'),
            '0x1111111111111111111111111111111111111111','dummy','echo',
-           decode(repeat('44',32),'hex'),'executing',now() - interval '1 hour')`,
+           decode(repeat('11',32),'hex'),'executing',now() - interval '1 hour')`,
         [row.id, row.orderId, Buffer.alloc(32, index + 1), bytes(row.dispatchHash)],
       );
       if (row.result) {

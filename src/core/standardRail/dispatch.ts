@@ -12,9 +12,11 @@ import {
   withDispatchRejection,
 } from "./dispatchErrors.js";
 import {
-  providerResponseSigner,
+  listingOf,
+  providerListingSigner,
   signDispatchSnapshot,
   type DispatchSnapshot,
+  type ListingSigner,
   type ProviderResponseSigner,
 } from "./dispatchResponse.js";
 import { answerDispatchStatus } from "./dispatchStatus.js";
@@ -52,6 +54,7 @@ export interface DispatchDependencies {
   evidence?: Pick<ProviderEvidenceVerifier, "verify" | "assertNotSanctioned">;
   /** Pre-admission product readiness for the legacy synchronous mode. */
   ready?: () => Promise<boolean>;
+  /** One signer for every listing version; tests replace the configured keys. */
   signer?: ProviderResponseSigner;
   /** Execution lease timing; tests shorten it. */
   lease?: SyncLeaseTiming;
@@ -76,7 +79,7 @@ function parseDispatchRequest(body: unknown): DispatchRequest {
 export class StandardDispatchService {
   private readonly evidence: Pick<ProviderEvidenceVerifier, "verify" | "assertNotSanctioned">;
   private readonly ready: () => Promise<boolean>;
-  private readonly signer: ProviderResponseSigner;
+  private readonly signers: ListingSigner;
   private readonly lease: SyncLeaseTiming;
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly resultValidators = new Map<string, ValidateFunction>();
@@ -89,14 +92,16 @@ export class StandardDispatchService {
   ) {
     this.evidence = dependencies.evidence ?? new ProviderEvidenceVerifier(config, chain);
     this.ready = dependencies.ready ?? providerReady;
-    this.signer = dependencies.signer ?? providerResponseSigner(config);
+    const injected = dependencies.signer;
+    this.signers = injected ? () => injected : providerListingSigner(config);
     this.lease = dependencies.lease ?? SYNC_LEASE;
-    for (const outcome of config.outcomes.values()) {
+    // Every installed version, superseded ones included, keeps the request
+    // and result contracts it was admitted with.
+    for (const outcome of config.servicing.values()) {
       this.validators.set(
         outcome.listingManifestHash,
         compileProviderSchema(outcome.requestSchema as unknown as Record<string, unknown>),
       );
-      // Each listing version keeps the result contract it was admitted with.
       this.resultValidators.set(outcome.listingManifestHash, compileProviderSchema(outcome.resultSchema));
     }
   }
@@ -105,7 +110,7 @@ export class StandardDispatchService {
     return answerDispatchStatus(body, {
       config: this.config,
       chainId: this.chainId,
-      signer: this.signer,
+      signers: this.signers,
     });
   }
 
@@ -197,7 +202,7 @@ export class StandardDispatchService {
 
   private async snapshot(row: ProviderTransaction, dispatchHash: Hex): Promise<DispatchSnapshot> {
     try {
-      return await signDispatchSnapshot(row, dispatchHash, this.signer);
+      return await signDispatchSnapshot(row, dispatchHash, this.signers(listingOf(row)));
     } catch (error) {
       throw new DispatchAmbiguousError("Dispatch snapshot could not be signed", error);
     }
@@ -208,10 +213,12 @@ export class StandardDispatchService {
     const dispatch = parts.dispatch.payload;
     try {
       assertDispatchPayloadBound(parts.dispatch, parts.request, this.config, this.chainId);
-      const outcome = [...this.config.outcomes.values()].find((candidate) =>
-        candidate.listingManifestHash === dispatch.listingManifestHash
-        && candidate.providerOfferHash === dispatch.providerOfferHash);
-      if (!outcome) throw new DispatchRejectedError("outcome_policy");
+      // The funded order's own listing version, even if a newer one now takes
+      // new sales: it is served with the definition it was paid under.
+      const outcome = this.config.servicing.get(dispatch.listingManifestHash);
+      if (!outcome || outcome.providerOfferHash !== dispatch.providerOfferHash) {
+        throw new DispatchRejectedError("outcome_policy");
+      }
       assertDispatchIsCurrent(parts.dispatch, outcome);
       assertOutcomeBinding(dispatch, outcome, this.config);
       await verifyQuoteEnvelope(parts.quote, dispatch, outcome, this.config, this.chainId);
@@ -223,10 +230,13 @@ export class StandardDispatchService {
       const validate = this.validators.get(outcome.listingManifestHash);
       if (!validate) throw new DispatchRejectedError("validator");
       await withDispatchRejection("validator", () => validateProviderRequest(validate, parts.request));
+      // The handler must be installed; only a head must also match the
+      // build's current price (a superseded version keeps its admitted one).
       const skill = getSkill(outcome.serviceSlug, outcome.skillId);
+      const head = this.config.outcomes.get(outcome.outcomeId) === outcome;
       if (
         !getService(outcome.serviceSlug) || !skill
-        || skill.fixedPriceAtomic !== outcome.fixedGrossAmount
+        || (head && skill.fixedPriceAtomic !== outcome.fixedGrossAmount)
       ) throw new DispatchRejectedError("outcome_policy");
       // Synchronous execution during an outage would sign a terminal failure;
       // refusing before admission lets the gateway retry a fresh envelope.

@@ -152,6 +152,8 @@ export interface ProviderOutcomeConfig {
   commissionBps: number;
   maxOpenOrders: number;
   dispatchDeadlineSeconds: number;
+  /** The admitted fulfillment window of this listing version (the gateway's default when unset). */
+  fulfillmentSeconds: number;
   bindingProfile: "stock-fixed-v1" | "recipe-bound-v1" | "recipe-bound-v2";
   requestSchema: {
     type: "object";

@@ -21,7 +21,8 @@ export const SYNC_RECOVERY_MARGIN_SECONDS = 120;
 
 const MIN_DEADLINE_SECONDS = 30;
 const MAX_DISPATCH_SECONDS = 86_400;
-const MAX_FULFILLMENT_SECONDS = 31_536_000;
+/** The longest fulfillment window the gateway admits for a skill (one year). */
+export const MAX_FULFILLMENT_SECONDS = 31_536_000;
 
 export interface SkillDeadlines {
   dispatchSeconds: number;

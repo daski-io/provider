@@ -6,9 +6,10 @@ import {
   DispatchStatusRejectedError,
 } from "./dispatchErrors.js";
 import {
+  listingOf,
   signDispatchSnapshot,
   type DispatchSnapshot,
-  type ProviderResponseSigner,
+  type ListingSigner,
 } from "./dispatchResponse.js";
 import { GatewayEnvelopeError, verifyGatewayRequestEnvelope } from "./gatewayEnvelope.js";
 import { dispatchHashOf, findTransaction } from "./transactionStore.js";
@@ -24,7 +25,7 @@ import type { DispatchStatusQueryV1 } from "./types.js";
  */
 export async function answerDispatchStatus(
   body: unknown,
-  context: { config: ProviderStandardRailConfig; chainId: number; signer: ProviderResponseSigner },
+  context: { config: ProviderStandardRailConfig; chainId: number; signers: ListingSigner },
 ): Promise<DispatchSnapshot> {
   const record = body as Record<string, unknown> | null;
   if (
@@ -38,7 +39,7 @@ export async function answerDispatchStatus(
       payloadKeys: ["orderId", "dispatchHash", "issuedAt", "validBefore"],
       environment: context.config.environment,
       chainId: context.chainId,
-      audience: context.config.providerAudience,
+      audience: context.config.servicingAudiences,
       signer: context.config.gatewayDispatchSigner,
     });
     query = envelope.payload;
@@ -63,7 +64,7 @@ export async function answerDispatchStatus(
     throw new DispatchStatusRejectedError("binding_conflict", true);
   }
   try {
-    return await signDispatchSnapshot(claim, query.dispatchHash, context.signer);
+    return await signDispatchSnapshot(claim, query.dispatchHash, context.signers(listingOf(claim)));
   } catch (error) {
     throw new DispatchAmbiguousError("Dispatch status could not be signed", error);
   }

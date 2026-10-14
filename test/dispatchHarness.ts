@@ -14,6 +14,8 @@ import { FakeEvidence } from "./gatewayOrderFixture.js";
 import { gatewayStatusQuery, type ProviderAnswer } from "./gatewayWire.js";
 import { echoService, railConfig, railOutcome } from "./standardRailServiceFixture.js";
 
+type RetainedServicing = Parameters<typeof railConfig>[1];
+
 /**
  * A provider booted over HTTP against the real pool, with only chain
  * evidence and (optionally) signing replaced. Callers point DATABASE_URL at a
@@ -38,9 +40,11 @@ export async function startRailHarness(options: {
   signer?: ProviderResponseSigner;
   service?: Partial<ServiceModule>;
   lease?: SyncLeaseTiming;
+  /** Superseded versions, previous keys and audiences still serviced. */
+  retained?: RetainedServicing;
 } = {}): Promise<RailHarness> {
   const outcome = railOutcome(options.outcome);
-  const config = railConfig([outcome]);
+  const config = railConfig([outcome], options.retained);
   const evidence = new FakeEvidence();
   const state = { ready: true };
   const harness = { executions: 0 } as RailHarness;

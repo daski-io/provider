@@ -61,7 +61,8 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
   payloadKeys: readonly string[];
   environment: string;
   chainId: number;
-  audience: string;
+  /** The exact provider audience, or the accepted set for servicing calls. */
+  audience: string | ReadonlySet<string>;
   signer: Address;
   /** Defaults to `gateway-dispatch`; lifecycle grants use `gateway-lifecycle`. */
   signerKeyId?: string;
@@ -79,7 +80,9 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
     || envelope.schemaVersion !== 1
     || envelope.environment !== expected.environment
     || envelope.chainId !== expected.chainId
-    || envelope.audience !== expected.audience
+    || (typeof expected.audience === "string"
+      ? envelope.audience !== expected.audience
+      : !expected.audience.has(envelope.audience))
     || envelope.signerKeyId !== (expected.signerKeyId ?? GATEWAY_DISPATCH_KEY_ID)
     || !Number.isSafeInteger(envelope.issuedAt)
     || !Number.isSafeInteger(envelope.validBefore)

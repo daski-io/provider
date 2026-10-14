@@ -98,7 +98,7 @@ export async function verifyLifecycleGrant(
       payloadKeys: GRANT_PAYLOAD_KEYS,
       environment: config.environment,
       chainId,
-      audience: config.providerAudience,
+      audience: config.servicingAudiences,
       signer: config.gatewayLifecycleSigner,
       signerKeyId: GATEWAY_LIFECYCLE_KEY_ID,
     });

@@ -148,10 +148,29 @@ export async function promoteRuntimeListingVersions(
   }
 }
 
+/** Any installed version: the new-sale head, or a superseded one old orders still name. */
+export interface RuntimeListingVersion extends RuntimeListingHead {
+  supersededAt: Date | null;
+}
+
 export async function loadRuntimeListingHeads(
   gatewayOrigin?: string,
 ): Promise<RuntimeListingHead[]> {
-  const result = await pool.query<{
+  return (await loadRuntimeListingVersions(gatewayOrigin))
+    .filter((version) => version.supersededAt === null)
+    .map(({ supersededAt: _superseded, ...head }) => head);
+}
+
+/**
+ * Every installed version, heads and superseded alike. Superseding never
+ * deletes a version: orders paid against it are serviced with its own
+ * admitted definition, looked up by its runtime commitment hash.
+ */
+export async function loadRuntimeListingVersions(
+  gatewayOrigin?: string,
+  database: Pick<Pool, "query"> = pool,
+): Promise<RuntimeListingVersion[]> {
+  const result = await database.query<{
     gateway_origin: string;
     service_id: Buffer;
     skill_id: string;
@@ -162,14 +181,14 @@ export async function loadRuntimeListingHeads(
     runtime_commitment: unknown;
     bundle: unknown;
     promoted_at: Date;
+    superseded_at: Date | null;
   }>(
     `SELECT gateway_origin,service_id,skill_id,listing_id,listing_key,
             payment_required,runtime_commitment_hash,runtime_commitment,
-            bundle,promoted_at
+            bundle,promoted_at,superseded_at
        FROM provider_runtime_listing_versions
-      WHERE superseded_at IS NULL
-        AND ($1::text IS NULL OR gateway_origin=$1)
-      ORDER BY gateway_origin,skill_id`,
+      WHERE ($1::text IS NULL OR gateway_origin=$1)
+      ORDER BY gateway_origin,skill_id,promoted_at,runtime_commitment_hash`,
     [gatewayOrigin ?? null],
   );
   return result.rows.map((row) => ({
@@ -183,5 +202,6 @@ export async function loadRuntimeListingHeads(
     runtimeCommitment: row.runtime_commitment as RuntimeListingCommitmentV1,
     bundle: row.bundle as ProviderRuntimeListingBundleV1,
     promotedAt: row.promoted_at,
+    supersededAt: row.superseded_at,
   }));
 }

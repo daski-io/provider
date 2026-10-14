@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import pg from "pg";
+import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withRuntimeEpochMarker } from "../src/core/db/runtimeEpoch.js";
 import { providerKey } from "./gatewayWire.js";
@@ -15,7 +16,12 @@ import {
   type DisposableDatabase,
   type DisposableRole,
 } from "./postgresHarness.js";
-import { buildGlobalPolicyFixture, encodeGlobalPolicy, testGatewaySigner } from "./runtimeCatalogFixture.js";
+import {
+  buildGlobalPolicyFixture,
+  buildRuntimeHeadFixture,
+  encodeGlobalPolicy,
+  testGatewaySigner,
+} from "./runtimeCatalogFixture.js";
 
 /**
  * L-T14 against the actual pre-R1 compiled image. Build it outside this
@@ -62,6 +68,8 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
   let runtime: DisposableRole;
   const databases: DisposableDatabase[] = [];
   let baseEnv: NodeJS.ProcessEnv;
+  let head: ReturnType<typeof buildRuntimeHeadFixture>;
+  let listing: string;
 
   async function admin<T>(database: DisposableDatabase, work: (client: pg.Client) => Promise<T>): Promise<T> {
     const client = new pg.Client(withRuntimeEpochMarker(databaseUrl(database.name)));
@@ -109,25 +117,38 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     databases.push(database);
     const control = await legacyBoot(database, "owner");
     expect(control.served, control.logs).toBe(true);
+    // The pre-R1 image's own state: an installed head and, optionally, a call
+    // it was making under it.
+    const owner = new pg.Client({ connectionString: databaseUrl(database.name, migrator) });
+    await owner.connect();
+    await owner.query(
+      `INSERT INTO provider_runtime_listing_versions
+         (id,gateway_origin,service_id,skill_id,listing_id,listing_key,payment_required,
+          runtime_commitment_hash,runtime_commitment,bundle)
+       VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,true,$6,$7,$8)`,
+      [
+        head.gatewayOrigin, Buffer.from(head.serviceId.slice(2), "hex"), head.skillId, head.listingId,
+        Buffer.from(head.listingKey.slice(2), "hex"), Buffer.from(listing, "hex"),
+        head.runtimeCommitment, head.bundle,
+      ],
+    );
     if (withExecutingRows) {
-      const owner = new pg.Client({ connectionString: databaseUrl(database.name, migrator) });
-      await owner.connect();
       await owner.query(`INSERT INTO provider_transactions (
           id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
           service_slug,skill_id,listing_manifest_hash,state)
         VALUES ('task-pre-r1','https://gateway.example','ord_pre_r1',decode(repeat('01',32),'hex'),
           decode(repeat('02',32),'hex'),decode(repeat('03',32),'hex'),
           '0x1111111111111111111111111111111111111111','dummy','echo',
-          decode(repeat('04',32),'hex'),'executing')`);
-      await owner.end();
+          decode($1,'hex'),'executing')`, [listing]);
     }
+    await owner.end();
     const upgrade = await r1Boot(database);
     expect(upgrade.served, upgrade.logs).toBe(true);
     await admin(database, async (client) => {
       await client.query(`INSERT INTO provider_quotes
           (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
-        VALUES (decode(repeat('05',32),'hex'),'echo',decode(repeat('04',32),'hex'),
-          decode(repeat('06',32),'hex'),'10000',NULL,1000,1120)`);
+        VALUES (decode(repeat('05',32),'hex'),'echo',decode($1,'hex'),
+          decode(repeat('06',32),'hex'),'10000',NULL,1000,1120)`, [listing]);
       if (withExecutingRows) {
         await client.query(`INSERT INTO provider_transactions (
             id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
@@ -136,8 +157,8 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
           VALUES ('task-r1','https://gateway.example','ord_r1',decode(repeat('07',32),'hex'),
             decode(repeat('08',32),'hex'),decode(repeat('09',32),'hex'),
             '0x1111111111111111111111111111111111111111','dummy','echo',
-            decode(repeat('04',32),'hex'),'executing',now() + interval '5 minutes',
-            gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`);
+            decode($1,'hex'),'executing',now() + interval '5 minutes',
+            gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`, [listing]);
       }
     });
     return database;
@@ -147,6 +168,22 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     migrator = await createDisposableRole("lite_legacy_migrator");
     runtime = await createDisposableRole("lite_legacy_runtime");
     const port = await freePort();
+    const globalPolicy = await buildGlobalPolicyFixture();
+    head = buildRuntimeHeadFixture({
+      globalPolicy,
+      serviceSlug: "dummy",
+      skillId: "echo",
+      providerAgentId: "8327",
+      agentWallet: privateKeyToAccount(providerKey).address,
+      pricing: { USDC: { type: "one-time", fixed_amount: "10000" } },
+      inputSchema: {
+        type: "object",
+        properties: { message: { type: "string", minLength: 1, maxLength: 500 } },
+        required: ["message"],
+        additionalProperties: false,
+      },
+    });
+    listing = head.runtimeCommitmentHash.slice(2);
     baseEnv = {
       PATH: process.env.PATH,
       NODE_ENV: "development",
@@ -172,7 +209,7 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
       STANDARD_RAIL_GATEWAY_SIGNER: testGatewaySigner,
       STANDARD_RAIL_GATEWAY_ORIGIN: "https://gateway.example",
       STANDARD_RAIL_GATEWAY_AUDIENCE: "https://gateway.example",
-      STANDARD_RAIL_GLOBAL_POLICY_JSON: encodeGlobalPolicy(await buildGlobalPolicyFixture()),
+      STANDARD_RAIL_GLOBAL_POLICY_JSON: encodeGlobalPolicy(globalPolicy),
       STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH: `0x${"3".repeat(64)}`,
       SANCTIONS_ORACLE_ADDRESS: "0x5555555555555555555555555555555555555555",
       REPUTATION_STORAGE_ADDRESS: "0x4545454545454545454545454545454545454545",
@@ -236,7 +273,7 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
         gatewayAudience: "https://gateway.example", orderId: "ord_old_process",
         dispatchNonce: "0x" + "0a".repeat(32), dispatchHash: "0x" + "0b".repeat(32),
         requestHash: "0x" + "0c".repeat(32), payer: "0x1111111111111111111111111111111111111111",
-        serviceSlug: "dummy", skillId: "echo", listingManifestHash: "0x" + "04".repeat(32),
+        serviceSlug: "dummy", skillId: "echo", listingManifestHash: "0x${listing}",
         maxOpenOrders: 10,
       }));
       await attempt("promote", () => catalog.promoteRuntimeListingVersions(

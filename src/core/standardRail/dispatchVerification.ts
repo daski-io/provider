@@ -41,7 +41,8 @@ export async function authenticateDispatchEnvelope(
     || envelope.schemaVersion !== 2
     || envelope.environment !== config.environment
     || envelope.chainId !== chainId
-    || envelope.audience !== config.providerAudience
+    || typeof envelope.audience !== "string"
+    || !config.servicingAudiences.has(envelope.audience)
     || envelope.signerKeyId !== GATEWAY_DISPATCH_KEY_ID
     || !Number.isSafeInteger(envelope.issuedAt)
     || !Number.isSafeInteger(envelope.validBefore)
@@ -113,7 +114,7 @@ function dispatchPayloadIsBound(
   return dispatch.environment === config.environment
     && dispatch.chainId === chainId
     && dispatch.gatewayAudience === config.gatewayAudience
-    && dispatch.providerAudience === config.providerAudience
+    && dispatch.providerAudience === envelope.audience
     && dispatch.reputationEligible === true
     && /^0x[0-9a-fA-F]{40}$/.test(dispatch.reputationContract)
     && getAddress(dispatch.reputationContract) === config.reputationContract

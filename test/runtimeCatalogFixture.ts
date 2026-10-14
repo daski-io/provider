@@ -166,7 +166,7 @@ export interface RuntimeHeadFixtureArgs {
   pricing?: Record<string, unknown>;
   inputSchema?: Record<string, unknown>;
   capacity?: { maxOpenOrders: number };
-  deadlines?: { dispatchSeconds?: number };
+  deadlines?: { dispatchSeconds?: number; fulfillmentSeconds?: number };
   listingEpoch?: string;
 }
 

@@ -68,6 +68,19 @@ An identical bundle is an idempotent no-op. If boot warns that an installed
 paid skill has no promoted runtime listing, the service is not purchasable yet;
 install the reviewed bundle rather than weakening exact-set checks.
 
+If boot or the importer refuses with `retained listing obligations are not
+serviceable by this build: 0x…abcd (<reason>)`, this build cannot service an
+order it would take over (see `docs/configuration.md`):
+
+| Reason | Fix |
+| --- | --- |
+| `signing key not retained` | Orders of that listing version were admitted under a previous wallet; add its key to `PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`. |
+| `skill_not_installed` | Its quotes may still be dispatched but the build no longer installs the service or skill; restore it until the window passes. |
+| `definition_invalid`, `schema_invalid` | The version no longer materializes against this build's global policy or schema compiler; do not edit the catalog, restore the matching configuration. |
+| `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
+
+Never delete claims or quotes to pass the check.
+
 If boot logs `listing commitment drift`, this build's published skill contract
 changed after the installed bundle was issued. The process stays online so
 Daski can read the new AgentCard, but the gateway may quarantine the service.
@@ -155,8 +168,8 @@ is a reviewed code:
 - `signature`/`envelope_lifetime`/`validator`: signer, audience, environment,
   chain, clock, an envelope that expired before its claim could commit, or a
   malformed request;
-- `outcome_policy`/`self_purchase`: the listing version is not the installed
-  catalog head, or the payer is a provider wallet;
+- `outcome_policy`/`self_purchase`: the listing version is not installed (or
+  its service or skill is not), or the payer is a provider wallet;
 - `quote_window`/`price`: the forwarded `QuoteV1` or the persisted provider
   quote it names does not bind this order (unknown or zero quote hash,
   different request, payer or window), or the amount differs;

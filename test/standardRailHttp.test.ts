@@ -162,6 +162,7 @@ function admittedClaim() {
     gateway_audience: "https://gateway.example",
     order_id: orderId,
     dispatch_hash: Buffer.from(dispatchHash.slice(2), "hex"),
+    listing_manifest_hash: Buffer.from(railOutcome().listingManifestHash.slice(2), "hex"),
     state: "executing",
     result: null,
     completed_at: null,

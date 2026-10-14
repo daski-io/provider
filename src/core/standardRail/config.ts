@@ -1,21 +1,18 @@
-import {
-  concatHex,
-  encodeAbiParameters,
-  getAddress,
-  getCreate2Address,
-  keccak256,
-  type Address,
-  type Hex,
-} from "viem";
+import { getAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { assertExactKeys } from "./canonical.js";
-import { loadRuntimeListingHeads } from "../gatewayRegistration/runtimeCatalog.js";
+import {
+  loadRuntimeListingVersions,
+  type RuntimeListingHead,
+  type RuntimeListingVersion,
+} from "../gatewayRegistration/runtimeCatalog.js";
 import {
   loadStandardRailGlobalPolicy,
-  materializeCatalogOutcomes,
   type StandardRailGlobalPolicy,
 } from "./catalogOutcomes.js";
 import type { ProviderOutcomeLaunchPolicy } from "./launchPolicy.js";
+import { validateOutcome } from "./outcomeValidation.js";
+import { parseRetainedSigningKeys, parseServicingAudiences } from "./retainedConfig.js";
+import { buildServicingCatalog, type UnserviceableReason } from "./servicingCatalog.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
 export interface ProviderStandardRailConfig {
@@ -33,7 +30,21 @@ export interface ProviderStandardRailConfig {
   terminalAttestationPrivateKey: Hex;
   terminalAttestationKey: Address;
   evidenceRpcUrls: readonly [string, ...string[]];
+  /** New-sale heads by outcome id: quotes, intake and the outcome list. */
   outcomes: ReadonlyMap<string, ProviderOutcomeConfig>;
+  /**
+   * Every installed version this build services, heads included, by listing
+   * manifest (runtime commitment) hash, with its admitted definition.
+   */
+  servicing: ReadonlyMap<Hex, ProviderOutcomeConfig>;
+  /** Installed versions this build cannot service, with the reason. */
+  unserviceable: ReadonlyMap<Hex, UnserviceableReason>;
+  /** Each installed version's provider wallet: the key its orders' answers carry. */
+  listingWallets: ReadonlyMap<Hex, Address>;
+  /** Previous provider wallet keys by address; secrets. */
+  retainedSigningKeys: ReadonlyMap<Address, Hex>;
+  /** Provider audiences servicing calls may name: current plus retained. */
+  servicingAudiences: ReadonlySet<string>;
   globalPolicy: StandardRailGlobalPolicy;
   finalityConfirmations: number;
   sanctionsOracleAddress: Address;
@@ -70,7 +81,8 @@ export async function loadProviderStandardRailConfig(
   env: NodeJS.ProcessEnv = process.env,
   options: {
     warn?: (message: string) => void;
-    headsOverride?: readonly import("../gatewayRegistration/runtimeCatalog.js").RuntimeListingHead[];
+    headsOverride?: readonly RuntimeListingHead[];
+    versionsOverride?: readonly RuntimeListingVersion[];
   } = {},
 ): Promise<ProviderStandardRailConfig> {
   const chainId = Number(need(env, "CHAIN_ID"));
@@ -121,17 +133,23 @@ export async function loadProviderStandardRailConfig(
     need(env, "STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH"),
     "STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH",
   );
-  const outcomes = materializeCatalogOutcomes({
-    heads: options.headsOverride ?? await loadRuntimeListingHeads(gatewayOrigin),
+  const catalog = buildServicingCatalog({
+    versions: options.versionsOverride
+      ?? options.headsOverride?.map((head) => ({ ...head, supersededAt: null }))
+      ?? await loadRuntimeListingVersions(gatewayOrigin),
     globalPolicy,
     chainId,
     providerControlProfileHash,
     installedPaidSkills: reviewedPaidSkills,
+    canonicalToken,
+    strictHeads: true,
     warn: options.warn,
   });
+  const outcomes = catalog.heads;
   const parsedOutcomes = [...outcomes.values()];
   for (const outcome of parsedOutcomes) {
     validateOutcome(outcome, chainId);
+    // New sales are signed with the current key only.
     if (getAddress(outcome.providerTerminalAttestationKey) !== terminalAttestationKey) {
       throw new Error(`Outcome ${outcome.outcomeId} terminal attestation key mismatch`);
     }
@@ -139,6 +157,9 @@ export async function loadProviderStandardRailConfig(
       throw new Error(`Outcome ${outcome.outcomeId} token is not configured USDC`);
     }
   }
+  // A superseded version this build cannot vouch for is left out of
+  // servicing; boot refuses only if it still has obligations
+  // (retainedObligations.ts).
   if (
     parsedOutcomes.length > 0 &&
     new Set(parsedOutcomes.map((outcome) =>
@@ -160,13 +181,13 @@ export async function loadProviderStandardRailConfig(
   if (!Number.isSafeInteger(finalityConfirmations) || finalityConfirmations < 1) {
     throw new Error("STANDARD_RAIL_FINALITY_CONFIRMATIONS must be positive");
   }
+  const providerAudience = env.STANDARD_RAIL_PROVIDER_AUDIENCE?.trim() || need(env, "BASE_URL");
   return {
     environment,
     chainId,
     gatewayAudience,
     gatewayOrigin,
-    providerAudience:
-      env.STANDARD_RAIL_PROVIDER_AUDIENCE?.trim() || need(env, "BASE_URL"),
+    providerAudience,
     // The gateway signs every protocol artifact with its one protocol key;
     // each key id still names its own role and is checked separately.
     gatewayDispatchSigner: gatewaySigner,
@@ -178,6 +199,11 @@ export async function loadProviderStandardRailConfig(
     terminalAttestationKey,
     evidenceRpcUrls,
     outcomes,
+    servicing: catalog.servicing,
+    unserviceable: catalog.unserviceable,
+    listingWallets: catalog.listingWallets,
+    retainedSigningKeys: parseRetainedSigningKeys(env, providerAuthorityPrivateKey),
+    servicingAudiences: parseServicingAudiences(env, providerAudience),
     globalPolicy,
     finalityConfirmations,
     sanctionsOracleAddress: getAddress(need(env, "SANCTIONS_ORACLE_ADDRESS")),
@@ -189,120 +215,4 @@ export async function loadProviderStandardRailConfig(
       "EAS_OUTCOME_SCHEMA_UID",
     ),
   };
-}
-
-function validateOutcome(outcome: ProviderOutcomeConfig, chainId: number): void {
-  assertExactKeys(outcome, [
-    "outcomeId", "serviceSlug", "serviceId", "skillId", "listingManifestHash", "providerOfferHash",
-    "pricingMode", "fixedGrossAmount", "quoteMaximumLifetimeSeconds",
-    "quoteMinimumPaymentWindowSeconds", "providerControlProfileHash", "activeRailProfileHash",
-    "customerIdentityPolicyId", "token", "splitter", "splitterRuntimeCodeHash",
-    "splitterFactory", "splitterFactoryRuntimeCodeHash", "splitterCreationCode",
-    "splitterCreationCodeHash", "splitterInitCodeHash", "splitterDeploymentSalt",
-    "splitterDeploymentTransaction", "splitterDeploymentBlockNumber",
-    "splitterDeploymentBlockHash", "splitterActivationBlockNumber",
-    "splitterActivationBlockHash", "splitterActivationPosition",
-    "splitterStartingTokenBalance", "splitterStartingReleaseSequence", "tokenRuntimeCodeHash",
-    "tokenImplementationAddress", "tokenImplementationRuntimeCodeHash", "tokenImplementationSlot",
-    "tokenDomainSeparator", "sanctionsOracleRuntimeCodeHash", "providerControlledWallets",
-    "maximumSourceLagBlocks", "maximumLogPageEvents", "listingCommitmentHash", "outcomeIdHash",
-    "policyVersionHash", "listingEpoch", "providerPayee", "providerTerminalAttestationKey",
-    "daskiCommissionReceiver", "commissionBps", "maxOpenOrders", "dispatchDeadlineSeconds",
-    "bindingProfile", "requestSchema", "resultSchema",
-  ], `outcome ${outcome.outcomeId}`);
-  if (
-    !outcome.outcomeId || !outcome.serviceSlug || !outcome.skillId
-    || outcome.pricingMode !== "fixed"
-    || !/^[1-9]\d*$/.test(outcome.fixedGrossAmount)
-    || outcome.quoteMaximumLifetimeSeconds !== 0
-    || outcome.quoteMinimumPaymentWindowSeconds !== 0
-    || outcome.customerIdentityPolicyId !== "none"
-  ) throw new Error(`Outcome ${outcome.outcomeId} must use fixed one-shot pricing`);
-
-  const hexFields = [
-    "serviceId", "listingManifestHash", "providerOfferHash", "providerControlProfileHash",
-    "activeRailProfileHash", "splitterFactoryRuntimeCodeHash", "splitterCreationCodeHash",
-    "splitterInitCodeHash", "splitterDeploymentSalt", "splitterRuntimeCodeHash",
-    "splitterDeploymentTransaction", "splitterDeploymentBlockHash",
-    "splitterActivationBlockHash", "tokenRuntimeCodeHash",
-    "tokenImplementationRuntimeCodeHash", "tokenImplementationSlot", "tokenDomainSeparator",
-    "sanctionsOracleRuntimeCodeHash", "listingCommitmentHash", "outcomeIdHash",
-    "policyVersionHash",
-  ] as const;
-  for (const field of hexFields) bytes32(outcome[field], `${outcome.outcomeId}.${field}`);
-  for (const field of [
-    "token", "tokenImplementationAddress", "splitter", "splitterFactory", "providerPayee",
-    "providerTerminalAttestationKey", "daskiCommissionReceiver",
-  ] as const) getAddress(outcome[field]);
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(outcome.splitterCreationCode)) {
-    throw new Error(`Outcome ${outcome.outcomeId} splitter creation code is invalid`);
-  }
-  if (
-    !/^\d+$/.test(outcome.listingEpoch)
-    || !/^\d+$/.test(outcome.splitterDeploymentBlockNumber)
-    || !/^\d+$/.test(outcome.splitterActivationBlockNumber)
-    || !/^\d+$/.test(outcome.splitterStartingTokenBalance)
-    || !/^\d+$/.test(outcome.splitterStartingReleaseSequence)
-    || BigInt(outcome.listingEpoch) === 0n
-    || BigInt(outcome.listingEpoch) >= 1n << 64n
-    || BigInt(outcome.splitterActivationBlockNumber)
-      < BigInt(outcome.splitterDeploymentBlockNumber)
-    || BigInt(outcome.splitterStartingReleaseSequence) >= 1n << 64n
-    || BigInt(outcome.splitterStartingTokenBalance) >= 1n << 256n
-    || outcome.splitterActivationPosition !== "END_OF_BLOCK"
-  ) throw new Error(`Outcome ${outcome.outcomeId} activation checkpoint is invalid`);
-
-  const constructorArgs = encodeAbiParameters(
-    [
-      { type: "uint256" }, { type: "address" }, { type: "address" },
-      { type: "address" }, { type: "uint16" }, { type: "bytes32" },
-      { type: "bytes32" }, { type: "bytes32" }, { type: "uint64" },
-    ],
-    [
-      BigInt(chainId), getAddress(outcome.token), getAddress(outcome.providerPayee),
-      getAddress(outcome.daskiCommissionReceiver), outcome.commissionBps,
-      outcome.policyVersionHash, outcome.outcomeIdHash, outcome.listingCommitmentHash,
-      BigInt(outcome.listingEpoch),
-    ],
-  );
-  const creationCodeHash = keccak256(outcome.splitterCreationCode);
-  const initCodeHash = keccak256(concatHex([outcome.splitterCreationCode, constructorArgs]));
-  if (
-    creationCodeHash.toLowerCase() !== outcome.splitterCreationCodeHash.toLowerCase()
-    || initCodeHash.toLowerCase() !== outcome.splitterInitCodeHash.toLowerCase()
-    || getCreate2Address({
-      from: getAddress(outcome.splitterFactory),
-      salt: outcome.splitterDeploymentSalt,
-      bytecodeHash: initCodeHash,
-    }) !== getAddress(outcome.splitter)
-  ) throw new Error(`Outcome ${outcome.outcomeId} splitter provenance is invalid`);
-
-  if (
-    !Array.isArray(outcome.providerControlledWallets)
-    || outcome.providerControlledWallets.some((value) => !/^0x[0-9a-fA-F]{40}$/.test(value))
-    || new Set(outcome.providerControlledWallets.map((value) =>
-      getAddress(value).toLowerCase())).size !== outcome.providerControlledWallets.length
-    || !Number.isSafeInteger(outcome.commissionBps)
-    || outcome.commissionBps <= 0 || outcome.commissionBps >= 10_000
-    || !Number.isSafeInteger(outcome.maxOpenOrders) || outcome.maxOpenOrders < 1
-    || !Number.isSafeInteger(outcome.maximumSourceLagBlocks) || outcome.maximumSourceLagBlocks < 0
-    || !Number.isSafeInteger(outcome.maximumLogPageEvents)
-    || outcome.maximumLogPageEvents < 1 || outcome.maximumLogPageEvents > 100_000
-    || !Number.isSafeInteger(outcome.dispatchDeadlineSeconds)
-    || outcome.dispatchDeadlineSeconds < 30 || outcome.dispatchDeadlineSeconds > 86_400
-    || !["stock-fixed-v1", "recipe-bound-v1", "recipe-bound-v2"].includes(
-      outcome.bindingProfile,
-    )
-    || !outcome.requestSchema || outcome.requestSchema.type !== "object"
-    || outcome.requestSchema.additionalProperties !== false
-    || !outcome.requestSchema.properties
-    || !outcome.resultSchema || outcome.resultSchema.type !== "object"
-    || outcome.resultSchema.additionalProperties !== false
-    || !outcome.resultSchema.properties
-  ) throw new Error(`Outcome ${outcome.outcomeId} policy is invalid`);
-  if (
-    outcome.bindingProfile === "stock-fixed-v1"
-    && (Object.keys(outcome.requestSchema.properties).length !== 0
-      || (outcome.requestSchema.required?.length ?? 0) !== 0)
-  ) throw new Error(`Outcome ${outcome.outcomeId} stock-fixed requests must be empty`);
 }

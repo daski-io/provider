@@ -1,4 +1,4 @@
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
@@ -48,6 +48,38 @@ export function providerResponseSigner(config: ProviderStandardRailConfig): Prov
     terminal: (digest) => terminal.signMessage({ message: { raw: digest } }),
   };
 }
+
+/** The signer for answers about one order, chosen by its listing version. */
+export type ListingSigner = (listingManifestHash: Hex) => ProviderResponseSigner;
+
+/**
+ * Answers about an order carry the keys its checkout snapshot named: those of
+ * the provider wallet recorded with its listing version. The current wallet
+ * signs with the configured authority and terminal keys; an older version's
+ * wallet signs both roles with its retained key. A version with no recorded
+ * or retained key throws, which callers answer as unavailable, never with a
+ * key the gateway would refuse.
+ */
+export function providerListingSigner(config: ProviderStandardRailConfig): ListingSigner {
+  const current = providerResponseSigner(config);
+  const retained = new Map<Address, ProviderResponseSigner>();
+  for (const [address, key] of config.retainedSigningKeys) {
+    const account = privateKeyToAccount(key);
+    const sign = (digest: Hex) => account.signMessage({ message: { raw: digest } });
+    retained.set(address, { authority: sign, terminal: sign });
+  }
+  return (listingManifestHash) => {
+    const wallet = config.listingWallets.get(listingManifestHash);
+    if (wallet === config.terminalAttestationKey) return current;
+    const signer = wallet ? retained.get(wallet) : undefined;
+    if (!signer) throw new Error("Listing version's signing key is not available");
+    return signer;
+  };
+}
+
+/** The listing version a stored claim was admitted under. */
+export const listingOf = (row: Pick<ProviderTransaction, "listing_manifest_hash">): Hex =>
+  `0x${row.listing_manifest_hash.toString("hex")}` as Hex;
 
 /** Legacy synchronous `executing` is the gateway's `working`; no new wire state exists. */
 export function publicDispatchState(state: ProviderTransaction["state"]): PublicDispatchState {

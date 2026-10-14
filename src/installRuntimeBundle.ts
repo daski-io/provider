@@ -6,6 +6,7 @@ import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import {
+  loadRuntimeListingVersions,
   promoteRuntimeListingVersions,
   type RuntimeListingHead,
   type RuntimeListingVersionInput,
@@ -27,7 +28,14 @@ import {
 import {
   loadStandardRailGlobalPolicy,
   materializeOutcome,
+  type StandardRailGlobalPolicy,
 } from "./core/standardRail/catalogOutcomes.js";
+import { parseRetainedSigningKeys } from "./core/standardRail/retainedConfig.js";
+import {
+  assertObligationsServiceable,
+  loadListingObligations,
+} from "./core/standardRail/retainedObligations.js";
+import { buildServicingCatalog } from "./core/standardRail/servicingCatalog.js";
 import type { SignedEnvelope } from "./core/standardRail/types.js";
 import { redactSensitiveText } from "./core/security/redaction.js";
 import { configuredServices } from "./providerServices.js";
@@ -103,9 +111,17 @@ async function verifyEnvelope(
   }
 }
 
+/** What the candidate build needs to judge the catalog it would take over. */
+interface CandidateServicing {
+  gatewayAudience: string;
+  globalPolicy: StandardRailGlobalPolicy;
+  providerControlProfileHash: Hex;
+}
+
 export async function validateRuntimeBundleSet(value: unknown): Promise<{
   artifact: RuntimeBundleSetV1;
   gatewayOrigin: string;
+  candidate: CandidateServicing;
 }> {
   assertExactKeys(value, [
     "artifactType", "schemaVersion", "gatewayOrigin", "serviceId", "versions",
@@ -349,7 +365,42 @@ export async function validateRuntimeBundleSet(value: unknown): Promise<{
   if (covered.size !== expectedPaid.size || [...expectedPaid].some((key) => !covered.has(key))) {
     throw new Error("runtime bundle set must cover the exact installed paid-skill set");
   }
-  return { artifact: { ...artifact, serviceId }, gatewayOrigin };
+  return {
+    artifact: { ...artifact, serviceId },
+    gatewayOrigin,
+    candidate: { gatewayAudience: audience, globalPolicy, providerControlProfileHash },
+  };
+}
+
+/**
+ * An incompatible candidate cannot take over: before promoting, this build
+ * must be able to service every obligation of every installed version
+ * (promotion only supersedes heads, it never removes a version), with the
+ * signing keys and handlers it has.
+ */
+export async function assertCandidateServicesObligations(
+  gatewayOrigin: string,
+  candidate: CandidateServicing,
+): Promise<void> {
+  const catalog = buildServicingCatalog({
+    versions: await loadRuntimeListingVersions(gatewayOrigin, migrationPool),
+    globalPolicy: candidate.globalPolicy,
+    chainId: config.CHAIN_ID,
+    providerControlProfileHash: candidate.providerControlProfileHash,
+    installedPaidSkills: new Set(configuredServices(config.CHAIN_ID).flatMap((service) =>
+      service.skills
+        .filter((skill) => BigInt(skill.fixedPriceAtomic) > 0n)
+        .map((skill) => `${service.manifest.slug}:${skill.id}`))),
+    canonicalToken: getAddress(config.USDC_ADDRESS),
+    strictHeads: false,
+  });
+  const current = privateKeyToAccount(config.PROVIDER_WALLET_PRIVATE_KEY as Hex).address;
+  const retained = parseRetainedSigningKeys(process.env, config.PROVIDER_WALLET_PRIVATE_KEY as Hex);
+  assertObligationsServiceable({
+    catalog,
+    obligations: await loadListingObligations(migrationPool, candidate.gatewayAudience, catalog),
+    signingWallets: new Set([current, ...retained.keys()]),
+  });
 }
 
 async function main(): Promise<void> {
@@ -360,8 +411,9 @@ async function main(): Promise<void> {
     throw new Error("runtime bundle file is too large");
   }
   assertNoDuplicateJsonKeys(source);
-  const { artifact, gatewayOrigin } = await validateRuntimeBundleSet(JSON.parse(source));
+  const { artifact, gatewayOrigin, candidate } = await validateRuntimeBundleSet(JSON.parse(source));
   await prepareProviderDatabase();
+  await assertCandidateServicesObligations(gatewayOrigin, candidate);
   // The runtime principal only reads the catalog; promotion writes it as the
   // schema-owning migration principal.
   await promoteRuntimeListingVersions(

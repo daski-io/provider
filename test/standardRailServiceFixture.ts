@@ -1,4 +1,4 @@
-import type { Hex } from "viem";
+import { getAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { ServiceModule, ServiceResult } from "../src/core/serviceRegistry/types.js";
 import type { ProviderStandardRailConfig } from "../src/core/standardRail/config.js";
@@ -13,8 +13,15 @@ export function railOutcome(overrides: Partial<ProviderOutcomeConfig> = {}): Pro
 
 export function railConfig(
   outcomes: ProviderOutcomeConfig[] = [railOutcome()],
+  retained: {
+    /** Superseded versions still serviced for orders paid against them. */
+    versions?: ProviderOutcomeConfig[];
+    keys?: Hex[];
+    audiences?: string[];
+  } = {},
 ): ProviderStandardRailConfig {
   const authority = privateKeyToAccount(providerKey).address;
+  const servicing = [...outcomes, ...(retained.versions ?? [])];
   return {
     environment: "testnet",
     chainId: 84532,
@@ -30,6 +37,13 @@ export function railConfig(
     terminalAttestationKey: authority,
     evidenceRpcUrls: ["https://rpc.example"],
     outcomes: new Map(outcomes.map((outcome) => [outcome.outcomeId, outcome])),
+    servicing: new Map(servicing.map((outcome) => [outcome.listingManifestHash, outcome])),
+    unserviceable: new Map(),
+    listingWallets: new Map(servicing.map((outcome) => [
+      outcome.listingManifestHash, getAddress(outcome.providerTerminalAttestationKey),
+    ])),
+    retainedSigningKeys: new Map((retained.keys ?? []).map((key) => [privateKeyToAccount(key).address, key])),
+    servicingAudiences: new Set(["https://provider.example", ...(retained.audiences ?? [])]),
     globalPolicy: {} as never,
     finalityConfirmations: 12,
     sanctionsOracleAddress: "0x5555555555555555555555555555555555555555",

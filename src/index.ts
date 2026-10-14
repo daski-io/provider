@@ -19,6 +19,7 @@ import {
 import { deriveProviderLaunchPolicy } from "./core/standardRail/launchPolicy.js";
 import { countLegacyExecutions } from "./core/standardRail/legacyCutover.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
+import { verifyRetainedObligations } from "./core/standardRail/retainedObligations.js";
 import { startSyncLeaseSweeper } from "./core/standardRail/syncLease.js";
 import { configuredServices } from "./providerServices.js";
 
@@ -43,6 +44,10 @@ async function main(): Promise<void> {
     { warn: (message) => logWarn(message) },
   );
   validateComposition(standard);
+  // An incompatible build cannot take over: every claim's listing version
+  // needs its signing key, and every version whose quotes may still be
+  // dispatched needs its admitted definition and handler.
+  await verifyRetainedObligations(pool, standard);
   void logListingCommitmentDrift({
     gatewayOrigin: standard.gatewayOrigin,
     baseUrl: config.BASE_URL,

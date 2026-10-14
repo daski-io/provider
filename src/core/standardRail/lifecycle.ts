@@ -5,9 +5,11 @@ import type { ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import {
+  listingOf,
   operationsObservation,
-  providerResponseSigner,
+  providerListingSigner,
   publicDispatchState,
+  type ListingSigner,
   type OperationsObservation,
   type ProviderResponseSigner,
   type PublicDispatchState,
@@ -53,6 +55,7 @@ export interface LifecycleAnswer {
 }
 
 export interface LifecycleDependencies {
+  /** One signer for every listing version; tests replace the configured keys. */
   signer?: ProviderResponseSigner;
   payerSignatures?: Partial<PayerSignatureOptions>;
 }
@@ -65,7 +68,7 @@ export interface LifecycleDependencies {
  * afresh; a read never calls the product, enqueues work or writes.
  */
 export class StandardLifecycleService {
-  private readonly signer: ProviderResponseSigner;
+  private readonly signers: ListingSigner;
   private readonly payerSignatures: PayerSignatureOptions;
 
   constructor(
@@ -73,7 +76,8 @@ export class StandardLifecycleService {
     private readonly chainId: number,
     dependencies: LifecycleDependencies = {},
   ) {
-    this.signer = dependencies.signer ?? providerResponseSigner(config);
+    const injected = dependencies.signer;
+    this.signers = injected ? () => injected : providerListingSigner(config);
     this.payerSignatures = {
       accountTypes: parsePayerAccountTypes(coreConfig.PAYER_ACCOUNT_TYPES),
       verifyTimeoutMs: coreConfig.PAYER_SIGNATURE_VERIFY_TIMEOUT_MS,
@@ -125,6 +129,8 @@ export class StandardLifecycleService {
   private async answer(task: ProviderTransaction, artifact: boolean): Promise<LifecycleAnswer> {
     if (artifact && task.state !== "completed") throw new LifecycleRefusal("artifact_unavailable");
     try {
+      // Signed with the keys the order's own listing version names.
+      const signer = this.signers(listingOf(task));
       const state = publicDispatchState(task.state);
       const body: Omit<LifecycleAnswer, "signature"> = {
         orderId: task.order_id,
@@ -142,9 +148,9 @@ export class StandardLifecycleService {
           resultHash: identity.resultHash,
           completedAt: identity.completedAt,
         };
-        body.terminalAttestation = { payload, signature: await this.signer.terminal(canonicalHash(payload)) };
+        body.terminalAttestation = { payload, signature: await signer.terminal(canonicalHash(payload)) };
       }
-      return { ...body, signature: await this.signer.authority(canonicalHash(body)) };
+      return { ...body, signature: await signer.authority(canonicalHash(body)) };
     } catch (error) {
       if (error instanceof TerminalIntegrityError) {
         logError("Stored terminal result does not prove its frozen identity", {

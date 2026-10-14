@@ -54,8 +54,13 @@ export async function quoteOrder(args: {
   payer?: Hex;
   quotePayer?: Hex | null;
   challengeTtlSeconds?: number;
+  /** The provider key the gateway's listing names when the quote is priced. */
+  providerAuthorityKey?: Hex;
 }): Promise<GatewayOrder> {
-  const listing = gatewayListing(args.outcome);
+  const listing = {
+    ...gatewayListing(args.outcome),
+    ...(args.providerAuthorityKey ? { providerAuthorityKey: args.providerAuthorityKey } : {}),
+  };
   const request = args.request ?? { message: "hello" };
   const payer = getAddress(args.payer ?? `0x${randomBytes(20).toString("hex")}` as Hex);
   const quotePayer = args.quotePayer === undefined ? payer.toLowerCase() as Hex : args.quotePayer;

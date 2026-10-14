@@ -87,6 +87,7 @@ unaffected. Never set the marker at role or database level
 | `BASE_RPC_URL` | Primary credential-free HTTPS Base RPC. Put credentials in a provider-side proxy, not the URL. |
 | `BASE_RPC_FALLBACK_URLS` | Optional comma-separated credential-free HTTPS RPCs. |
 | `PROVIDER_WALLET_PRIVATE_KEY` | Non-zero 32-byte `0x` private key. Secret; use a dedicated environment wallet. |
+| `PROVIDER_RETAINED_WALLET_PRIVATE_KEYS` | Optional comma-separated previous wallet keys, kept after a rotation for orders admitted under older listing versions. Secret; never the current key, never repeated. |
 | `PROVIDER_AGENT_ID` | Unsigned decimal ERC-8004 agent id coordinated during onboarding. |
 | `IDENTITY_REGISTRY_ADDRESS` | Reviewed registry address; canonical address required on Mainnet. |
 | `USDC_ADDRESS` | Reviewed Circle USDC address; canonical address required on Mainnet. |
@@ -120,6 +121,7 @@ unavailable there. Read-capability reads never need the RPC.
 | `STANDARD_RAIL_GATEWAY_ORIGIN` | Credential-free HTTPS origin that scopes the installed runtime catalog. Normally identical to `GATEWAY_BASE_URL`. |
 | `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
 | `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |
+| `STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES` | Optional comma-separated previous provider audiences that dispatch, status and lifecycle calls for older orders may still name. Quotes and intake use only the current audience. |
 | `STANDARD_RAIL_GLOBAL_POLICY_JSON` | Daski-issued JSON containing the signed chain-evidence, active-rail, and capability envelopes plus reviewed global code hashes. Preserve exactly. |
 | `STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH` | Reviewed bytes32 provider endpoint/control profile binding. |
 | `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Positive evidence-finality requirement; default 12, coordinated with Daski. |
@@ -135,6 +137,31 @@ bundle pins one service's exact skill contracts, fixed prices, capacity and
 deadlines, token/splitter provenance, commission/payee, provider intent, and
 runtime commitments. Ask Daski for a new consistent set after any reviewed
 contract change.
+
+### Retained listing versions, keys and audiences
+
+Installing a new bundle supersedes a listing's head but never removes the
+older version: an order paid against it, even one first dispatched days
+later, is admitted and read with that version's admitted definition (request
+and result schemas, price, deadlines and fulfillment window, handler). The
+gateway verifies every answer about an order with the keys and sends it to the
+audience its checkout snapshot named, so:
+
+- after rotating the provider wallet, list each previous key in
+  `PROVIDER_RETAINED_WALLET_PRIVATE_KEYS` until no order admitted under its
+  versions remains; answers about those orders are signed with it, never with
+  a key the snapshot does not name;
+- after moving the public origin, keep the old origin routed to this provider
+  and list the old audience in `STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES`
+  (the standard-rail paths themselves never change); and
+- keep every retained version's service and skill installed while its quotes
+  may still be dispatched: up to the quote's window plus the version's
+  fulfillment window plus 30 days.
+
+Boot and the importer verify this for every obligation (claims of any state,
+and quotes that may still be dispatched) and refuse with
+`retained listing obligations are not serviceable by this build` otherwise,
+so an incompatible build cannot take over. Paused sales never block servicing.
 
 The bundle is installed into the append-only PostgreSQL catalog, not placed in
 an environment variable:

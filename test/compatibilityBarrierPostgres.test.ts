@@ -172,6 +172,18 @@ describePostgres("legacy-process compatibility barrier against PostgreSQL", () =
     }
   });
 
+  // C-T07: rollback is a compatible image on the forward schema. A later
+  // migration that keeps the epoch does not stop this build; a raised epoch does.
+  it("boots on a schema a compatible newer build extended", async () => {
+    const owner = await connect(migrator, true);
+    await owner.query("INSERT INTO _migrations (name, checksum) VALUES ('099_compatible_extension.sql', 'x')");
+    try {
+      await expect(modules.startup.prepareProviderDatabase()).resolves.toBeUndefined();
+    } finally {
+      await owner.query("DELETE FROM _migrations WHERE name='099_compatible_extension.sql'");
+    }
+  });
+
   it("refuses a database whose barrier was weakened", async () => {
     const owner = await connect(migrator, true);
     const verify = () => modules.epoch.verifyCompatibilityBarrier(

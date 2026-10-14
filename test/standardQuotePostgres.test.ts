@@ -145,10 +145,11 @@ describePostgres("provider quotes in PostgreSQL", () => {
          gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour',decode(repeat('f4',32),'hex'))`,
       [payer],
     );
+    const fixtures = ["f1", "f2", "f3", "f4"].map((byte) => Buffer.from(byte.repeat(32), "hex"));
     const remaining = async () => (await pool.query<{ hash: string }>(
-      "SELECT encode(quote_hash,'hex') AS hash FROM provider_quotes WHERE quote_hash <> $1 ORDER BY 1",
-      [Buffer.from(accepted.providerQuoteHash.slice(2), "hex")],
-    )).rows.map((row) => row.hash.slice(0, 2)).filter((prefix) => /^f[1-4]$/.test(prefix));
+      "SELECT encode(quote_hash,'hex') AS hash FROM provider_quotes WHERE quote_hash = ANY($1) ORDER BY 1",
+      [fixtures],
+    )).rows.map((row) => row.hash.slice(0, 2));
     // A window longer than the quote's age keeps even a settled quote.
     await expect(pruneSettledQuotes(pool, 500 * 86_400)).resolves.toBe(0);
     await expect(pruneSettledQuotes(pool, 900)).resolves.toBe(1);

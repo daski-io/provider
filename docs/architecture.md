@@ -172,8 +172,24 @@ The migrations create only:
 - `rate_limit_buckets`;
 - `provider_runtime_listing_versions`;
 - `provider_quotes` (signed readiness quotes, retained for dispatch binding);
+- `provider_schema_epoch` (the compatibility epoch the schema requires);
+- `provider_async_admission` and `provider_runtime_instances` (the
+  async-admission switch and the heartbeat registry of running processes);
   and
-- `provider_schema_epoch` (the compatibility epoch the schema requires).
+- `provider_external_jobs` (one row per external-job claim: its phase,
+  schedule, lease and encrypted recovery material).
+
+An external-job claim lives in `provider_transactions` under its own pending
+state, `external_job`; `executing` is only ever a synchronous execution.
+Migration 009 makes PostgreSQL hold the pair together: the claim commits only
+with its job, the two finish in one transaction (the claim's terminal
+identity frozen exactly as for synchronous claims), a pending claim never
+changes mode, the job's admission facts, start horizon, linked journal entry
+and job reference never change once recorded, every job write raises its
+revision, phases move only along the reviewed transitions, and a queued job
+can fail only if no start was ever attempted. Input, job reference and any
+invalid result candidate are stored only as authenticated envelopes
+(`docs/configuration.md`) and are cleared when the job finishes.
 
 `_migrations` is created by the migration runner. Migrations are append-only,
 checksummed, serialized with a PostgreSQL advisory lock, and pinned by the

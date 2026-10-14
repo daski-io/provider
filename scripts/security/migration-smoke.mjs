@@ -22,6 +22,7 @@ const quoted = `"${schema}"`;
 const expected = [
   "_migrations",
   "provider_async_admission",
+  "provider_external_jobs",
   "provider_quotes",
   "provider_runtime_instances",
   "provider_runtime_listing_versions",
@@ -102,7 +103,7 @@ try {
        '0x1111111111111111111111111111111111111111','smoke','echo',decode(repeat('44',32),'hex'),
        'completed','{"status":"completed"}'::jsonb,decode(repeat('66',32),'hex'),now(),
        now() + interval '5 minutes')`).then(() => "admitted", (error) => error.message);
-  if (bornTerminal !== "a claim is admitted as executing") {
+  if (bornTerminal !== "a claim is admitted as executing or as an external job") {
     throw new Error("a claim was admitted already terminal");
   }
   for (const [id, validBefore] of [["task-late", "now() - interval '1 second'"], ["task-open", "NULL"]]) {
@@ -186,6 +187,63 @@ try {
   }
   await client.query(deleteQuote("e3"));
 
+  // External jobs: a claim in its own pending state commits only with its
+  // job; phases follow the reviewed transitions; a started job never fails
+  // as never started; and the claim and its job finish together, frozen.
+  const jobClaim = (id) => claim(id, "now() + interval '5 minutes'", "NULL,NULL,NULL")
+    .replace("'executing'", "'external_job'");
+  const job = (id, key) => `INSERT INTO provider_external_jobs
+      (task_id,adapter_version,idempotency_key,input_ciphertext,input_key_id,fulfillment_deadline)
+    VALUES ('${id}','v1','${key}','daski:v1:input','primary',now() + interval '12 hours')`;
+  await client.query("BEGIN");
+  await client.query(jobClaim("task-jobless"));
+  if (!await rejects("COMMIT")) throw new Error("an external-job claim committed without its job");
+  await client.query("BEGIN");
+  await client.query(jobClaim("task-job"));
+  await client.query(job("task-job", "00000000-0000-8000-8000-000000000001"));
+  await client.query("COMMIT");
+  if (!await rejects(job("task-smoke", "00000000-0000-8000-8000-000000000002"))) {
+    throw new Error("an external job was attached to a synchronous claim");
+  }
+  if (!await rejects(`UPDATE provider_transactions SET state='executing' WHERE id='task-job'`)) {
+    throw new Error("an external-job claim changed its execution mode");
+  }
+  if (!await rejects(`UPDATE provider_external_jobs SET phase='polling',revision=1,
+      job_reference_ciphertext='daski:v1:ref',job_reference_key_id='primary' WHERE task_id='task-job'`)) {
+    throw new Error("a queued external job skipped its start");
+  }
+  await client.query(`UPDATE provider_external_jobs SET phase='starting',revision=1,
+      first_start_attempt_at=now(),start_attempts=1,lease_owner=gen_random_uuid(),
+      lease_token=gen_random_uuid(),lease_expires_at=now() + interval '90 seconds' WHERE task_id='task-job'`);
+  for (const change of [
+    "first_start_attempt_at=now() + interval '1 second'",
+    "idempotency_key='00000000-0000-8000-8000-000000000009'",
+    "input_ciphertext='daski:v1:other'",
+    "fulfillment_deadline=now() + interval '13 hours'",
+  ]) {
+    if (!await rejects(`UPDATE provider_external_jobs SET ${change},revision=revision+1 WHERE task_id='task-job'`)) {
+      throw new Error(`an external job's admission or start horizon changed: ${change}`);
+    }
+  }
+  if (!await rejects("UPDATE provider_external_jobs SET last_error_code='timeout' WHERE task_id='task-job'")) {
+    throw new Error("an external job changed without raising its revision");
+  }
+  const finish = (state) => `UPDATE provider_transactions SET state='${state}',
+      result='{"status":"failed","errorCode":"provider_job_not_started"}'::jsonb,
+      result_hash=decode(repeat('ab',32),'hex'),completed_at=now() WHERE id='task-job'`;
+  await client.query("BEGIN");
+  await client.query(finish("failed"));
+  if (!await rejects("COMMIT")) throw new Error("an external-job claim finished without its job");
+  await client.query("BEGIN");
+  await client.query(finish("failed"));
+  await client.query(`UPDATE provider_external_jobs SET phase='failed',revision=revision+1,
+      result_hash=decode(repeat('ab',32),'hex'),finished_at=now(),input_ciphertext=NULL,input_key_id=NULL,
+      lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL WHERE task_id='task-job'`);
+  await client.query("COMMIT");
+  if (!await rejects("UPDATE provider_external_jobs SET revision=revision+1 WHERE task_id='task-job'")) {
+    throw new Error("a finished external job changed");
+  }
+
   // Legacy-process barrier: an unmarked session cannot write any provider
   // table, even with a statement matching no rows (the pre-R1 startup sweep).
   for (const sql of [
@@ -205,6 +263,7 @@ try {
     "INSERT INTO _migrations (name, checksum) VALUES ('legacy.sql', 'x')",
     "UPDATE provider_async_admission SET enabled=false",
     "UPDATE provider_runtime_instances SET heartbeat_at=now() WHERE false",
+    "UPDATE provider_external_jobs SET revision=revision+1 WHERE false",
     "TRUNCATE rate_limit_buckets",
   ]) {
     if (!await barred(sql)) throw new Error(`an unmarked session wrote a provider table: ${sql}`);

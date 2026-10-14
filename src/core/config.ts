@@ -4,6 +4,7 @@ import {
   BASE_MAINNET_CHAIN_ID,
   BASE_MAINNET_EXTERNAL_CONTRACTS,
 } from "./chain/reviewedDeployments.js";
+import { parseFieldEncryptionKeys } from "./security/fieldEncryption.js";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
@@ -132,6 +133,17 @@ const envSchema = z.object({
   // and at most one RPC failover.
   PAYER_SIGNATURE_VERIFY_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
 
+  // External-job state encryption (src/core/security/fieldEncryption.ts):
+  // required to admit external jobs and while stored jobs name a key;
+  // synchronous-only installations need none. Secret.
+  PROVIDER_DATA_ENCRYPTION_KEY: z.string().trim()
+    .regex(/^0x[0-9a-fA-F]{64}$/, "must be 0x followed by exactly 64 hexadecimal characters")
+    .refine((value) => !/^0x0+$/.test(value), "must not be the zero key")
+    .optional(),
+  PROVIDER_DATA_ENCRYPTION_KEY_ID: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/).default("primary"),
+  // Comma-separated previous read-only keys: key-id=0x<64 hex>. Secret.
+  PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS: z.string().default(""),
+
   RATE_LIMIT_HASH_KEY: z.string().min(32).refine(
     (value) => new Set(value).size >= 8 && !/replace/i.test(value),
     "must be a high-entropy secret, not a placeholder",
@@ -181,6 +193,22 @@ const envSchema = z.object({
   }
   if (production && (!env.MIGRATION_DATABASE_URL || env.MIGRATION_DATABASE_URL === env.DATABASE_URL)) {
     reject("MIGRATION_DATABASE_URL", "production requires a distinct migration database principal");
+  }
+  try {
+    parseFieldEncryptionKeys({
+      activeKey: env.PROVIDER_DATA_ENCRYPTION_KEY,
+      activeKeyId: env.PROVIDER_DATA_ENCRYPTION_KEY_ID,
+      previousKeys: env.PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS,
+      forbiddenMaterials: [env.PROVIDER_WALLET_PRIVATE_KEY],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid key ring";
+    reject(
+      message.startsWith("PROVIDER_DATA_ENCRYPTION_KEY ")
+        ? "PROVIDER_DATA_ENCRYPTION_KEY"
+        : "PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS",
+      message,
+    );
   }
   if (env.HTTP_MAX_CONCURRENCY_PER_IP > env.HTTP_MAX_CONCURRENCY) {
     reject("HTTP_MAX_CONCURRENCY_PER_IP", "cannot exceed HTTP_MAX_CONCURRENCY");

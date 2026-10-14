@@ -139,6 +139,31 @@ deadlines, token/splitter provenance, commission/payee, provider intent, and
 runtime commitments. Ask Daski for a new consistent set after any reviewed
 contract change.
 
+### External-job state encryption
+
+External jobs persist their buyer input, the upstream job reference and, for a
+result that failed validation, a bounded candidate. Each is stored only as an
+authenticated envelope (`src/core/security/fieldEncryption.ts`), the same
+format provider-full uses for protected data:
+`daski:v1:<base64url JSON {v, alg: "A256GCM", kid, purpose, iv, ciphertext, tag}>`,
+AES-256-GCM under an HKDF-SHA256 per-purpose key, with the owning record
+(table, task id, field, service) bound as associated data.
+
+| Variable | Purpose and rule |
+| --- | --- |
+| `PROVIDER_DATA_ENCRYPTION_KEY` | Active 32-byte `0x` master key. Secret. Required to admit external jobs and while stored jobs name it; synchronous-only installations need none. Never a provider wallet key. |
+| `PROVIDER_DATA_ENCRYPTION_KEY_ID` | Id written into every new envelope, default `primary`; 1 to 64 of `A-Z a-z 0-9 . _ -`. |
+| `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` | Comma-separated read-only `id=0x<64 hex>` keys for values written before a rotation. Secret. Ids are unique; no material is reused under another id. |
+
+Rotation contract: new values always use the active key and name its id; a
+value is read only with the key its own id names. To rotate, configure a new
+active key under a new id and move the old one to
+`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`; keep it there while any unfinished
+job names it (finished jobs keep no encrypted state). Changing a key without
+changing its id makes old values fail authentication instead of decrypting
+wrongly. Generate a key with `openssl rand -hex 32` and prefix `0x`. Keep keys
+out of Git, images, logs, manifests and support material.
+
 ### Async admission switch
 
 External-job admission is governed by a database switch that starts off.

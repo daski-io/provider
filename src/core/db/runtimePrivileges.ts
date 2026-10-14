@@ -22,6 +22,8 @@ export const RUNTIME_TABLE_PRIVILEGES: Readonly<Record<string, readonly TablePri
   // Only the operator's activation command changes the switch.
   provider_async_admission: ["SELECT"],
   provider_runtime_instances: ["SELECT", "INSERT", "UPDATE"],
+  // The worker claims, renews and transitions jobs; nothing deletes them.
+  provider_external_jobs: ["SELECT", "INSERT", "UPDATE"],
 };
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;

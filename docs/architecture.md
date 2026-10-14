@@ -189,6 +189,20 @@ job. Core admits the funded order (above), then the worker in
   are fixed once and no retry extends them. A product outage defers a queued
   job (`product_unavailable`) instead of starting or failing it. A job whose
   lease expired while `starting` was interrupted and always reconciles.
+- **Start journal.** Core owns the start's supplier-operation journal entry
+  (`external-job.start`, keyed by the service and the job's idempotency
+  key; the adapter never journals the same start). It records the intent in
+  the transaction that records it on the job, becomes `ambiguous` with every
+  uncertain or interrupted start, and is reopened under the same identity for
+  a proven restart. The handoff is one fenced transaction that persists the
+  start's outcome on the job row (the encrypted job reference, a frozen
+  result, or an invalid-result candidate) and confirms the entry by naming
+  that row (`external_job_task_id`), its `result` left empty: a failure
+  between the two writes rolls both back, and the start is then reconciled
+  through its original key. A replay follows the reference and decrypts the
+  job row; the generic `runSupplierOperation` refuses to replay such an
+  entry, so a redacted placeholder can never become a job handle. A
+  confirmed entry means the start executed, so no restart follows it.
 - **Recovery.** `recoverStart` may return the original job or result, or a
   safe-to-start verdict, which core acts on only with the same key, never
   past the deadline, never after the start is known to have executed, and,

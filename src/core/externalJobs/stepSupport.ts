@@ -24,6 +24,7 @@ export interface StepContext {
 /** One claimed job, its adapter version and the lease held for the step. */
 export interface Step {
   ctx: StepContext;
+  /** The claim, updated with the start horizon and journal once an intent is recorded. */
   job: ClaimedJob;
   adapter: ExternalJobAdapter;
   lease: HeldJobLease;
@@ -58,6 +59,11 @@ export const call = (step: Step, method: AdapterMethod, argument: Record<string,
 
 export const input = (step: Step) => openJobField(step.ctx.keys, "input", step.job, step.job.input);
 
+/**
+ * The product accepted the start: in one fenced transaction the encrypted
+ * job reference is persisted and the start journal confirmed by naming this
+ * job row (L04 handoff); either both commit or neither does.
+ */
 export async function accepted(step: Step, from: ActiveJobPhase, job: Record<string, unknown>, hint: number | null) {
   const outcome = await write(step, from, {
     phase: "polling",
@@ -69,6 +75,7 @@ export async function accepted(step: Step, from: ActiveJobPhase, job: Record<str
     errorCode: null,
     candidate: null,
     diagnostic: null,
+    journal: "confirmed",
   });
   if (outcome === "committed") logInfo("External job accepted by the product; polling", facts(step.job));
 }
@@ -79,8 +86,10 @@ export async function accepted(step: Step, from: ActiveJobPhase, job: Record<str
  * integration error, not proof of product failure: the job stays
  * nonterminal with a bounded encrypted candidate and a stable diagnostic,
  * and only authoritative retrieval continues (an immediate terminal start
- * reconciles through its original key). Returns "malformed" when the value
- * is no ServiceResult at all, for the caller to treat as an invalid return.
+ * reconciles through its original key). A terminal answer from start or
+ * recovery is the start's known outcome, so its write also confirms the
+ * start journal. Returns "malformed" when the value is no ServiceResult at
+ * all, for the caller to treat as an invalid return.
  */
 export async function terminal(step: Step, from: ActiveJobPhase, value: unknown): Promise<"done" | "malformed"> {
   const { job } = step;
@@ -89,8 +98,9 @@ export async function terminal(step: Step, from: ActiveJobPhase, value: unknown)
     ? judgeServiceResult(value, contract)
     : { kind: "invalid" as const, diagnostic: { code: "result_contract_unavailable", keywords: [] }, candidate: value };
   if (judged.kind === "malformed") return "malformed";
+  const confirmsStart = from !== "polling";
   if (judged.kind === "frozen") {
-    const outcome = await finishJob(job, from, judged.result);
+    const outcome = await finishJob(job, from, judged.result, { confirmJournal: confirmsStart });
     if (outcome === "committed") logInfo(`External job ${judged.result.status}`, facts(job));
     return "done";
   }
@@ -104,6 +114,7 @@ export async function terminal(step: Step, from: ActiveJobPhase, value: unknown)
     delaySeconds: delay(step, "failure", job.failureCount + 1, null),
     failures: "increment",
     errorCode: "result_invalid",
+    ...(confirmsStart ? { journal: "confirmed" as const } : {}),
   });
   return "done";
 }

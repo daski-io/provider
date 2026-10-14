@@ -219,10 +219,12 @@ reconciliation function must read authoritative product state and return:
 - `null` only when it definitively did not happen and is safe to execute; or
 - `SupplierOutcomeAmbiguousError` when neither can be proven.
 
-In this minimal runtime an unresolved ambiguous result becomes a terminal
-failure; there is no background reconciliation loop. Therefore use the journal
-only when the product can resolve within the synchronous deadline. Otherwise
-use `provider-full`.
+In the synchronous mode an unresolved ambiguous result becomes a terminal
+failure; there is no background reconciliation for a synchronous call.
+Therefore use the journal there only when the product can resolve within the
+synchronous deadline. An external-job adapter never journals its own start:
+core journals it and reconciles it through `recoverStart`
+(`docs/architecture.md`).
 
 ## Output and data boundary
 

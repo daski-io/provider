@@ -57,6 +57,12 @@ export interface SupplierOperationRow {
   result: Record<string, unknown> | null;
   error_code: string | null;
   attempts: number;
+  /**
+   * Set when an external-job start confirmed by naming its job row: the
+   * outcome (an encrypted job reference or a frozen result) lives there,
+   * never in `result`.
+   */
+  external_job_task_id?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -136,6 +142,44 @@ export async function confirmSupplierOperation(
   );
   if (updated.rowCount !== 1) {
     throw new Error(`supplier operation '${id}' was not durably confirmed`);
+  }
+}
+
+/// Confirm by naming the external-job row that holds the outcome; `result`
+/// stays empty, so nothing sensitive or redacted is ever replayed from it.
+/// Run it in the transaction that writes that row.
+export async function confirmSupplierOperationWithJobReference(
+  id: string,
+  externalJobTaskId: string,
+  db: Queryable = pool,
+): Promise<void> {
+  const updated = await db.query(
+    `UPDATE supplier_operations
+        SET state = 'confirmed', result = NULL, external_job_task_id = $2,
+            error_code = NULL, updated_at = now()
+      WHERE id = $1 AND state IN ('intent','ambiguous')`,
+    [id, externalJobTaskId],
+  );
+  if (updated.rowCount !== 1) {
+    throw new Error(`supplier operation '${id}' was not durably confirmed`);
+  }
+}
+
+/// Record a new attempt under the same identity after reconciliation proved
+/// it safe: ambiguous (or a dangling intent) becomes intent again.
+export async function reopenSupplierOperationIntent(
+  id: string,
+  db: Queryable = pool,
+): Promise<void> {
+  const updated = await db.query(
+    `UPDATE supplier_operations
+        SET state = 'intent', error_code = NULL,
+            attempts = attempts + 1, updated_at = now()
+      WHERE id = $1 AND state IN ('intent','ambiguous')`,
+    [id],
+  );
+  if (updated.rowCount !== 1) {
+    throw new Error(`supplier operation '${id}' was not reopened`);
   }
 }
 
@@ -329,7 +373,14 @@ async function runSupplierOperationLocked<T extends Record<string, unknown>>(
   }
   const { op, fresh } = claimed;
 
-  if (op.state === "confirmed") return (op.result ?? {}) as T;
+  if (op.state === "confirmed") {
+    // An external-job start's outcome is its job row; the generic replay
+    // never returns a placeholder in its place.
+    if (op.external_job_task_id) {
+      throw new Error("supplier operation is an external-job start; its job row holds the outcome");
+    }
+    return (op.result ?? {}) as T;
+  }
   if (op.state === "failed" && !fresh) {
     // A definitively-failed operation is terminal under this key; the
     // caller decides whether to mint a NEW operation (fresh key) or fail.

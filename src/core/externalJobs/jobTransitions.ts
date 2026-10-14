@@ -4,6 +4,8 @@ import type { ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "../standardRail/canonical.js";
 import type { ClaimedJob } from "./jobClaims.js";
 import type { SealedField } from "./jobCodec.js";
+import { journalStartAmbiguous, journalStartConfirmed, journalStartIntent } from "./journalHandoff.js";
+import type { ReviewedIssue } from "./outcomes.js";
 import type { ActiveJobPhase } from "./phases.js";
 
 /**
@@ -77,11 +79,17 @@ export interface JobUpdate {
   candidate?: SealedField | null;
   /** A stable result diagnostic (null clears it). */
   diagnostic?: string | null;
+  /**
+   * The start journal's matching record, written in this same transaction:
+   * `confirmed` when the start's outcome is now on the row (the handoff),
+   * or the cause of a start whose outcome is unknown.
+   */
+  journal?: "confirmed" | { ambiguous: ReviewedIssue["code"] | "interrupted" };
 }
 
 /** Persist one step's outcome and release the lease until the next run. */
-export function updateJob(client: Queryable, job: ClaimedJob, update: JobUpdate): Promise<void> {
-  return client.query(
+export async function updateJob(client: Queryable, job: ClaimedJob, update: JobUpdate): Promise<void> {
+  await client.query(
     `UPDATE provider_external_jobs SET
         phase=COALESCE($2, phase),
         next_run_at=now() + make_interval(secs => $3),
@@ -106,12 +114,15 @@ export function updateJob(client: Queryable, job: ClaimedJob, update: JobUpdate)
       update.diagnostic !== undefined, update.diagnostic ?? null,
     ],
   ).then((result) => expectOne(result.rowCount));
+  if (update.journal === "confirmed") await journalStartConfirmed(client, job);
+  else if (update.journal) await journalStartAmbiguous(client, job, update.journal.ambiguous);
 }
 
-/** The persisted start horizon once a start intent is recorded. */
+/** The persisted start horizon and journal entry once a start intent is recorded. */
 export interface StartIntent {
   firstStartAttemptAt: number;
   idempotencyValidBefore: number | null;
+  journalOperationId: string;
 }
 
 /**
@@ -121,7 +132,9 @@ export interface StartIntent {
  * and no start is recorded at or after the fulfillment deadline. A restart
  * after recovery additionally needs its basis to still hold at this
  * database instant: proven absence, or a replay horizon that leaves room for
- * the bounded call plus a safety margin.
+ * the bounded call plus a safety margin. The start journal records the same
+ * intent in this transaction (begun, or reopened under the same identity; a
+ * confirmed journal, a start known to have executed, refuses).
  */
 export async function recordStartIntent(args: {
   job: ClaimedJob;
@@ -132,8 +145,9 @@ export async function recordStartIntent(args: {
   const { job } = args;
   let intent: StartIntent | null = null;
   const outcome = await fenced(job, args.from, async (client) => {
+    const journalOperationId = await journalStartIntent(client, job);
     const result = await client.query<{ first: string; horizon: string | null }>(
-      `UPDATE provider_external_jobs SET phase='starting',
+      `UPDATE provider_external_jobs SET phase='starting', journal_operation_id=$5,
           first_start_attempt_at=COALESCE(first_start_attempt_at, now()),
           idempotency_valid_before=CASE WHEN first_start_attempt_at IS NULL AND $2::int IS NOT NULL
             THEN now() + make_interval(secs => $2::int) ELSE idempotency_valid_before END,
@@ -145,26 +159,38 @@ export async function recordStartIntent(args: {
                 AND now() + make_interval(secs => $4::int) < idempotency_valid_before))
         RETURNING floor(extract(epoch FROM first_start_attempt_at))::bigint::text AS first,
                   floor(extract(epoch FROM idempotency_valid_before))::bigint::text AS horizon`,
-      [job.taskId, args.retentionSeconds, args.restart?.basis ?? null, args.restart?.replayMarginSeconds ?? 0],
+      [
+        job.taskId, args.retentionSeconds, args.restart?.basis ?? null,
+        args.restart?.replayMarginSeconds ?? 0, journalOperationId,
+      ],
     );
     expectOne(result.rowCount);
     const row = result.rows[0]!;
-    intent = { firstStartAttemptAt: Number(row.first), idempotencyValidBefore: row.horizon === null ? null : Number(row.horizon) };
+    intent = {
+      firstStartAttemptAt: Number(row.first),
+      idempotencyValidBefore: row.horizon === null ? null : Number(row.horizon),
+      journalOperationId,
+    };
   });
   if (outcome === "committed") return intent;
   if (outcome === "lost") return null;
   // COMMIT outcome unknown: only the durable row decides whether the intent
   // exists. Without a provable intent, no call is made.
-  const current = await pool.query<{ first: string | null; horizon: string | null }>(
+  const current = await pool.query<{ first: string | null; horizon: string | null; journal: string | null }>(
     `SELECT floor(extract(epoch FROM first_start_attempt_at))::bigint::text AS first,
-            floor(extract(epoch FROM idempotency_valid_before))::bigint::text AS horizon
+            floor(extract(epoch FROM idempotency_valid_before))::bigint::text AS horizon,
+            journal_operation_id AS journal
        FROM provider_external_jobs
       WHERE task_id=$1 AND phase='starting' AND lease_token=$2 AND lease_expires_at > now()`,
     [job.taskId, job.leaseToken],
   ).catch(() => null);
   const row = current?.rows[0];
-  if (!row?.first) return null;
-  return { firstStartAttemptAt: Number(row.first), idempotencyValidBefore: row.horizon === null ? null : Number(row.horizon) };
+  if (!row?.first || !row.journal) return null;
+  return {
+    firstStartAttemptAt: Number(row.first),
+    idempotencyValidBefore: row.horizon === null ? null : Number(row.horizon),
+    journalOperationId: row.journal,
+  };
 }
 
 /**
@@ -177,7 +203,7 @@ export function finishJob(
   job: ClaimedJob,
   expected: ActiveJobPhase,
   result: ServiceResult,
-  options: { neverStarted?: boolean } = {},
+  options: { neverStarted?: boolean; confirmJournal?: boolean } = {},
 ): Promise<FencedOutcome> {
   const hash = Buffer.from(canonicalHash(result).slice(2), "hex");
   return fenced(job, expected, async (client) => {
@@ -207,5 +233,7 @@ export function finishJob(
       [job.taskId, result.status, hash],
     );
     expectOne(finished.rowCount);
+    // A terminal answer from start or recovery is the start's outcome too.
+    if (options.confirmJournal) await journalStartConfirmed(client, job);
   });
 }

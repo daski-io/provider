@@ -176,7 +176,7 @@ for (const path of [
 // stay one database read.
 const REVIEWED_EXTERNAL_JOB_MODULES = [
   "admission.ts", "calls.ts", "idempotency.ts", "jobClaims.ts", "jobCodec.ts", "jobStep.ts",
-  "jobTransitions.ts", "keyRing.ts", "outcomes.ts", "phases.ts", "runtime.ts", "sales.ts",
+  "jobTransitions.ts", "journalHandoff.ts", "keyRing.ts", "outcomes.ts", "phases.ts", "runtime.ts", "sales.ts",
   "scheduling.ts", "settings.ts", "stepSupport.ts", "worker.ts",
 ].map((name) => `src/core/externalJobs/${name}`);
 const externalJobModules = files(join(root, "src/core/externalJobs")).map(projectPath).sort();

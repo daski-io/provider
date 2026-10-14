@@ -46,6 +46,26 @@ vi.mock("../src/core/db/pool.js", () => ({
         const row = h.rows.get(key);
         return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
       }
+      if (sql.includes("external_job_task_id = $2")) {
+        let changed = 0;
+        for (const row of h.rows.values()) {
+          if (row.id === params[0] && ["intent", "ambiguous"].includes(row.state as string)) {
+            Object.assign(row, { state: "confirmed", result: null, external_job_task_id: params[1] });
+            changed += 1;
+          }
+        }
+        return { rows: [], rowCount: changed };
+      }
+      if (sql.includes("SET state = 'intent'")) {
+        let changed = 0;
+        for (const row of h.rows.values()) {
+          if (row.id === params[0] && ["intent", "ambiguous"].includes(row.state as string)) {
+            Object.assign(row, { state: "intent", error_code: null, attempts: (row.attempts as number) + 1 });
+            changed += 1;
+          }
+        }
+        return { rows: [], rowCount: changed };
+      }
       if (sql.includes("SET state = 'confirmed'")) {
         if (h.failConfirm) throw new Error("journal confirmation unavailable");
         let changed = 0;
@@ -137,9 +157,11 @@ vi.mock("../src/core/db/pool.js", () => ({
 import {
   beginSupplierOperation,
   confirmSupplierOperation,
+  confirmSupplierOperationWithJobReference,
   failSupplierOperation,
   getSupplierOperation,
   markSupplierOperationAmbiguous,
+  reopenSupplierOperationIntent,
   runSupplierOperation,
   SupplierOutcomeAmbiguousError,
   fingerprintRequest,
@@ -541,6 +563,29 @@ describe("runSupplierOperation", () => {
       SupplierOutcomeAmbiguousError,
     );
     expect([...h.rows.values()][0]?.error_code).toBe("execute.validation");
+  });
+
+  it("confirms an external-job start by its job row and never replays it generically", async () => {
+    const { op } = await beginSupplierOperation({
+      serviceId: "svc-1", opKey: "job-key", kind: "external-job.start", requestFingerprint: "fp",
+    });
+    await markSupplierOperationAmbiguous(op.id, "execute.transport");
+    await reopenSupplierOperationIntent(op.id);
+    expect(h.rows.get("svc-1:job-key")).toMatchObject({ state: "intent", attempts: 2, error_code: null });
+    await confirmSupplierOperationWithJobReference(op.id, "task-9");
+    expect(h.rows.get("svc-1:job-key")).toMatchObject({
+      state: "confirmed", result: null, external_job_task_id: "task-9",
+    });
+    // A confirmed entry is neither reopened nor confirmed again.
+    await expect(reopenSupplierOperationIntent(op.id)).rejects.toThrow(/not reopened/);
+    await expect(confirmSupplierOperationWithJobReference(op.id, "task-9")).rejects.toThrow(/not durably confirmed/);
+    // The generic wrapper never hands back a placeholder for the job's handle.
+    const execute = vi.fn(async () => ({ jobId: "again" }));
+    h.rows.get("svc-1:job-key")!.request_fingerprint = fingerprintRequest({ taskId: "task-9" });
+    await expect(runSupplierOperation(opArgs({
+      opKey: "job-key", kind: "external-job.start", request: { taskId: "task-9" }, execute,
+    }))).rejects.toThrow(/job row holds the outcome/);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("refuses to replay an operation already failed under the same key", async () => {

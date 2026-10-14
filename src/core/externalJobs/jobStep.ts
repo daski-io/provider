@@ -1,3 +1,4 @@
+import { pool } from "../db/pool.js";
 import { logError, logWarn } from "../logger.js";
 import { getExternalJobAdapter, getService } from "../serviceRegistry/registry.js";
 import type { ServiceModule } from "../serviceRegistry/types.js";
@@ -5,6 +6,7 @@ import { EXTERNAL_JOB_NOT_STARTED, failureEvidence } from "../standardRail/servi
 import { holdJobLease, type ClaimedJob } from "./jobClaims.js";
 import { openJobField } from "./jobCodec.js";
 import { finishJob, recordStartIntent, type StartIntent } from "./jobTransitions.js";
+import { replayStartJournal } from "./journalHandoff.js";
 import { pollVerdict, recoveryVerdict, startVerdict, type CallResult, type ReviewedIssue } from "./outcomes.js";
 import {
   accepted,
@@ -100,6 +102,7 @@ async function queued(step: Step, service: ServiceModule): Promise<void> {
 
 /** Call start under a recorded intent; any non-definitive answer reconciles. */
 async function start(step: Step, intent: StartIntent): Promise<void> {
+  step.job = { ...step.job, ...intent };
   const result = await call(step, "start", input(step), intent);
   if (result.kind === "lease_lost") return;
   const verdict = startVerdict(result);
@@ -118,6 +121,7 @@ async function ambiguous(step: Step, issue: ReviewedIssue): Promise<void> {
     delaySeconds: delay(step, "failure", step.job.failureCount + 1, issue.retryAfterSeconds),
     failures: "increment",
     errorCode: `start.${issue.code}`,
+    journal: { ambiguous: issue.code },
   });
   if (outcome === "committed") logWarn("External job start is ambiguous; reconciling", { ...facts(step.job), issue: issue.code });
 }
@@ -125,6 +129,7 @@ async function ambiguous(step: Step, issue: ReviewedIssue): Promise<void> {
 async function interrupted(step: Step): Promise<void> {
   const outcome = await write(step, "starting", {
     phase: "reconciling", delaySeconds: 0, failures: "keep", errorCode: "start.interrupted",
+    journal: { ambiguous: "interrupted" },
   });
   if (outcome === "committed") logWarn("Interrupted external job start; reconciling", facts(step.job));
 }
@@ -155,6 +160,10 @@ async function restart(step: Step, basis: "authoritative-absence" | "idempotent-
   if (job.overdue || job.candidate || (basis === "idempotent-replay" && retention === null)) {
     return unresolved(step, null, null, "recover.restart_not_permitted");
   }
+  // The journal decides whether the start is known to have executed: a
+  // confirmed entry resolves only through this job's row, never by starting.
+  const journal = await replayStartJournal(pool, step.ctx.keys, job);
+  if (journal.state === "confirmed") return unresolved(step, null, null, "recover.restart_not_permitted");
   const intent = await recordStartIntent({
     job, from: "reconciling", retentionSeconds: retention,
     restart: {

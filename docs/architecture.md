@@ -305,9 +305,10 @@ identity frozen exactly as for synchronous claims), a pending claim never
 changes mode, the job's admission facts, start horizon, linked journal entry
 and job reference never change once recorded, every job write raises its
 revision, phases move only along the reviewed transitions, and a queued job
-can fail only if no start was ever attempted. Input, job reference and any
-invalid result candidate are stored only as authenticated envelopes
-(`docs/configuration.md`) and are cleared when the job finishes.
+can fail only once its deadline passed and if no start was ever attempted.
+Input, job reference and any invalid result candidate are stored only as
+authenticated envelopes (`docs/configuration.md`) and are cleared when the
+job finishes.
 
 `_migrations` is created by the migration runner. Migrations are append-only,
 checksummed, serialized with a PostgreSQL advisory lock, and pinned by the

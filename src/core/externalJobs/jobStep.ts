@@ -54,7 +54,8 @@ export async function runJobStep(ctx: StepContext, job: ClaimedJob): Promise<voi
   const lease = holdJobLease(job, ctx.settings, (message) => logWarn(message, facts(job)));
   const step: Step = { ctx, job, adapter, lease };
   try {
-    if (job.firstOverdue) {
+    // A queued job past its deadline never started: it fails below instead.
+    if (job.firstOverdue && job.phase !== "queued") {
       logWarn("External job passed its fulfillment deadline and stays nonterminal", {
         ...facts(job), diagnostic: "external_job_overdue", phase: job.phase,
       });

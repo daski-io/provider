@@ -148,8 +148,9 @@ CREATE INDEX provider_external_jobs_due
 -- Admission facts, the start horizon, the linked journal, the overdue marker
 -- and the job reference never change once recorded; each write raises the
 -- revision; phases move only along the reviewed transitions; a queued job
--- can fail only if no start was ever attempted; and a finished job matches
--- its frozen claim and changes no more.
+-- can fail only once its deadline passed and if no start was ever
+-- attempted; and a finished job matches its frozen claim and changes no
+-- more.
 CREATE FUNCTION provider_external_jobs_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -194,7 +195,8 @@ BEGIN
   END IF;
   IF NEW.phase IS DISTINCT FROM OLD.phase AND NOT (
        (OLD.phase = 'queued' AND NEW.phase = 'starting')
-    OR (OLD.phase = 'queued' AND NEW.phase = 'failed' AND NEW.first_start_attempt_at IS NULL)
+    OR (OLD.phase = 'queued' AND NEW.phase = 'failed' AND NEW.first_start_attempt_at IS NULL
+        AND now() >= OLD.fulfillment_deadline)
     OR (OLD.phase IN ('starting', 'reconciling')
         AND NEW.phase IN ('reconciling', 'polling', 'completed', 'failed'))
     OR (OLD.phase = 'reconciling' AND NEW.phase = 'starting')

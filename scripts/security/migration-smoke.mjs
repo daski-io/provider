@@ -188,13 +188,14 @@ try {
   await client.query(deleteQuote("e3"));
 
   // External jobs: a claim in its own pending state commits only with its
-  // job; phases follow the reviewed transitions; a started job never fails
-  // as never started; and the claim and its job finish together, frozen.
+  // job; phases follow the reviewed transitions; a queued job fails only
+  // once its deadline passed and never after a start; and the claim and its
+  // job finish together, frozen.
   const jobClaim = (id) => claim(id, "now() + interval '5 minutes'", "NULL,NULL,NULL")
     .replace("'executing'", "'external_job'");
-  const job = (id, key) => `INSERT INTO provider_external_jobs
+  const job = (id, key, deadline = "now() + interval '12 hours'") => `INSERT INTO provider_external_jobs
       (task_id,adapter_version,idempotency_key,input_ciphertext,input_key_id,fulfillment_deadline)
-    VALUES ('${id}','v1','${key}','daski:v1:input','primary',now() + interval '12 hours')`;
+    VALUES ('${id}','v1','${key}','daski:v1:input','primary',${deadline})`;
   await client.query("BEGIN");
   await client.query(jobClaim("task-jobless"));
   if (!await rejects("COMMIT")) throw new Error("an external-job claim committed without its job");
@@ -228,21 +229,42 @@ try {
   if (!await rejects("UPDATE provider_external_jobs SET last_error_code='timeout' WHERE task_id='task-job'")) {
     throw new Error("an external job changed without raising its revision");
   }
-  const finish = (state) => `UPDATE provider_transactions SET state='${state}',
+  const finish = (state, id = "task-job") => `UPDATE provider_transactions SET state='${state}',
       result='{"status":"failed","errorCode":"provider_job_not_started"}'::jsonb,
-      result_hash=decode(repeat('ab',32),'hex'),completed_at=now() WHERE id='task-job'`;
+      result_hash=decode(repeat('ab',32),'hex'),completed_at=now() WHERE id='${id}'`;
+  const failJob = (id = "task-job") => `UPDATE provider_external_jobs SET phase='failed',revision=revision+1,
+      result_hash=decode(repeat('ab',32),'hex'),finished_at=now(),input_ciphertext=NULL,input_key_id=NULL,
+      lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL WHERE task_id='${id}'`;
   await client.query("BEGIN");
   await client.query(finish("failed"));
   if (!await rejects("COMMIT")) throw new Error("an external-job claim finished without its job");
   await client.query("BEGIN");
   await client.query(finish("failed"));
-  await client.query(`UPDATE provider_external_jobs SET phase='failed',revision=revision+1,
-      result_hash=decode(repeat('ab',32),'hex'),finished_at=now(),input_ciphertext=NULL,input_key_id=NULL,
-      lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL WHERE task_id='task-job'`);
+  await client.query(failJob());
   await client.query("COMMIT");
   if (!await rejects("UPDATE provider_external_jobs SET revision=revision+1 WHERE task_id='task-job'")) {
     throw new Error("a finished external job changed");
   }
+  // A queued job that never started fails only once its deadline passed.
+  for (const [id, key, deadline] of [
+    ["task-job-early", "00000000-0000-8000-8000-000000000003", undefined],
+    ["task-job-due", "00000000-0000-8000-8000-000000000004", "now() + interval '1 millisecond'"],
+  ]) {
+    await client.query("BEGIN");
+    await client.query(jobClaim(id));
+    await client.query(job(id, key, deadline));
+    await client.query("COMMIT");
+  }
+  await client.query("SELECT pg_sleep(0.05)");
+  await client.query("BEGIN");
+  await client.query(finish("failed", "task-job-early"));
+  const failedEarly = !await rejects(failJob("task-job-early"));
+  await client.query("ROLLBACK");
+  if (failedEarly) throw new Error("a queued external job failed before its deadline");
+  await client.query("BEGIN");
+  await client.query(finish("failed", "task-job-due"));
+  await client.query(failJob("task-job-due"));
+  await client.query("COMMIT");
 
   // Legacy-process barrier: an unmarked session cannot write any provider
   // table, even with a statement matching no rows (the pre-R1 startup sweep).

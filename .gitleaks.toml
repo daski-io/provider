@@ -8,7 +8,7 @@ paths = [
 ]
 
 [[allowlists]]
-description = "Gateway provider-wire fixtures, vendored byte for byte: every key is synthetic, derived from a public label, test-only and holds nothing"
+description = "Gateway provider-wire fixtures are synthetic by construction (test-only keys derived from public labels) and pinned by the gateway manifest checksums the parity test verifies"
 paths = [
   '''test/fixtures/provider-wire/.*\.json$''',
 ]

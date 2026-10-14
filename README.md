@@ -79,7 +79,8 @@ npm run try-skill -- dummy echo "hello daski"
 
 The command invokes only `src/services/dummy` in memory. It does not use a
 wallet, database, RPC, gateway, payment, or external API. It is a code-path
-tour, not a paid-order simulation.
+tour, not a paid-order simulation. `npm run try-skill -- synthetic-audit
+audit` tours the external-job example the same way, with a fake clock.
 
 Next read [Getting started](docs/getting-started.md), copy `.env.example`,
 start the loopback-only PostgreSQL service, and run:

@@ -248,6 +248,13 @@ function resolveImport(from, specifier) {
 
 const byPath = new Set(sourceFiles.map((file) => resolve(file)));
 const reachable = new Set();
+// The reviewed example roots: the synthetic external-job service is a
+// Testnet-only copy-from example that providerServices.ts does not compose;
+// tests and the offline tour (npm run try-skill) build it.
+const REVIEWED_EXAMPLE_ROOTS = [
+  "src/services/synthetic-audit/index.ts",
+  "src/services/synthetic-audit/tour.ts",
+];
 const queue = [
   "src/bootstrap.ts",
   "src/installRuntimeBundle.ts",
@@ -256,7 +263,11 @@ const queue = [
   "src/core/security/outboundHttp.ts",
   "src/core/security/reviewedEndpoint.ts",
   "src/core/suppliers/operationJournal.ts",
+  ...REVIEWED_EXAMPLE_ROOTS,
 ].map((path) => resolve(root, path));
+if (/synthetic-audit/.test(read("src/providerServices.ts"))) {
+  failures.push("the synthetic audit example must not be composed into the provider");
+}
 while (queue.length) {
   const file = queue.pop();
   if (!file || reachable.has(file) || !byPath.has(file)) continue;

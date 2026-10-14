@@ -37,7 +37,10 @@ interface ServiceModule {
 ```
 
 An adapter without a `mode` (or with `mode: "sync"`) is synchronous, as the
-dummy's is; this guide describes that mode. An `ExternalJobAdapter`
+dummy's is; this guide describes that mode. For an external job, copy
+`src/services/synthetic-audit` instead: a Testnet-only example with an
+in-memory fake product that `src/providerServices.ts` does not compose
+(`npm run try-skill -- synthetic-audit audit` tours it offline). An `ExternalJobAdapter`
 (`mode: "external-job"`, with `version`, `start`, `recoverStart` and `poll`)
 is for a product that already runs the paid work as its own asynchronous
 job; its types are in `src/core/serviceRegistry/adapterTypes.ts`. The mode

@@ -8,6 +8,12 @@ Mainnet automation.
 
 - `npm run try-skill -- dummy echo "message"` invokes only the dummy adapter
   in memory. It performs no payment, database, network, chain, or product call.
+- `npm run try-skill -- synthetic-audit audit "description"` tours one
+  external job of the Testnet-only synthetic audit offline, with a fake clock
+  and its in-memory product: a lost start answer, recovery by the order key,
+  eight fake hours of pending polls, and the report judged against the
+  published result contract. No payment, database, network or chain is used;
+  the durable scheduler itself is covered by the PostgreSQL suites.
 - `npm run doctor -- --stage=<local|testnet|mainnet>` performs redacted,
   read-only local checks. Add `--json` for stable machine-readable output. It
   does not validate external reachability or whitelist status.

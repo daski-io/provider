@@ -8,6 +8,7 @@ import { clearServicesForTests, registerService } from "../src/core/serviceRegis
 import type { ServiceModule } from "../src/core/serviceRegistry/types.js";
 import type { ProviderResponseSigner } from "../src/core/standardRail/dispatchResponse.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
+import type { SyncLeaseTiming } from "../src/core/standardRail/syncLease.js";
 import type { ProviderOutcomeConfig } from "../src/core/standardRail/types.js";
 import { FakeEvidence } from "./gatewayOrderFixture.js";
 import { gatewayStatusQuery, type ProviderAnswer } from "./gatewayWire.js";
@@ -36,6 +37,7 @@ export async function startRailHarness(options: {
   outcome?: Partial<ProviderOutcomeConfig>;
   signer?: ProviderResponseSigner;
   service?: Partial<ServiceModule>;
+  lease?: SyncLeaseTiming;
 } = {}): Promise<RailHarness> {
   const outcome = railOutcome(options.outcome);
   const config = railConfig([outcome]);
@@ -58,7 +60,7 @@ export async function startRailHarness(options: {
   setProviderIdentityStatus(true);
   setRailStatus(true);
   const server: Server = createApp(config, {
-    dispatch: { evidence, ready: async () => state.ready, signer: options.signer },
+    dispatch: { evidence, ready: async () => state.ready, signer: options.signer, lease: options.lease },
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

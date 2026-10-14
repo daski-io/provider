@@ -53,7 +53,8 @@ provider does. PostgreSQL is the small durable rail ledger that prevents a
 signed dispatch or admitted chain event from being replayed after a process
 restart. It stores:
 
-- transaction identity, state, terminal result, and operations revision;
+- transaction identity, state, execution lease, terminal result, and
+  operations revision;
 - signed readiness quotes that later dispatches bind to;
 - admitted public deposit and release evidence;
 - shared rate-limit buckets; and
@@ -192,6 +193,10 @@ After configuring the supplied values, install the bundle once per service:
 ```bash
 npm run daski:install-runtime -- --file /secure/path/runtime-bundle.json
 ```
+
+Upgrading a deployment that ran a pre-R1 image is a stop-and-drain cutover
+(`npm run daski:cutover`), described in
+[docs/onboarding.md](docs/onboarding.md#upgrading-a-pre-r1-deployment-stop-and-drain-cutover).
 
 The importer verifies signatures, domains, provider intent, the exact local
 skill-contract hashes and prices, runtime commitments, and splitter provenance

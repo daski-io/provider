@@ -7,6 +7,7 @@ import {
   AdmissionUncertainError,
   claimTransaction,
   completeTransaction,
+  ExecutionLeaseLostError,
   findTransaction,
   type ProviderTransaction,
 } from "./transactionStore.js";
@@ -55,25 +56,29 @@ export async function admitDispatch(
 }
 
 /**
- * Persist an admitted synchronous result, retrying transient database
- * failures briefly. If another writer finalized the task first, that durable
- * state is served and the lost result is logged for reconciliation.
+ * Persist an admitted synchronous result under its execution lease, retrying
+ * transient database failures briefly. If another writer finalized the task
+ * first, that durable state is served and the lost result is logged for
+ * reconciliation. A lost lease ends the attempt: the result is not written,
+ * the answer is ambiguous, and the expired lease is swept by policy.
  */
 export async function persistSynchronousResult(
   taskId: string,
+  leaseToken: string,
   result: ServiceResult,
 ): Promise<ProviderTransaction> {
   let failure: unknown;
   for (const delay of RETRY_DELAYS_MS) {
     await sleep(delay);
     try {
-      const stored = await completeTransaction(taskId, result);
+      const stored = await completeTransaction(taskId, leaseToken, result);
       if (stored.result_hash?.toString("hex") !== canonicalHash(result).slice(2)) {
         logWarn("Synchronous result lost to a concurrent finalization", { taskId });
       }
       return stored;
     } catch (error) {
       failure = error;
+      if (error instanceof ExecutionLeaseLostError) break;
     }
   }
   throw new DispatchAmbiguousError("Synchronous result could not be persisted", failure);

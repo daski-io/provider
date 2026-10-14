@@ -28,17 +28,22 @@ export async function executeSynchronously(
   context: Omit<TaskContext, "signal">,
   input: Record<string, unknown>,
   contract: ResultContract,
+  lease?: AbortSignal,
 ): Promise<ServiceResult> {
   let value: unknown;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), MAX_EXECUTION_MS);
     timeout.unref();
+    // Losing the execution lease ends the wait too; the caller then cannot
+    // persist anything. Abort never proves the product call stopped.
+    const signal = lease ? AbortSignal.any([controller.signal, lease]) : controller.signal;
     try {
       value = await Promise.race([
-        adapter.execute({ ...context, signal: controller.signal }, input),
+        adapter.execute({ ...context, signal }, input),
         new Promise<never>((_, reject) => {
-          controller.signal.addEventListener(
+          if (signal.aborted) reject(new Error("service execution was aborted"));
+          signal.addEventListener(
             "abort",
             () => reject(new Error("service execution timed out")),
             { once: true },

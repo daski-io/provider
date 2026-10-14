@@ -218,10 +218,17 @@ it gets the ambiguous `503`, and status for its hash answers `409
 binding_conflict`. The original claim stays authoritative; reconcile with the
 original dispatch hash.
 
-After a provider restart, an interrupted `executing` row becomes terminal
-`failed` with `provider_restarted_during_execution`. The minimal runtime must
-have one active replica. If transparent resumption is required, use
-`provider-full`.
+After a provider crash or stall, an interrupted `executing` row stays
+`working` until its execution lease expires (at most 30 seconds after the
+last renewal), then any running process fails it with
+`provider_execution_abandoned`. A restart never fails another process's live
+call. The supplier journal is left as it was, so reconcile a possibly applied
+product mutation before retrying it. The minimal runtime must have one active
+replica. If transparent resumption is required, use `provider-full`.
+
+If boot warns `Pre-R1 executions await the stop-and-drain cutover`, rows a
+pre-R1 image left executing are still open: they have no lease, show
+`working`, and are resolved only by the cutover in `docs/onboarding.md`.
 
 A completed task's attested identity (state, result hash and completion time)
 is frozen when it becomes terminal and never changes. PostgreSQL refuses an

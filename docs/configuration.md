@@ -65,6 +65,10 @@ that drops startup parameters therefore fails closed: boot stops with
 `database sessions do not carry this build's runtime-epoch marker`. Connect
 directly or through a pooler that forwards `options` in session mode.
 
+Synchronous executions hold a 30-second lease renewed every 10 seconds, and
+every process sweeps expired leases every 15 seconds (reviewed constants in
+`src/core/standardRail/syncLease.ts`, not configuration).
+
 Maintenance sessions that write provider tables or read `_migrations` must
 declare the marker explicitly, for example
 `PGOPTIONS='-c daski.runtime_epoch=1' psql ...`. A logical backup by the

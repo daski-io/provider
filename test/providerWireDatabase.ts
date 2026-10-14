@@ -54,11 +54,11 @@ export function wireQuery(db: WireDatabase) {
       const row = db.quotes.get(hex(params[0]));
       return { rows: row ? [row] : [] };
     }
-    if (sql.includes("UPDATE provider_transactions") && sql.includes("result_hash=$4")) {
+    if (sql.includes("UPDATE provider_transactions") && sql.includes("result_hash=$5")) {
       const row = [...db.claims.values()].find((claim) => claim.id === params[0]);
-      if (!row || row.state !== "executing") return { rows: [] };
+      if (!row || row.state !== "executing" || row.execution_lease_token !== params[1]) return { rows: [] };
       Object.assign(row, {
-        state: params[1], result: JSON.parse(String(params[2])), result_hash: params[3],
+        state: params[2], result: JSON.parse(String(params[3])), result_hash: params[4],
         completed_at: new Date(db.clock * 1_000),
       });
       return { rows: observed(db, row) };
@@ -82,11 +82,13 @@ export function wireConnect(db: WireDatabase) {
       }
       if (sql.includes("FOR UPDATE")) return { rows: observed(db, db.claims.get(String(params[1]))) };
       if (sql.includes("INSERT INTO provider_transactions")) {
-        const [, gatewayAudience, orderId, nonce, dispatchHash, requestHash, payer, slug, skill, listing] = params;
+        const [, gatewayAudience, orderId, nonce, dispatchHash, requestHash, payer, slug, skill, listing,
+          , owner, leaseToken] = params;
         const row = {
           id: db.taskId, gateway_audience: gatewayAudience, order_id: orderId, dispatch_nonce: nonce,
           dispatch_hash: dispatchHash, request_hash: requestHash, payer, service_slug: slug, skill_id: skill,
           listing_manifest_hash: listing, state: "executing", result: null, result_hash: null,
+          execution_owner: owner, execution_lease_token: leaseToken,
           created_at: new Date(db.clock * 1_000), completed_at: null, operations_revision: 0,
           operations_projection: { fulfillment: null, support: null, recovery: null },
         };

@@ -76,6 +76,7 @@ const REVIEWED_MIGRATIONS = [
   ["003_dispatch_admission.sql", []],
   ["004_terminal_identity.sql", []],
   ["005_runtime_epoch_barrier.sql", ["provider_schema_epoch"]],
+  ["006_sync_execution_leases.sql", []],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();
@@ -214,6 +215,7 @@ const reachable = new Set();
 const queue = [
   "src/bootstrap.ts",
   "src/installRuntimeBundle.ts",
+  "src/upgradeCutover.ts",
   "src/core/security/outboundHttp.ts",
   "src/core/security/reviewedEndpoint.ts",
   "src/core/suppliers/operationJournal.ts",

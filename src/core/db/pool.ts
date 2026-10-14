@@ -5,11 +5,6 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { config } from "../config.js";
 import { logError, logInfo } from "../logger.js";
-import { canonicalHash } from "../standardRail/canonical.js";
-import {
-  failureEvidence,
-  PROVIDER_RESTARTED_DURING_EXECUTION,
-} from "../standardRail/serviceResult.js";
 import { withRuntimeEpochMarker } from "./runtimeEpoch.js";
 import { applyRuntimePrivileges } from "./runtimePrivileges.js";
 import { withSessionAdvisoryLock } from "./sessionAdvisoryLock.js";
@@ -180,16 +175,4 @@ export async function verifyDatabaseRoleSeparation(): Promise<void> {
     throw new Error("database role verification returned no rows");
   }
   assertDatabaseRolePosture(runtime.rows[0], migrator.rows[0]);
-}
-
-/** Legacy startup sweep; like every terminal transition it freezes the result hash. */
-export async function failInterruptedTransactions(): Promise<number> {
-  const interrupted = failureEvidence(PROVIDER_RESTARTED_DURING_EXECUTION);
-  const result = await pool.query(
-    `UPDATE provider_transactions
-        SET state='failed',result=$1::jsonb,result_hash=$2,completed_at=now()
-      WHERE state='executing'`,
-    [JSON.stringify(interrupted), Buffer.from(canonicalHash(interrupted).slice(2), "hex")],
-  );
-  return result.rowCount ?? 0;
 }

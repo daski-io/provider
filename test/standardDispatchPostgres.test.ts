@@ -272,11 +272,12 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
     const inflight = async (id: string, listingByte?: string) => pool.query(
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+         execution_owner,execution_lease_token,execution_lease_expires_at
        ) VALUES ($1,'https://gateway.example',$1,decode(md5($1) || md5($1),'hex'),
          decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),
          '0x1111111111111111111111111111111111111111','dummy','echo',$2,'executing',
-         now() + interval '5 minutes')`,
+         now() + interval '5 minutes',gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`,
       [id, listingByte ? Buffer.from(listingByte.repeat(32), "hex")
         : Buffer.from(rail.outcome.listingManifestHash.slice(2), "hex")],
     );

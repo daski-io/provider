@@ -238,7 +238,9 @@ artifact; a result that fails becomes `{"status": "failed", "errorCode":
 "service_result_invalid"}`. Failure evidence is exactly `{status: "failed",
 errorCode}`: messages are dropped and unlisted codes become
 `service_execution_failed`. Core's own codes are `service_execution_failed`,
-`service_result_invalid` and `provider_restarted_during_execution`.
+`service_result_invalid`, `provider_execution_abandoned` (a synchronous
+execution whose lease expired) and `provider_restarted_during_execution` (an
+interrupted pre-R1 execution, as resolved by the cutover).
 
 The terminal transition writes the state, the frozen result, its
 `canonicalHash` (`result_hash`) and the completion time in one conditional

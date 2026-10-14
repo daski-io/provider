@@ -104,11 +104,13 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
     await pool.query(
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,created_at
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,created_at,
+         execution_owner,execution_lease_token,execution_lease_expires_at
        ) VALUES ('task-pending','https://gateway.example','ord_00000000-0000-4000-8000-0000000000aa',
          decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex'),decode(repeat('33',32),'hex'),
          '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('44',32),'hex'),
-         'executing',now() + interval '5 minutes',now() - interval '6 minutes')`,
+         'executing',now() + interval '5 minutes',now() - interval '6 minutes',
+         gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`,
     );
     const pendingHash = `0x${"cd".repeat(32)}` as Hex;
     for (const [orderId, dispatchHash, state] of [

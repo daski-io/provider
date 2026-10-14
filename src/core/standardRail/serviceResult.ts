@@ -7,11 +7,17 @@ import { assertBoundedJsonValue, RESPONSE_JSON_BUDGET } from "./jsonBounds.js";
 export const SERVICE_EXECUTION_FAILED = "service_execution_failed";
 /** A completed result failed the admitted result schema or core's bounds. */
 export const SERVICE_RESULT_INVALID = "service_result_invalid";
-/** The legacy startup sweep failed an execution interrupted by a restart. */
+/**
+ * A pre-R1 execution interrupted by a restart, as that image attested it and
+ * as the stop-and-drain cutover resolves the ones it left executing.
+ */
 export const PROVIDER_RESTARTED_DURING_EXECUTION = "provider_restarted_during_execution";
+/** A synchronous execution whose owner stopped renewing its lease. */
+export const SYNC_EXECUTION_ABANDONED = "provider_execution_abandoned";
 /** Codes core may always attest; services add their own reviewed codes. */
 export const CORE_FAILURE_CODES: ReadonlySet<string> = new Set([
   SERVICE_EXECUTION_FAILED, SERVICE_RESULT_INVALID, PROVIDER_RESTARTED_DURING_EXECUTION,
+  SYNC_EXECUTION_ABANDONED,
 ]);
 export const FAILURE_CODE_PATTERN = /^[a-z][a-z0-9_]{1,63}$/;
 export const MAX_RESULT_BYTES = 1_000_000;

@@ -21,6 +21,7 @@ import {
   AdmissionUncertainError,
   claimTransaction,
   completeTransaction,
+  ExecutionLeaseLostError,
 } from "../src/core/standardRail/transactionStore.js";
 
 const hash = (byte: string): Hex => `0x${byte.repeat(64)}` as Hex;
@@ -149,7 +150,21 @@ describe("minimal transaction store", () => {
     expect(mocks.release).toHaveBeenCalledWith(true);
   });
 
-  it("persists a terminal result only from executing state and serves a finalized row", async () => {
+  it("claims under this process's fresh lease token", async () => {
+    const row = transaction();
+    mocks.clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [row] })
+      .mockResolvedValueOnce({ rows: [] });
+    await claim();
+    const [sql, params] = mocks.clientQuery.mock.calls[2] as [string, unknown[]];
+    expect(sql).toMatch(/execution_owner,execution_lease_token,execution_lease_expires_at/);
+    expect(sql).toContain("now() + make_interval(secs => $14)");
+    expect(params.slice(11)).toEqual([expect.stringMatching(/^[0-9a-f-]{36}$/), expect.stringMatching(/^[0-9a-f-]{36}$/), 30]);
+  });
+
+  it("persists a terminal result only for the unexpired lease holder and serves a finalized row", async () => {
     const completed = {
       ...transaction(),
       state: "completed" as const,
@@ -157,22 +172,30 @@ describe("minimal transaction store", () => {
       completed_at: new Date(),
     };
     mocks.poolQuery.mockResolvedValueOnce({ rows: [completed] });
-    await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);
+    await expect(completeTransaction("task-1", "lease-1", completed.result)).resolves.toBe(completed);
     expect(mocks.poolQuery.mock.calls[0]?.[0]).toContain("state='executing'");
+    expect(mocks.poolQuery.mock.calls[0]?.[0])
+      .toMatch(/execution_lease_token=\$2\s+AND execution_lease_expires_at > now\(\)/);
     // The state, result, its canonical hash and the completion time are one write.
-    expect(mocks.poolQuery.mock.calls[0]?.[0]).toMatch(/result_hash=\$4,completed_at=now\(\)/);
+    expect(mocks.poolQuery.mock.calls[0]?.[0]).toMatch(/result_hash=\$5,completed_at=now\(\)/);
     expect(mocks.poolQuery.mock.calls[0]?.[1]).toEqual([
       "task-1",
+      "lease-1",
       "completed",
       JSON.stringify(completed.result),
       Buffer.from(canonicalHash(completed.result).slice(2), "hex"),
     ]);
 
     mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [completed] });
-    await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);
+    await expect(completeTransaction("task-1", "lease-1", completed.result)).resolves.toBe(completed);
+
+    // A stale holder writes nothing while the row is still executing.
+    mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [transaction()] });
+    await expect(completeTransaction("task-1", "lease-1", completed.result))
+      .rejects.toBeInstanceOf(ExecutionLeaseLostError);
 
     mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
-    await expect(completeTransaction("task-1", completed.result))
+    await expect(completeTransaction("task-1", "lease-1", completed.result))
       .rejects.toThrow("Transaction completion claim was lost");
   });
 });

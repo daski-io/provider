@@ -131,11 +131,13 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
       if (withExecutingRows) {
         await client.query(`INSERT INTO provider_transactions (
             id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-            service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before)
+            service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+            execution_owner,execution_lease_token,execution_lease_expires_at)
           VALUES ('task-r1','https://gateway.example','ord_r1',decode(repeat('07',32),'hex'),
             decode(repeat('08',32),'hex'),decode(repeat('09',32),'hex'),
             '0x1111111111111111111111111111111111111111','dummy','echo',
-            decode(repeat('04',32),'hex'),'executing',now() + interval '5 minutes')`);
+            decode(repeat('04',32),'hex'),'executing',now() + interval '5 minutes',
+            gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')`);
       }
     });
     return database;

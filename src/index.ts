@@ -2,7 +2,7 @@ import { base, baseSepolia } from "viem/chains";
 import { startProviderIdentityMonitor } from "./core/chain/providerIdentity.js";
 import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
-import { closeMigrationPool, failInterruptedTransactions, pool } from "./core/db/pool.js";
+import { closeMigrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { logListingCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
@@ -17,12 +17,15 @@ import {
   type ProviderStandardRailConfig,
 } from "./core/standardRail/config.js";
 import { deriveProviderLaunchPolicy } from "./core/standardRail/launchPolicy.js";
+import { countLegacyExecutions } from "./core/standardRail/legacyCutover.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
+import { startSyncLeaseSweeper } from "./core/standardRail/syncLease.js";
 import { configuredServices } from "./providerServices.js";
 
 let shuttingDown = false;
 let stopIdentity: (() => void) | null = null;
 let stopRail: (() => void) | null = null;
+let stopLeases: (() => void) | null = null;
 
 async function main(): Promise<void> {
   logInfo("Starting Daski minimal provider", {
@@ -46,9 +49,15 @@ async function main(): Promise<void> {
     services,
   });
 
-  const interrupted = await failInterruptedTransactions();
-  if (interrupted > 0) {
-    logWarn("Marked interrupted synchronous executions as failed", { count: interrupted });
+  // Only executions whose lease expired are failed; another process's live
+  // call is never swept. Pre-R1 rows wait for the operator's cutover.
+  stopLeases = await startSyncLeaseSweeper();
+  const legacy = await countLegacyExecutions(pool);
+  if (legacy > 0) {
+    logWarn("Pre-R1 executions await the stop-and-drain cutover", {
+      count: legacy,
+      remedy: "npm run daski:cutover",
+    });
   }
 
   await verifyRuntimeChainTrust();
@@ -94,6 +103,7 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
     await stopServer();
     stopIdentity?.();
     stopRail?.();
+    stopLeases?.();
     await closeMigrationPool();
     await pool.end();
   } catch (error) {

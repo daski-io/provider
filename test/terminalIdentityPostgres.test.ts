@@ -13,8 +13,14 @@ const target = vi.hoisted(() => {
   return { name };
 });
 
-import { closeMigrationPool, failInterruptedTransactions, pool, runMigrations } from "../src/core/db/pool.js";
+import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { canonicalHash } from "../src/core/standardRail/canonical.js";
+import {
+  countLegacyExecutions,
+  cutoverInventory,
+  resolveLegacyExecutions,
+} from "../src/core/standardRail/legacyCutover.js";
+import { sweepAbandonedSyncExecutions } from "../src/core/standardRail/syncLease.js";
 import { json, startRailHarness, type RailHarness } from "./dispatchHarness.js";
 import { dispatchOrder, quoteOrder } from "./gatewayOrderFixture.js";
 import { acceptDispatchSnapshotAsGateway } from "./gatewayWire.js";
@@ -68,10 +74,10 @@ describePostgres("frozen terminal identity against PostgreSQL", () => {
       await pool.query(
         `INSERT INTO provider_transactions (
            id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-           service_slug,skill_id,listing_manifest_hash,state
+           service_slug,skill_id,listing_manifest_hash,state,created_at
          ) VALUES ($1,'https://gateway.example',$2,$3,$4,decode(repeat('33',32),'hex'),
            '0x1111111111111111111111111111111111111111','dummy','echo',
-           decode(repeat('44',32),'hex'),'executing')`,
+           decode(repeat('44',32),'hex'),'executing',now() - interval '1 hour')`,
         [row.id, row.orderId, Buffer.alloc(32, index + 1), bytes(row.dispatchHash)],
       );
       if (row.result) {
@@ -130,14 +136,43 @@ describePostgres("frozen terminal identity against PostgreSQL", () => {
     )).rejects.toThrow("a terminal task identity is frozen");
   });
 
-  it("freezes the hash when the startup sweep fails an interrupted legacy execution", async () => {
-    await expect(failInterruptedTransactions()).resolves.toBe(1);
+  // L-T12: an interrupted pre-R1 execution gets no lease, owner, input or
+  // handle; nothing at boot fails it, and only the cutover resolves it.
+  it("leaves an interrupted pre-R1 execution to the stop-and-drain cutover", async () => {
+    const lease = await pool.query(
+      `SELECT state,execution_owner,execution_lease_token,execution_lease_expires_at
+         FROM provider_transactions WHERE id=$1`,
+      [LEGACY.interrupted.id],
+    );
+    expect(lease.rows[0]).toEqual({
+      state: "executing", execution_owner: null, execution_lease_token: null, execution_lease_expires_at: null,
+    });
+    await expect(sweepAbandonedSyncExecutions()).resolves.toEqual([]);
+    await expect(countLegacyExecutions(pool)).resolves.toBe(1);
+    const status = await rail.status(LEGACY.interrupted.orderId, LEGACY.interrupted.dispatchHash);
+    expect(json(status).state).toBe("working");
+    const inventory = await cutoverInventory(pool);
+    expect(inventory.legacyExecutions).toMatchObject({ count: 1, taskIds: [LEGACY.interrupted.id] });
+    expect(inventory.legacyExecutions.oldestAgeSeconds).toBeGreaterThanOrEqual(3_600);
+
+    await expect(resolveLegacyExecutions(pool)).resolves.toEqual([LEGACY.interrupted.id]);
     const evidence = { status: "failed", errorCode: "provider_restarted_during_execution" };
     expect(await stored(LEGACY.interrupted.id)).toMatchObject({
       state: "failed",
       result: evidence,
       result_hash: frozen(evidence),
     });
+    await expect(resolveLegacyExecutions(pool)).resolves.toEqual([]);
+    // A lease-less executing row can no longer be created.
+    await expect(pool.query(
+      `INSERT INTO provider_transactions (
+         id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+       ) VALUES ('task-leaseless','https://gateway.example','ord_00000000-0000-4000-8000-0000000000c5',
+         decode(repeat('c5',32),'hex'),decode(repeat('c5',32),'hex'),decode(repeat('33',32),'hex'),
+         '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('44',32),'hex'),
+         'executing',now() + interval '5 minutes')`,
+    )).rejects.toThrow("provider_transactions_execution_lease");
   });
 
   it("freezes a new result with its hash and serves one identity across reads and restarts", async () => {
@@ -183,11 +218,13 @@ describePostgres("frozen terminal identity against PostgreSQL", () => {
     await pool.query(
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+         execution_owner,execution_lease_token,execution_lease_expires_at
        ) VALUES ('task-unhashed','https://gateway.example','ord_00000000-0000-4000-8000-0000000000c4',
          decode(repeat('c4',32),'hex'),decode(repeat('c4',32),'hex'),decode(repeat('33',32),'hex'),
          '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('44',32),'hex'),
-         'executing',now() + interval '5 minutes')`,
+         'executing',now() + interval '5 minutes',gen_random_uuid(),gen_random_uuid(),
+         now() + interval '1 hour')`,
     );
     await expect(pool.query(
       `UPDATE provider_transactions SET state='completed',result='{"status":"completed"}',

@@ -19,6 +19,7 @@
     "copy-assets": "node scripts/copy-assets.mjs",
     "start": "node --env-file-if-exists=.env dist/bootstrap.js",
     "daski:install-runtime": "node --env-file-if-exists=.env --import=tsx src/installRuntimeBundle.ts",
+    "daski:cutover": "node --env-file-if-exists=.env --import=tsx src/upgradeCutover.ts",
     "dev:db:up": "docker compose up -d postgres",
     "dev:db:stop": "docker compose stop postgres",
     "doctor": "node --env-file-if-exists=.env scripts/doctor.mjs",

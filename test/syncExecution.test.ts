@@ -160,3 +160,26 @@ describe("synchronous terminal results", () => {
     await expect(pending).resolves.toEqual(generic);
   });
 });
+
+describe("synchronous execution under its lease", () => {
+  it("stops waiting and aborts the adapter signal when the lease is lost", async () => {
+    const lease = new AbortController();
+    let observed: AbortSignal | undefined;
+    const pending = executeSynchronously(adapter(async (taskContext) => {
+      observed = taskContext.signal;
+      return new Promise<ServiceResult>(() => undefined);
+    }), context, { message: "hi" }, contract, lease.signal);
+    await Promise.resolve();
+    lease.abort();
+    await expect(pending).resolves.toEqual({ status: "failed", errorCode: SERVICE_EXECUTION_FAILED });
+    expect(observed?.aborted).toBe(true);
+  });
+
+  it("does not start waiting on a lease that is already lost", async () => {
+    const lease = new AbortController();
+    lease.abort();
+    await expect(executeSynchronously(
+      adapter(() => new Promise<ServiceResult>(() => undefined)), context, { message: "hi" }, contract, lease.signal,
+    )).resolves.toEqual({ status: "failed", errorCode: SERVICE_EXECUTION_FAILED });
+  });
+});

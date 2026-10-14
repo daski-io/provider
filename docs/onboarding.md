@@ -147,8 +147,10 @@ Through the Daski gateway, test at least:
 7. product timeout/outage and safe public failure;
 8. product idempotency and authoritative ambiguity reconciliation, when
    mutating;
-9. process restart with an active request, verifying it fails terminally and
-   is not blindly re-executed; and
+9. process crash with an active request, verifying it fails terminally once
+   its execution lease expires (`provider_execution_abandoned`) and is not
+   blindly re-executed, and that a restart does not fail another process's
+   live call; and
 10. readiness failure/recovery for database, identity, rail, and product.
 
 Do not call the provider dispatch endpoint directly with invented envelopes as
@@ -195,6 +197,35 @@ Before Mainnet:
 - operate one active instance and prove failure/recovery behavior;
 - run `npm run doctor -- --stage=mainnet` and every release gate; and
 - obtain explicit Daski whitelist/coordinated release approval.
+
+## Upgrading a pre-R1 deployment (stop-and-drain cutover)
+
+The first upgrade from a released pre-R1 image is a coordinated cutover, not
+a rolling deployment: an old process already in a product call cannot be made
+safe by fencing its later write, and the old image fails every executing row
+whenever it boots. Hand this sequence to the operator:
+
+1. Pause new sales: ask Daski to pause the listings (or stop quoting), so no
+   new paid order arrives during the change. Funded orders remain owed.
+2. Drain: wait at least 50 seconds (the synchronous budget) plus margin after
+   the last dispatch so in-flight calls finish.
+3. Stop every pre-R1 process, including any that a supervisor would restart.
+4. Run `npm run daski:cutover` with the R1 build and the production
+   configuration. It applies the R1 migrations, which install the
+   legacy-process barrier (from then on no pre-R1 process can boot or change a
+   row), and prints the inventory as JSON: schema epoch, pre-R1 executions
+   left `executing` (opaque task ids), leased R1 executions, and unresolved
+   supplier operations.
+5. For each listed pre-R1 execution, reconcile any supplier mutation it may
+   have made with the product (authoritative lookup; never repeat it blindly).
+   Then run `npm run daski:cutover -- --resolve-legacy --old-processes-stopped`
+   to fail them as the old image would have (`provider_restarted_during_execution`).
+   Rows younger than 120 seconds are left for a later run. No input or job
+   handle is invented for them.
+6. Start the R1 build, check `/health/ready`, then resume sales.
+
+The pre-R1 image is not a rollback target afterwards: a rollback is a tested
+compatible R1 image on the same schema, or R1 servicing with new sales off.
 
 ## Changes requiring renewed coordination
 

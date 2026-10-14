@@ -89,10 +89,12 @@ claim commit (fenced at envelope validBefore) -- expired -> definite refusal
        |                                     \-- outcome unknown -> re-read or 503
        v
 executing (public "working") -- adapter result --> completed | failed
-       |                         (validated against the admitted result
-       |                          contract; state, result, result hash and
-       |                          completion time frozen in one write)
-       +-- process restart --> failed(provider_restarted_during_execution)
+       |   owner + lease token,    (validated against the admitted result
+       |   lease renewed while     contract; state, result, result hash and
+       |   the call runs           completion time frozen in one write, only
+       |                           by the unexpired lease holder)
+       +-- lease expired (owner crashed or stalled) -->
+             failed(provider_execution_abandoned), by any process
 ```
 
 A JSON `error` from dispatch therefore always means "definitely not
@@ -117,14 +119,35 @@ refuses any later change to them or to the claim's admitted bindings. Every
 attestation signs the frozen hash; rows from before the hash existed are
 attested from their stored result unchanged.
 
-## Why one replica
+## Execution ownership and why one replica
 
-The runtime performs the product operation inline and uses no job lease. On
-startup it marks any `executing` rows failed because that process cannot know
-whether an interrupted external call completed. That behavior is correct for
-one active process and a strictly synchronous/reconcilable integration, but it
-would interfere with another active replica. Use `provider-full` when execution
-must survive restarts or scale across workers.
+The runtime performs the product operation inline. Each claim records the
+process instance executing it, a fencing token and an expiring lease
+(migration 006): 30 seconds, renewed every 10 seconds while the at most
+50-second call runs and its result is persisted. Only the token holder can
+renew or finalize, and only before expiry. A holder whose renewal finds the
+lease lost aborts the call's signal and answers ambiguously; a holder that
+finishes late writes nothing.
+
+Every process sweeps expired leases at startup and every 15 seconds, failing
+those executions with `provider_execution_abandoned`: their owner can no
+longer finalize, and the runtime cannot know whether an interrupted product
+call completed. The sweep never touches another process's live call, so a
+restart or an overlapping compatible process (during an R1-to-R1 upgrade) is
+safe, and it never touches the supplier journal, so a possible mutation stays
+exactly as ambiguous as it was. An abandoned synchronous execution is never
+resumed or taken over.
+
+This makes restarts and short overlaps safe; it is not a horizontally scaled
+worker platform. Operate one active replica. Use `provider-full` when
+execution must resume after restarts or scale across workers.
+
+Rows a pre-R1 process left `executing` have no lease. Nothing resolves them
+automatically: the operator's stop-and-drain cutover
+(`docs/onboarding.md`) inventories them and, once every old process is
+stopped, fails them as the old image would have at its next boot
+(`provider_restarted_during_execution`). No input, lease or job handle is
+invented for them.
 
 ## Database boundary
 

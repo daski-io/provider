@@ -28,6 +28,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     transactions: typeof import("../src/core/standardRail/transactionStore.js");
     journal: typeof import("../src/core/suppliers/operationJournal.js");
     quotes: typeof import("../src/core/standardRail/quoteStore.js");
+    leases: typeof import("../src/core/standardRail/syncLease.js");
   };
 
   beforeAll(async () => {
@@ -43,6 +44,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       transactions: await import("../src/core/standardRail/transactionStore.js"),
       journal: await import("../src/core/suppliers/operationJournal.js"),
       quotes: await import("../src/core/standardRail/quoteStore.js"),
+      leases: await import("../src/core/standardRail/syncLease.js"),
     };
     await modules.pool.runMigrations();
     await modules.pool.configureRuntimePrivileges();
@@ -118,9 +120,13 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       listingManifestHash: hash("3"),
       dispatchValidBefore: Math.floor(Date.now() / 1_000) + 300,
     });
-    await expect(modules.transactions.completeTransaction(claimed.transaction.id, {
-      status: "completed",
-    })).resolves.toMatchObject({ state: "completed" });
+    await expect(modules.leases.renewSyncLease(
+      claimed.transaction.id, claimed.transaction.execution_lease_token!,
+    )).resolves.toBe(true);
+    await expect(modules.transactions.completeTransaction(
+      claimed.transaction.id, claimed.transaction.execution_lease_token!, { status: "completed" },
+    )).resolves.toMatchObject({ state: "completed" });
+    await expect(modules.leases.sweepAbandonedSyncExecutions()).resolves.toEqual([]);
     const operation = await modules.journal.beginSupplierOperation({
       serviceId: "dummy",
       opKey: "role-check",

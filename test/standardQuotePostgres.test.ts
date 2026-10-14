@@ -82,16 +82,21 @@ describePostgres("provider quotes in PostgreSQL", () => {
     // Claims are admitted as executing; a completed one is finished the way
     // the runtime does it, freezing its result hash.
     const insert = async (id: string, listingByte: string, state: "executing" | "completed") => {
-      await pool.query(
+      const claimed = await pool.query<{ token: string }>(
         `INSERT INTO provider_transactions (
            id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-           service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+           service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+           execution_owner,execution_lease_token,execution_lease_expires_at
          ) VALUES ($1,'https://gateway.example',$1,decode(md5($1) || md5($1),'hex'),
            decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),$2,'dummy','echo',
-           decode(repeat($3,32),'hex'),'executing',now() + interval '5 minutes')`,
+           decode(repeat($3,32),'hex'),'executing',now() + interval '5 minutes',
+           gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour')
+         RETURNING execution_lease_token AS token`,
         [id, payer, listingByte],
       );
-      if (state === "completed") await completeTransaction(id, { status: "completed" });
+      if (state === "completed") {
+        await completeTransaction(id, claimed.rows[0]!.token, { status: "completed" });
+      }
     };
     await insert("task-a1", "aa", "executing");
     await insert("task-a2", "aa", "executing");

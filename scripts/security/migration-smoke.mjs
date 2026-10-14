@@ -68,16 +68,27 @@ try {
     throw new Error(`unexpected migrated tables: ${actual.join(", ")}`);
   }
   await client.query(`SET search_path TO ${quoted}`);
-  const claim = (id, validBefore) => `INSERT INTO provider_transactions (
+  const claim = (id, validBefore, lease = "gen_random_uuid(),gen_random_uuid(),now() + interval '30 seconds'") =>
+    `INSERT INTO provider_transactions (
        id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,
-       payer,service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+       payer,service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+       execution_owner,execution_lease_token,execution_lease_expires_at
      ) VALUES (
        '${id}','https://gateway.example','${id}',decode(md5('${id}') || md5('${id}'),'hex'),
        decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),
        '0x1111111111111111111111111111111111111111','smoke','echo',
-       decode(repeat('44',32),'hex'),'executing',${validBefore}
+       decode(repeat('44',32),'hex'),'executing',${validBefore},${lease}
      )`;
   await client.query(claim("task-smoke", "now() + interval '5 minutes'"));
+  if (!await rejects(claim("task-leaseless", "now() + interval '5 minutes'", "NULL,NULL,NULL"))) {
+    throw new Error("an executing claim was admitted without an execution lease");
+  }
+  if (!await rejects(`UPDATE provider_transactions SET execution_lease_token=gen_random_uuid()
+      WHERE id='task-smoke'`)) {
+    throw new Error("an execution's lease token changed");
+  }
+  await client.query(`UPDATE provider_transactions
+      SET execution_lease_expires_at=now() + interval '30 seconds' WHERE id='task-smoke'`);
   const bornTerminal = await client.query(`INSERT INTO provider_transactions (
        id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,service_slug,
        skill_id,listing_manifest_hash,state,result,result_hash,completed_at,dispatch_valid_before

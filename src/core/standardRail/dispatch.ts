@@ -31,6 +31,7 @@ import { loadProviderQuote } from "./quoteStore.js";
 import { compileProviderSchema, validateProviderRequest } from "./schema.js";
 import type { ResultContract } from "./serviceResult.js";
 import { executeSynchronously } from "./syncExecution.js";
+import { holdSyncLease, SYNC_LEASE, type SyncLeaseTiming } from "./syncLease.js";
 import { dispatchHashOf, type ProviderTransaction } from "./transactionStore.js";
 import type {
   ProviderOutcomeConfig,
@@ -52,6 +53,8 @@ export interface DispatchDependencies {
   /** Pre-admission product readiness for the legacy synchronous mode. */
   ready?: () => Promise<boolean>;
   signer?: ProviderResponseSigner;
+  /** Execution lease timing; tests shorten it. */
+  lease?: SyncLeaseTiming;
 }
 
 function parseDispatchRequest(body: unknown): DispatchRequest {
@@ -74,6 +77,7 @@ export class StandardDispatchService {
   private readonly evidence: Pick<ProviderEvidenceVerifier, "verify" | "assertNotSanctioned">;
   private readonly ready: () => Promise<boolean>;
   private readonly signer: ProviderResponseSigner;
+  private readonly lease: SyncLeaseTiming;
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly resultValidators = new Map<string, ValidateFunction>();
 
@@ -86,6 +90,7 @@ export class StandardDispatchService {
     this.evidence = dependencies.evidence ?? new ProviderEvidenceVerifier(config, chain);
     this.ready = dependencies.ready ?? providerReady;
     this.signer = dependencies.signer ?? providerResponseSigner(config);
+    this.lease = dependencies.lease ?? SYNC_LEASE;
     for (const outcome of config.outcomes.values()) {
       this.validators.set(
         outcome.listingManifestHash,
@@ -133,6 +138,7 @@ export class StandardDispatchService {
         skillId: outcome.skillId,
         listingManifestHash: dispatch.listingManifestHash,
         dispatchValidBefore: parts.dispatch.validBefore,
+        leaseSeconds: this.lease.leaseSeconds,
       });
     } catch (error) {
       if (!(error instanceof DispatchRejectedError)) throw error;
@@ -143,6 +149,11 @@ export class StandardDispatchService {
       throw error;
     }
     if (!claimed.fresh) return this.replay(claimed.transaction, dispatchHash);
+    const leaseToken = claimed.transaction.execution_lease_token;
+    if (!leaseToken) throw new DispatchAmbiguousError("Admitted claim carries no execution lease");
+    // The lease is renewed until the result is persisted; a lost lease ends
+    // the attempt without a write and the answer stays ambiguous.
+    const lease = holdSyncLease(claimed.transaction.id, leaseToken, this.lease);
     try {
       const result = await executeSynchronously(getAdapter(outcome.serviceSlug), {
         taskId: claimed.transaction.id,
@@ -150,14 +161,17 @@ export class StandardDispatchService {
         payer: dispatch.payer,
         serviceSlug: outcome.serviceSlug,
         skillId: outcome.skillId,
-      }, parts.request, contract);
+      }, parts.request, contract, lease.signal);
+      if (lease.signal.aborted) throw new DispatchAmbiguousError("Synchronous execution lease was lost");
       return await this.snapshot(
-        await persistSynchronousResult(claimed.transaction.id, result),
+        await persistSynchronousResult(claimed.transaction.id, leaseToken, result),
         dispatchHash,
       );
     } catch (error) {
       if (error instanceof DispatchAmbiguousError) throw error;
       throw new DispatchAmbiguousError("Admitted dispatch could not be answered", error);
+    } finally {
+      lease.stop();
     }
   }
 

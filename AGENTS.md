@@ -137,9 +137,12 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
 
 The upstream starter is hosting-neutral. Use its Dockerfile, stable HTTPS,
 durable PostgreSQL, runtime-injected secrets, and `/health/ready` for traffic.
-Operate one active application replica. This minimal runtime marks incomplete
-synchronous executions failed after restart; it does not implement distributed
-execution leases or job recovery.
+Operate one active application replica. Synchronous executions carry a
+persisted owner and an expiring lease: a restart or an overlapping compatible
+process never fails a live call, and only an expired lease is failed
+(`provider_execution_abandoned`); there is no job recovery or resumption. The
+first upgrade from a pre-R1 image is the stop-and-drain cutover in
+`docs/onboarding.md` (`npm run daski:cutover`).
 
 Testnet is the normal first target. Mainnet requires production configuration,
 canonical reviewed contracts, separate runtime/migration database roles,

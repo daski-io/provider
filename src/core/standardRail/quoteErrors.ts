@@ -9,7 +9,8 @@ export type QuoteRefusalReason =
   | "request_invalid";
 
 export type QuoteUnavailableReason =
-  | "capacity" | "sales_paused" | "service_unavailable" | "contract_drift";
+  | "capacity" | "sales_paused" | "service_unavailable" | "contract_drift"
+  | "external_jobs_unavailable";
 
 /**
  * A definite, bounded refusal of a quote or intake request. The gateway turns

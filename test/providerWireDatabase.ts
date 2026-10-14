@@ -9,19 +9,28 @@ export interface WireDatabase {
   clock: number;
   taskId: string;
   failLookups: boolean;
+  /** The async-admission switch external-job admission reads. */
+  asyncAdmission: boolean;
   claims: Map<string, Record<string, unknown>>;
+  /** External-job rows by task id. */
+  jobs: Map<string, Record<string, unknown>>;
   quotes: Map<string, Record<string, unknown>>;
   statements: string[];
 }
 
 export function createWireDatabase(): WireDatabase {
-  return { clock: 0, taskId: "", failLookups: false, claims: new Map(), quotes: new Map(), statements: [] };
+  return {
+    clock: 0, taskId: "", failLookups: false, asyncAdmission: false,
+    claims: new Map(), jobs: new Map(), quotes: new Map(), statements: [],
+  };
 }
 
 export function resetWireDatabase(db: WireDatabase): void {
   db.clock = 0;
   db.failLookups = false;
+  db.asyncAdmission = false;
   db.claims.clear();
+  db.jobs.clear();
   db.quotes.clear();
   db.statements.length = 0;
 }
@@ -29,7 +38,9 @@ export function resetWireDatabase(db: WireDatabase): void {
 const hex = (value: unknown) => (value as Buffer).toString("hex");
 
 function observed(db: WireDatabase, row: Record<string, unknown> | undefined) {
-  return row ? [{ ...row, observed_at: String(db.clock) }] : [];
+  if (!row) return [];
+  const job = db.jobs.get(String(row.id));
+  return [{ ...row, observed_at: String(db.clock), job_phase: job?.phase ?? row.job_phase ?? null }];
 }
 
 /** `pool.query` over the rows the provider's handlers read and write. */
@@ -42,6 +53,9 @@ export function wireQuery(db: WireDatabase) {
       return { rows: observed(db, db.claims.get(String(params[1]))) };
     }
     if (sql.includes("count(*)")) return { rows: [{ count: "0" }] };
+    if (sql.includes("FROM provider_async_admission")) {
+      return { rows: [{ enabled: db.asyncAdmission, changed_at: db.asyncAdmission ? new Date(0) : null }] };
+    }
     if (sql.includes("INSERT INTO provider_quotes")) {
       const [hash, outcomeId, listing, request, gross, payer, issuedAt, validBefore, retainSeconds] = params;
       db.quotes.set(hex(hash), {
@@ -88,13 +102,22 @@ export function wireConnect(db: WireDatabase) {
         return { rows: [{ evidence_hash: params[0] }], rowCount: 1 };
       }
       if (sql.includes("FOR UPDATE")) return { rows: observed(db, db.claims.get(String(params[1]))) };
+      if (sql.includes("INSERT INTO provider_external_jobs")) {
+        // The claim took the fixture's task id in place of the generated one.
+        const [, adapterVersion, idempotencyKey, inputCiphertext, inputKeyId] = params;
+        db.jobs.set(db.taskId, {
+          task_id: db.taskId, adapter_version: adapterVersion, idempotency_key: idempotencyKey,
+          input_ciphertext: inputCiphertext, input_key_id: inputKeyId, phase: "queued",
+        });
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.includes("INSERT INTO provider_transactions")) {
         const [, gatewayAudience, orderId, nonce, dispatchHash, requestHash, payer, slug, skill, listing,
-          , owner, leaseToken, , providerQuoteHash] = params;
+          , owner, leaseToken, , providerQuoteHash, state] = params;
         const row = {
           id: db.taskId, gateway_audience: gatewayAudience, order_id: orderId, dispatch_nonce: nonce,
           dispatch_hash: dispatchHash, request_hash: requestHash, payer, service_slug: slug, skill_id: skill,
-          listing_manifest_hash: listing, state: "executing", result: null, result_hash: null,
+          listing_manifest_hash: listing, state, result: null, result_hash: null,
           execution_owner: owner, execution_lease_token: leaseToken, provider_quote_hash: providerQuoteHash,
           created_at: new Date(db.clock * 1_000), completed_at: null, operations_revision: 0,
           operations_projection: { fulfillment: null, support: null, recovery: null },

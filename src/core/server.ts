@@ -24,6 +24,7 @@ import {
   servicingAbuseLimiter,
   servicingPath,
 } from "./security/servicingIngress.js";
+import type { ExternalJobRuntime } from "./externalJobs/runtime.js";
 import type { ProviderStandardRailConfig } from "./standardRail/config.js";
 import type { DispatchDependencies } from "./standardRail/dispatch.js";
 import type { LifecycleDependencies } from "./standardRail/lifecycle.js";
@@ -49,7 +50,11 @@ let server: ReturnType<Express["listen"]> | null = null;
  */
 export function createApp(
   standard: ProviderStandardRailConfig,
-  options: { dispatch?: DispatchDependencies; lifecycle?: LifecycleDependencies } = {},
+  options: {
+    dispatch?: DispatchDependencies;
+    lifecycle?: LifecycleDependencies;
+    externalJobs?: ExternalJobRuntime;
+  } = {},
 ): Express {
   const app = express();
   installHttpSecurityBoundary(app);
@@ -100,6 +105,7 @@ export function createApp(
     recordServicingFailure: servicingAbuse.recordFailure,
     dispatch: options.dispatch,
     lifecycle: options.lifecycle,
+    externalJobs: options.externalJobs,
   }));
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
@@ -132,8 +138,11 @@ export function createApp(
   return app;
 }
 
-export async function startServer(standard: ProviderStandardRailConfig): Promise<void> {
-  const app = createApp(standard);
+export async function startServer(
+  standard: ProviderStandardRailConfig,
+  externalJobs?: ExternalJobRuntime,
+): Promise<void> {
+  const app = createApp(standard, { externalJobs });
   await new Promise<void>((resolve, reject) => {
     const listening = config.CHAIN_MODE === "mock"
       ? app.listen(config.PORT, "127.0.0.1")

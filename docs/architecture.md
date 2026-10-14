@@ -110,6 +110,24 @@ executing (public "working") -- adapter result --> completed | failed
              failed(provider_execution_abandoned), by any process
 ```
 
+An external-job service's dispatch follows the same verification, but
+instead of executing it claims the order in the pending state `external_job`
+and, in the same transaction, inserts its queued job: the input sealed to
+the job row, a stable idempotency key and an overdue threshold of durable
+acceptance plus the dispatched version's admitted fulfillment window. The
+answer is `submitted`, or a later state the worker already persisted; no
+product call happens in the dispatch handler. Admission requires the
+database async-admission switch on and an active encryption key, both
+checked before admission (a definite, retryable refusal otherwise), and
+deliberately not product readiness: a funded job waits for the product.
+
+The idempotency key is computed once at admission and stored with the job:
+SHA-256 over the canonical JSON of `{derivation:
+"daski-external-job-idempotency/v1", environment, chainId, providerAgentId,
+gatewayAudience, orderId, serviceSlug, skillId, operation: "start"}`,
+formatted as an RFC 9562 version-8 UUID. Retries, restarts and upgrades
+reuse the stored value; attempts, processes and times never enter it.
+
 A JSON `error` from dispatch therefore always means "definitely not
 admitted"; once a claim exists or its commit is uncertain, the gateway gets the
 signed snapshot or an empty 503 and reconciles through status. Every snapshot

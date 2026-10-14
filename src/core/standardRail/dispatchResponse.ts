@@ -5,7 +5,7 @@ import type { ProviderStandardRailConfig } from "./config.js";
 import { terminalIdentity } from "./terminalIdentity.js";
 import type { ProviderTransaction } from "./transactionStore.js";
 
-export type PublicDispatchState = "working" | "completed" | "failed";
+export type PublicDispatchState = "submitted" | "working" | "completed" | "failed";
 
 /** Gateway `operations` view. Lite publishes no fulfillment, support or recovery section. */
 export interface OperationsObservation {
@@ -81,12 +81,30 @@ export function providerListingSigner(config: ProviderStandardRailConfig): Listi
 export const listingOf = (row: Pick<ProviderTransaction, "listing_manifest_hash">): Hex =>
   `0x${row.listing_manifest_hash.toString("hex")}` as Hex;
 
-/** Legacy synchronous `executing` is the gateway's `working`; no new wire state exists. */
-export function publicDispatchState(state: ProviderTransaction["state"]): PublicDispatchState {
-  if (state === "executing") return "working";
-  if (state === "completed" || state === "failed") return state;
+/**
+ * The gateway state of a claim; no new wire state exists. A synchronous
+ * `executing` claim is `working`. An external job is `submitted` while
+ * queued and `working` while it starts, reconciles or polls, overdue or
+ * not. Anything else fails closed rather than being signed.
+ */
+export function publicDispatchState(
+  row: Pick<ProviderTransaction, "state" | "job_phase">,
+): PublicDispatchState {
+  if (row.state === "executing") return "working";
+  if (row.state === "external_job") {
+    if (row.job_phase === "queued") return "submitted";
+    if (row.job_phase === "starting" || row.job_phase === "reconciling" || row.job_phase === "polling") {
+      return "working";
+    }
+    throw new Error("External job phase is not servable");
+  }
+  if (row.state === "completed" || row.state === "failed") return row.state;
   throw new Error("Provider transaction state is not servable");
 }
+
+/** Whether a public state is terminal (carries a terminal attestation). */
+export const isTerminalState = (state: PublicDispatchState): state is "completed" | "failed" =>
+  state === "completed" || state === "failed";
 
 /**
  * The persisted projection and its revision, observed at the database clock.
@@ -123,7 +141,7 @@ export async function signDispatchSnapshot(
   dispatchHash: Hex,
   signer: ProviderResponseSigner,
 ): Promise<DispatchSnapshot> {
-  const state = publicDispatchState(row.state);
+  const state = publicDispatchState(row);
   const operations = operationsObservation(row);
   const signature = await signer.authority(canonicalHash({
     taskId: row.id,
@@ -131,7 +149,7 @@ export async function signDispatchSnapshot(
     state,
     operations,
   }));
-  if (state === "working") return { taskId: row.id, dispatchHash, signature, state, operations };
+  if (!isTerminalState(state)) return { taskId: row.id, dispatchHash, signature, state, operations };
   const identity = terminalIdentity(row);
   const payload = {
     taskId: row.id,

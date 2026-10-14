@@ -6,6 +6,7 @@ import { setProviderIdentityStatus, setRailStatus } from "../src/core/health.js"
 import { createApp } from "../src/core/server.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import type { ServiceResult } from "../src/core/serviceRegistry/types.js";
+import { jobRuntime } from "./externalJobFixture.js";
 import { FakeEvidence } from "./gatewayOrderFixture.js";
 import type { ProviderAnswer } from "./gatewayWire.js";
 import { claimRow, completedResult, noteService, order, wireConfig } from "./providerWireFixture.js";
@@ -34,6 +35,9 @@ export async function startWireHarness(db: WireDatabase): Promise<WireHarness> {
   const harness = { rail: { ready: true }, execute: async () => completedResult } as WireHarness;
   const server: Server = createApp(wireConfig(), {
     dispatch: { evidence, ready: async () => harness.rail.ready },
+    // A keyed runtime with a running worker, so external-job listings can be
+    // quoted and admitted when a test installs one.
+    externalJobs: jobRuntime(),
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

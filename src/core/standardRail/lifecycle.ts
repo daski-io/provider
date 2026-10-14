@@ -5,6 +5,7 @@ import type { ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import {
+  isTerminalState,
   listingOf,
   operationsObservation,
   providerListingSigner,
@@ -131,7 +132,7 @@ export class StandardLifecycleService {
     try {
       // Signed with the keys the order's own listing version names.
       const signer = this.signers(listingOf(task));
-      const state = publicDispatchState(task.state);
+      const state = publicDispatchState(task);
       const body: Omit<LifecycleAnswer, "signature"> = {
         orderId: task.order_id,
         taskId: task.id,
@@ -139,7 +140,7 @@ export class StandardLifecycleService {
         operations: operationsObservation(task),
         ...(artifact ? { result: frozenArtifact(task) } : {}),
       };
-      if (state !== "working") {
+      if (isTerminalState(state)) {
         const identity = terminalIdentity(task);
         const payload = {
           orderId: task.order_id,

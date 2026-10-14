@@ -47,7 +47,7 @@ function transaction(dispatchHash = hash("2")) {
   };
 }
 
-const claim = () => claimTransaction({
+const claim = (extra: Partial<Parameters<typeof claimTransaction>[0]> = {}) => claimTransaction({
   gatewayAudience: "https://gateway.example",
   orderId: "order-1",
   dispatchNonce: hash("1"),
@@ -59,6 +59,7 @@ const claim = () => claimTransaction({
   listingManifestHash: hash("4"),
   dispatchValidBefore: 1_900_000_300,
   providerQuoteHash: hash("5"),
+  ...extra,
 });
 
 describe("minimal transaction store", () => {
@@ -164,8 +165,27 @@ describe("minimal transaction store", () => {
     expect(sql).toContain("now() + make_interval(secs => $14),$15");
     expect(params.slice(11)).toEqual([
       expect.stringMatching(/^[0-9a-f-]{36}$/), expect.stringMatching(/^[0-9a-f-]{36}$/), 30,
-      Buffer.from(hash("5").slice(2), "hex"),
+      Buffer.from(hash("5").slice(2), "hex"), "executing",
     ]);
+  });
+
+  it("claims an external job without an execution lease and inserts its job in the same transaction", async () => {
+    const row = { ...transaction(), state: "external_job" as const, execution_lease_token: null };
+    mocks.clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [row] })
+      .mockResolvedValueOnce({ rows: [] });
+    const insertJob = vi.fn(async (client: { query: (sql: string) => Promise<unknown> }, taskId: string) => {
+      await client.query(`INSERT INTO provider_external_jobs -- ${taskId}`);
+    });
+    await claim({ execution: { kind: "external-job", insertJob } });
+    const [, params] = mocks.clientQuery.mock.calls[2] as [string, unknown[]];
+    expect(params.slice(11)).toEqual([null, null, null, Buffer.from(hash("5").slice(2), "hex"), "external_job"]);
+    // The job row is written after the claim and before COMMIT, with the new task id.
+    expect(insertJob).toHaveBeenCalledWith(expect.anything(), params[0]);
+    expect(mocks.clientQuery.mock.calls.map(([sql]) => String(sql).split(/\s/, 1)[0]))
+      .toEqual(["BEGIN", "SELECT", "INSERT", "INSERT", "COMMIT"]);
   });
 
   it("persists a terminal result only for the unexpired lease holder and serves a finalized row", async () => {

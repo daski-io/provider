@@ -2,6 +2,7 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Hex } from "viem";
+import type { ExternalJobRuntime } from "../src/core/externalJobs/runtime.js";
 import { setProviderIdentityStatus, setRailStatus } from "../src/core/health.js";
 import { createApp } from "../src/core/server.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
@@ -42,6 +43,8 @@ export async function startRailHarness(options: {
   lease?: SyncLeaseTiming;
   /** Superseded versions, previous keys and audiences still serviced. */
   retained?: RetainedServicing;
+  /** The external-job runtime the routes and the harness's quotes use. */
+  externalJobs?: ExternalJobRuntime;
 } = {}): Promise<RailHarness> {
   const outcome = railOutcome(options.outcome);
   const config = railConfig([outcome], options.retained);
@@ -65,6 +68,7 @@ export async function startRailHarness(options: {
   setRailStatus(true);
   const server: Server = createApp(config, {
     dispatch: { evidence, ready: async () => state.ready, signer: options.signer, lease: options.lease },
+    externalJobs: options.externalJobs,
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -85,7 +89,7 @@ export async function startRailHarness(options: {
     outcome,
     config,
     evidence,
-    quotes: new StandardQuoteService(config, 84532),
+    quotes: new StandardQuoteService(config, 84532, { externalJobs: options.externalJobs }),
     state,
     service,
     origin,

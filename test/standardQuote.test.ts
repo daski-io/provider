@@ -1,9 +1,10 @@
 import type { Hex } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const db = vi.hoisted(() => ({ query: vi.fn(), openObligations: 0 }));
+const db = vi.hoisted(() => ({ query: vi.fn(), openObligations: 0, asyncAdmission: false }));
 vi.mock("../src/core/db/pool.js", () => ({ pool: { query: db.query } }));
 
+import { parseFieldEncryptionKeys } from "../src/core/security/fieldEncryption.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { canonicalHash } from "../src/core/standardRail/canonical.js";
 import { StandardQuoteService, FIXED_QUOTE_LIFETIME_SECONDS } from "../src/core/standardRail/quote.js";
@@ -37,9 +38,14 @@ async function refusal(work: Promise<unknown>): Promise<QuoteRefusal | QuoteUnav
 
 beforeEach(() => {
   db.openObligations = 0;
-  db.query.mockReset().mockImplementation(async (sql: string) => String(sql).includes("count(*)")
-    ? { rows: [{ count: String(db.openObligations) }] }
-    : { rows: [], rowCount: 1 });
+  db.asyncAdmission = false;
+  db.query.mockReset().mockImplementation(async (sql: string) => {
+    if (String(sql).includes("count(*)")) return { rows: [{ count: String(db.openObligations) }] };
+    if (String(sql).includes("provider_async_admission")) {
+      return { rows: [{ enabled: db.asyncAdmission, changed_at: null }] };
+    }
+    return { rows: [], rowCount: 1 };
+  });
   clearServicesForTests();
   registerService(echoService());
 });
@@ -168,7 +174,9 @@ describe("signed fixed readiness quote", () => {
       .toEqual(new QuoteUnavailable("sales_paused"));
   });
 
-  it("does not sell an external-job listing before external-job admission exists", async () => {
+  // L03/L06: an external-job listing is sold only while a job could be
+  // admitted (switch on), sealed (active key) and progressed (worker).
+  it("sells an external-job listing only with async admission, a key and a running worker", async () => {
     clearServicesForTests();
     const service = echoService();
     registerService({
@@ -182,9 +190,31 @@ describe("signed fixed readiness quote", () => {
       },
       skills: [{ ...service.skills[0]!, deadlines: { fulfillmentSeconds: 43_200 } }],
     });
-    expect(await refusal(quotes().quote(await gatewayQuoteRequest({ listing, request, payer }))))
-      .toEqual(new QuoteUnavailable("service_unavailable"));
+    const keyed = parseFieldEncryptionKeys({ activeKey: `0x${"a1".repeat(32)}`, activeKeyId: "k1", previousKeys: "" });
+    const unkeyed = parseFieldEncryptionKeys({ activeKeyId: "k1", previousKeys: "" });
+    const jobQuotes = (keys: typeof keyed, running: boolean) => new StandardQuoteService(railConfig(), 84532, {
+      externalJobs: { keys, providerAgentId: "1", workerRunning: () => running, wake: () => undefined },
+    });
+    const ask = async (service: StandardQuoteService, body: Record<string, unknown> = request) =>
+      service.quote(await gatewayQuoteRequest({ listing, request: body, payer }));
+    for (const [keys, running, enabled] of [
+      [keyed, true, false], [unkeyed, true, true], [keyed, false, true],
+    ] as const) {
+      db.asyncAdmission = enabled;
+      expect(await refusal(ask(jobQuotes(keys, running))))
+        .toEqual(new QuoteUnavailable("external_jobs_unavailable"));
+    }
     expect(insertedQuotes()).toHaveLength(0);
+    db.query.mockImplementationOnce(async () => { throw new Error("connection reset"); });
+    expect(await refusal(ask(jobQuotes(keyed, true)))).toEqual(new QuoteUnavailable("service_unavailable"));
+    db.asyncAdmission = true;
+    const body = await ask(jobQuotes(keyed, true));
+    await expect(acceptQuoteAsGateway({ listing, body, request, payer })).resolves.toBeDefined();
+    // A request too large to store as the job's input is declined before payment.
+    const large = { message: "x".repeat(500) };
+    const bounded = await import("../src/core/externalJobs/jobCodec.js");
+    expect(bounded.jobInputFits(large)).toBe(true);
+    expect(bounded.jobInputFits({ message: "x".repeat(bounded.MAX_JOB_INPUT_BYTES) })).toBe(false);
   });
 
   it("stops new quotes, persisting nothing, for a listing whose served contract drifted", async () => {

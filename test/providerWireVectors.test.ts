@@ -12,6 +12,7 @@ vi.mock("../src/core/db/pool.js", async () => {
   };
 });
 
+import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import type { ServiceResult } from "../src/core/serviceRegistry/types.js";
 import { canonicalHash } from "../src/core/standardRail/canonical.js";
 import {
@@ -22,6 +23,7 @@ import {
   failedEvidence,
   fixture,
   keys,
+  noteJobService,
   order,
 } from "./providerWireFixture.js";
 import { startWireHarness, type WireHarness } from "./providerWireHarness.js";
@@ -134,6 +136,30 @@ describe("provider-wire dispatch and dispatch-status vectors", () => {
     }
   });
 
+  // L03: an external-job admission acknowledges durable acceptance with the
+  // vector's `submitted` bytes; its phases replay as `submitted`/`working`.
+  it("admits an external-job dispatch as submitted and replays its phases as the vectors", async () => {
+    clearServicesForTests();
+    registerService(noteJobService());
+    state.db.asyncAdmission = true;
+    await persistOrderQuote();
+    const submitted = vector(dispatch, "submitted.accepted");
+    wire.at(submitted.provider.now);
+    expectWireAnswer(await wire.send(dispatch.requests.initial.http), submitted);
+    expect(state.db.claims.get(order.orderId)).toMatchObject({ id: order.providerTaskId, state: "external_job" });
+    expect(state.db.jobs.get(order.providerTaskId)).toMatchObject({ phase: "queued", adapter_version: "v1" });
+    for (const [phase, id] of [
+      ["queued", "submitted.accepted"], ["starting", "working.accepted"],
+      ["reconciling", "working.accepted"], ["polling", "working.accepted"],
+    ] as const) {
+      wire.reset();
+      wire.plant({ state: "external_job", job_phase: phase });
+      const expected = vector(dispatch, id);
+      wire.at(expected.provider.now, expected.provider.operations.observedAt);
+      expectWireAnswer(await wire.send(dispatch.requests.initial.http), expected);
+    }
+  });
+
   it("refuses definitely before admission and answers uncertainty with the empty 503", async () => {
     // No persisted provider quote: the QuoteV1 binding cannot be proven.
     const quoteWindow = vector(dispatch, "refused.quote-window");
@@ -178,6 +204,8 @@ describe("provider-wire lifecycle and terminal-evidence vectors", () => {
   it("answers status and artifact reads byte for byte", async () => {
     for (const [doc, id, claim] of [
       [lifecycle, "status.working.accepted", {}],
+      // An external job past its start answers the same working read.
+      [lifecycle, "status.working.accepted", { state: "external_job", job_phase: "polling" }],
       [lifecycle, "status.completed.accepted", completed],
       [lifecycle, "artifact.service-result.accepted", completed],
       [terminal, "service-result.lifecycle-attestation.accepted", completed],

@@ -1,6 +1,8 @@
 import { Router, type Request } from "express";
 import { base, baseSepolia } from "viem/chains";
 import type { Config } from "../config.js";
+import { externalJobKeyRing } from "../externalJobs/keyRing.js";
+import { idleExternalJobRuntime, type ExternalJobRuntime } from "../externalJobs/runtime.js";
 import { logError, logWarn } from "../logger.js";
 import { respondAmbiguously, respondLifecycleUnavailable } from "../security/servicingIngress.js";
 import type { ProviderStandardRailConfig } from "./config.js";
@@ -40,19 +42,26 @@ export function createStandardRailRouter(
     recordServicingFailure?: (req: Request) => void;
     dispatch?: DispatchDependencies;
     lifecycle?: LifecycleDependencies;
+    externalJobs?: ExternalJobRuntime;
   } = {},
 ): Router {
+  // Without a worker in this process, external jobs are still admitted for
+  // funded orders, but none is sold (externalJobs/sales.ts).
+  const externalJobs = options.externalJobs ?? idleExternalJobRuntime(
+    externalJobKeyRing(core, config.retainedSigningKeys.values()),
+    core.PROVIDER_AGENT_ID.toString(),
+  );
   const dispatch = new StandardDispatchService(
     config,
     core.CHAIN_ID === 8453 ? base : baseSepolia,
     core.CHAIN_ID,
-    options.dispatch,
+    { externalJobs, ...options.dispatch },
   );
   const lifecycle = new StandardLifecycleService(config, core.CHAIN_ID, {
     signer: options.dispatch?.signer,
     ...options.lifecycle,
   });
-  const quotes = new StandardQuoteService(config, core.CHAIN_ID);
+  const quotes = new StandardQuoteService(config, core.CHAIN_ID, { externalJobs });
   const recordFailure = options.recordServicingFailure ?? (() => undefined);
   const router = Router();
 

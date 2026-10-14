@@ -178,7 +178,10 @@ provider log's `reason`:
 - `capacity`: the listing version's nonterminal tasks reached
   `maxOpenOrders`; new sales resume as they finish;
 - `contract_drift`: the served skill contract differs from the installed
-  bundle (see above); and
+  bundle (see above);
+- `external_jobs_unavailable`: an external-job listing while the
+  async-admission switch is off, `PROVIDER_DATA_ENCRYPTION_KEY` is not set or
+  the process runs no external-job worker; and
 - `service_unavailable`: provider readiness, the readiness hook, or the
   database failed; fix the dependency rather than the check.
 
@@ -202,7 +205,11 @@ is a reviewed code:
 - `evidence`: chain evidence, settlement timing (judged by the deposit block
   timestamp), sanctions, or evidence already admitted for another order; and
 - `service_unavailable`: provider readiness or the database failed before
-  anything was admitted.
+  anything was admitted, or, for an external-job listing, async admission is
+  off or no encryption key is configured (the log line `External-job dispatch
+  refused before admission` names `async_admission_off` or
+  `encryption_key_missing`). Product readiness never refuses an external-job
+  dispatch: the admitted job waits for the product.
 
 Listing capacity, paused sales, and quote age never refuse a funded dispatch.
 An empty-body `503` is deliberate ambiguity: admission exists, may exist, or

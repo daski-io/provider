@@ -1,11 +1,20 @@
 import type { ValidateFunction } from "ajv";
 import type { Chain, Hex } from "viem";
+import { pool } from "../db/pool.js";
+import {
+  externalJobAdmissionBlocker,
+  insertExternalJob,
+  planExternalJob,
+  type ExternalJobAdmission,
+} from "../externalJobs/admission.js";
+import { defaultExternalJobRuntime, type ExternalJobRuntime } from "../externalJobs/runtime.js";
 import { providerReady } from "../health.js";
 import { logWarn } from "../logger.js";
-import { getService, getSkill, getSyncAdapter } from "../serviceRegistry/registry.js";
+import { getService, getSkill } from "../serviceRegistry/registry.js";
+import type { ExternalJobAdapter } from "../serviceRegistry/types.js";
 import { assertExactKeys, canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
-import { admitDispatch, currentClaim, persistSynchronousResult } from "./dispatchAdmission.js";
+import { admitDispatch, currentClaim } from "./dispatchAdmission.js";
 import {
   DispatchAmbiguousError,
   DispatchRejectedError,
@@ -32,9 +41,14 @@ import { assertProviderQuoteBinding, verifyQuoteEnvelope } from "./quoteBinding.
 import { loadProviderQuote } from "./quoteStore.js";
 import { compileProviderSchema, validateProviderRequest } from "./schema.js";
 import type { ResultContract } from "./serviceResult.js";
-import { executeSynchronously } from "./syncExecution.js";
-import { holdSyncLease, renewSyncLease, SYNC_LEASE, type SyncLeaseTiming } from "./syncLease.js";
-import { dispatchHashOf, type ProviderTransaction } from "./transactionStore.js";
+import { executeAdmittedSyncClaim } from "./syncDispatch.js";
+import { SYNC_LEASE, type SyncLeaseTiming } from "./syncLease.js";
+import {
+  dispatchHashOf,
+  getTransaction,
+  type ClaimExecution,
+  type ProviderTransaction,
+} from "./transactionStore.js";
 import type {
   ProviderOutcomeConfig,
   QuoteV1,
@@ -58,7 +72,14 @@ export interface DispatchDependencies {
   signer?: ProviderResponseSigner;
   /** Execution lease timing; tests shorten it. */
   lease?: SyncLeaseTiming;
+  /** This process's external-job runtime: key ring, worker wake-up. */
+  externalJobs?: ExternalJobRuntime;
 }
+
+/** How a new claim executes, decided before it is admitted. */
+type AdmissionPlan =
+  | { kind: "sync"; contract: ResultContract }
+  | { kind: "external-job"; job: ExternalJobAdmission };
 
 function parseDispatchRequest(body: unknown): DispatchRequest {
   try {
@@ -81,6 +102,7 @@ export class StandardDispatchService {
   private readonly ready: () => Promise<boolean>;
   private readonly signers: ListingSigner;
   private readonly lease: SyncLeaseTiming;
+  private readonly externalJobs: ExternalJobRuntime;
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly resultValidators = new Map<string, ValidateFunction>();
 
@@ -95,6 +117,7 @@ export class StandardDispatchService {
     const injected = dependencies.signer;
     this.signers = injected ? () => injected : providerListingSigner(config);
     this.lease = dependencies.lease ?? SYNC_LEASE;
+    this.externalJobs = dependencies.externalJobs ?? defaultExternalJobRuntime(config);
     // Every installed version, superseded ones included, keeps the request
     // and result contracts it was admitted with.
     for (const outcome of config.servicing.values()) {
@@ -115,7 +138,8 @@ export class StandardDispatchService {
   }
 
   /**
-   * Admit and execute a funded dispatch. Definite refusals are thrown only
+   * Admit a funded dispatch, then execute a synchronous one or leave an
+   * external job queued for the worker. Definite refusals are thrown only
    * before any claim can exist for the order. Once a claim exists, or its
    * commit is uncertain, the answer is the signed snapshot or ambiguity.
    */
@@ -126,12 +150,10 @@ export class StandardDispatchService {
     const dispatchHash = canonicalHash(parts.dispatch);
     const existing = await currentClaim(dispatch.gatewayAudience, dispatch.orderId);
     if (existing) return this.replay(existing, dispatchHash);
-    let outcome: ProviderOutcomeConfig;
-    let contract: ResultContract;
+    let verified: { outcome: ProviderOutcomeConfig; plan: AdmissionPlan };
     let claimed: { transaction: ProviderTransaction; fresh: boolean };
     try {
-      outcome = await this.verifyNewDispatch(parts);
-      contract = this.resultContract(outcome);
+      verified = await this.verifyNewDispatch(parts);
       claimed = await admitDispatch({
         gatewayAudience: dispatch.gatewayAudience,
         orderId: dispatch.orderId,
@@ -139,12 +161,12 @@ export class StandardDispatchService {
         dispatchHash,
         requestHash: dispatch.canonicalProviderRequestHash,
         payer: dispatch.payer,
-        serviceSlug: outcome.serviceSlug,
-        skillId: outcome.skillId,
+        serviceSlug: verified.outcome.serviceSlug,
+        skillId: verified.outcome.skillId,
         listingManifestHash: dispatch.listingManifestHash,
         dispatchValidBefore: parts.dispatch.validBefore,
         providerQuoteHash: parts.quote.payload.providerQuoteHash,
-        leaseSeconds: this.lease.leaseSeconds,
+        execution: this.claimExecution(verified.plan),
       });
     } catch (error) {
       if (!(error instanceof DispatchRejectedError)) throw error;
@@ -155,37 +177,46 @@ export class StandardDispatchService {
       throw error;
     }
     if (!claimed.fresh) return this.replay(claimed.transaction, dispatchHash);
-    const leaseToken = claimed.transaction.execution_lease_token;
-    if (!leaseToken) throw new DispatchAmbiguousError("Admitted claim carries no execution lease");
-    // The claim's expiry was computed when its transaction began, which can be
-    // long before its COMMIT (a wait behind a concurrent claim, a slow commit).
-    // Extend it, fenced, before the product call: a lease that already expired
-    // may be failed by any process, so the call is never started under it.
-    const held = await renewSyncLease(claimed.transaction.id, leaseToken, this.lease.leaseSeconds)
-      .catch(() => false);
-    if (!held) throw new DispatchAmbiguousError("Admitted claim's lease expired before execution started");
-    // The lease is renewed until the result is persisted; a lost lease ends
-    // the attempt without a write and the answer stays ambiguous.
-    const lease = holdSyncLease(claimed.transaction.id, leaseToken, this.lease);
-    try {
-      const result = await executeSynchronously(getSyncAdapter(outcome.serviceSlug), {
+    if (verified.plan.kind === "external-job") return this.admittedJob(claimed.transaction, dispatchHash);
+    return this.snapshot(await executeAdmittedSyncClaim({
+      claim: claimed.transaction,
+      context: {
         taskId: claimed.transaction.id,
         orderId: dispatch.orderId,
         payer: dispatch.payer,
-        serviceSlug: outcome.serviceSlug,
-        skillId: outcome.skillId,
-      }, parts.request, contract, lease.signal);
-      if (lease.signal.aborted) throw new DispatchAmbiguousError("Synchronous execution lease was lost");
-      return await this.snapshot(
-        await persistSynchronousResult(claimed.transaction.id, leaseToken, result),
-        dispatchHash,
-      );
+        serviceSlug: verified.outcome.serviceSlug,
+        skillId: verified.outcome.skillId,
+      },
+      input: parts.request,
+      contract: verified.plan.contract,
+      lease: this.lease,
+    }), dispatchHash);
+  }
+
+  private claimExecution(plan: AdmissionPlan): ClaimExecution {
+    if (plan.kind === "sync") return { kind: "sync", leaseSeconds: this.lease.leaseSeconds };
+    const { job } = plan;
+    return {
+      kind: "external-job",
+      insertJob: (client, taskId) => insertExternalJob(client, this.externalJobs.keys, taskId, job),
+    };
+  }
+
+  /**
+   * A durably admitted job: the answer acknowledges acceptance, `submitted`,
+   * or a later state the worker has already persisted. Nothing here calls
+   * the product; the worker starts the job.
+   */
+  private async admittedJob(claim: ProviderTransaction, dispatchHash: Hex): Promise<DispatchSnapshot> {
+    this.externalJobs.wake();
+    let current: ProviderTransaction | null;
+    try {
+      current = await getTransaction(claim.id);
     } catch (error) {
-      if (error instanceof DispatchAmbiguousError) throw error;
-      throw new DispatchAmbiguousError("Admitted dispatch could not be answered", error);
-    } finally {
-      lease.stop();
+      throw new DispatchAmbiguousError("Admitted external job could not be read", error);
     }
+    if (!current) throw new DispatchAmbiguousError("Admitted external job could not be read");
+    return this.snapshot(current, dispatchHash);
   }
 
   /** The admitted result schema and reviewed failure codes, resolved before admission. */
@@ -216,8 +247,47 @@ export class StandardDispatchService {
     }
   }
 
+  /**
+   * An external job is admitted only while async admission is on and a key
+   * can seal its input; product readiness is not consulted (the worker
+   * waits for the product), and its stable idempotency key is fixed here.
+   */
+  private async externalJobPlan(
+    adapter: ExternalJobAdapter,
+    outcome: ProviderOutcomeConfig,
+    dispatch: StandardRailDispatchV2,
+    input: Record<string, unknown>,
+  ): Promise<AdmissionPlan> {
+    const blocker = await withDispatchRejection(
+      "service_unavailable",
+      () => externalJobAdmissionBlocker(this.externalJobs, pool),
+    );
+    if (blocker) {
+      logWarn("External-job dispatch refused before admission", { diagnostic: blocker });
+      throw new DispatchRejectedError("service_unavailable");
+    }
+    const job = planExternalJob({
+      adapter,
+      identity: {
+        environment: this.config.environment,
+        chainId: this.chainId,
+        providerAgentId: this.externalJobs.providerAgentId,
+        gatewayAudience: dispatch.gatewayAudience,
+        orderId: dispatch.orderId,
+        serviceSlug: outcome.serviceSlug,
+        skillId: outcome.skillId,
+      },
+      fulfillmentSeconds: outcome.fulfillmentSeconds,
+      input,
+    });
+    if (!job) throw new DispatchRejectedError("validator");
+    return { kind: "external-job", job };
+  }
+
   /** Every check before admission; any failure here is a definite refusal. */
-  private async verifyNewDispatch(parts: DispatchRequest): Promise<ProviderOutcomeConfig> {
+  private async verifyNewDispatch(
+    parts: DispatchRequest,
+  ): Promise<{ outcome: ProviderOutcomeConfig; plan: AdmissionPlan }> {
     const dispatch = parts.dispatch.payload;
     try {
       assertDispatchPayloadBound(parts.dispatch, parts.request, this.config, this.chainId);
@@ -245,13 +315,17 @@ export class StandardDispatchService {
       if (!service || !getSkill(outcome.serviceSlug, outcome.skillId)) {
         throw new DispatchRejectedError("outcome_policy");
       }
-      // External-job admission is not available in this build yet; refuse
-      // before admission so the gateway retries with a fresh envelope.
-      if (service.adapter.mode === "external-job") throw new DispatchRejectedError("service_unavailable");
-      // Synchronous execution during an outage would sign a terminal failure;
-      // refusing before admission lets the gateway retry a fresh envelope.
-      if (!(await this.ready().catch(() => false))) {
-        throw new DispatchRejectedError("service_unavailable");
+      const contract = this.resultContract(outcome);
+      let plan: AdmissionPlan;
+      if (service.adapter.mode === "external-job") {
+        plan = await this.externalJobPlan(service.adapter, outcome, dispatch, parts.request);
+      } else {
+        // Synchronous execution during an outage would sign a terminal
+        // failure; refusing before admission lets the gateway retry.
+        if (!(await this.ready().catch(() => false))) {
+          throw new DispatchRejectedError("service_unavailable");
+        }
+        plan = { kind: "sync", contract };
       }
       const verified = await withDispatchRejection("evidence", () => this.evidence.verify({
         dispatch,
@@ -268,7 +342,7 @@ export class StandardDispatchService {
         parts.evidenceBundle,
         verified.authorizationKey,
       ));
-      return outcome;
+      return { outcome, plan };
     } catch (error) {
       if (error instanceof DispatchRejectedError) throw error;
       throw new DispatchRejectedError("validator");

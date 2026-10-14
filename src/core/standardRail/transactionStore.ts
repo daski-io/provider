@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
-import { rollbackFailedTransaction, type TransactionClient } from "../db/queryable.js";
+import { rollbackFailedTransaction, type Queryable, type TransactionClient } from "../db/queryable.js";
+import type { ExternalJobPhase } from "../externalJobs/phases.js";
 import { RUNTIME_INSTANCE_ID } from "../runtimeInstance.js";
 import type { ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "./canonical.js";
@@ -19,7 +20,11 @@ export interface ProviderTransaction {
   skill_id: string;
   /** The listing version (runtime commitment hash) the claim was admitted under. */
   listing_manifest_hash: Buffer;
-  state: "executing" | "completed" | "failed";
+  /**
+   * `executing` is a synchronous execution; `external_job` an admitted
+   * external job, whose progress is its job row's phase.
+   */
+  state: "executing" | "external_job" | "completed" | "failed";
   result: ServiceResult | null;
   /**
    * canonicalHash of `result`, frozen with the terminal transition. NULL for
@@ -39,10 +44,24 @@ export interface ProviderTransaction {
   execution_lease_expires_at?: Date | null;
   /** Database clock (Unix seconds) when this row was read. */
   observed_at: string;
+  /** The external job's phase, read with the claim; null for synchronous claims. */
+  job_phase?: ExternalJobPhase | null;
 }
 
-/** Every read stamps the database clock so each answer carries a fresh observation. */
-const ROW = `*, floor(extract(epoch FROM now()))::bigint::text AS observed_at`;
+/**
+ * Every read stamps the database clock so each answer carries a fresh
+ * observation, and carries an external job's phase from the same snapshot.
+ */
+const ROW = `*, floor(extract(epoch FROM now()))::bigint::text AS observed_at,
+  (SELECT j.phase FROM provider_external_jobs j WHERE j.task_id=provider_transactions.id) AS job_phase`;
+
+/**
+ * How a new claim executes: a synchronous call under an execution lease, or
+ * an external job inserted by the caller inside the claim's transaction.
+ */
+export type ClaimExecution =
+  | { kind: "sync"; leaseSeconds?: number }
+  | { kind: "external-job"; insertJob(client: Queryable, taskId: string): Promise<void> };
 
 /** The deferred admission fence refused a claim at or after its envelope deadline. */
 export class AdmissionExpiredError extends Error {
@@ -93,9 +112,10 @@ const isAdmissionDeadline = (error: unknown) =>
  * existing claim is returned unchanged for the caller to compare; the claim
  * cannot commit at or after `dispatchValidBefore` (database-enforced). Any
  * other error means this call admitted nothing, though a concurrent call
- * may have; callers re-check before refusing. A new claim is owned by this
- * process under a fresh lease token, generated here so that a re-read after
- * an unknown COMMIT recognizes it.
+ * may have; callers re-check before refusing. A new synchronous claim is
+ * owned by this process under a fresh lease token, generated here so that a
+ * re-read after an unknown COMMIT recognizes it; a new external-job claim has
+ * no execution lease and commits only together with its job row.
  */
 export async function claimTransaction(args: {
   gatewayAudience: string;
@@ -110,11 +130,12 @@ export async function claimTransaction(args: {
   dispatchValidBefore: number;
   /** The persisted provider quote the order was paid against. */
   providerQuoteHash: Hex;
-  /** The initial execution lease; the owner renews it with the same length. */
-  leaseSeconds?: number;
+  /** Synchronous with its initial lease (the default), or an external job. */
+  execution?: ClaimExecution;
 }): Promise<{ transaction: ProviderTransaction; fresh: boolean }> {
   const id = `task-${randomUUID()}`;
-  const leaseToken = randomUUID();
+  const execution = args.execution ?? { kind: "sync" };
+  const leaseToken = execution.kind === "sync" ? randomUUID() : null;
   const client = (await pool.connect()) as TransactionClient;
   let destroy = false;
   let commitSent = false;
@@ -136,17 +157,21 @@ export async function claimTransaction(args: {
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
          service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
          execution_owner,execution_lease_token,execution_lease_expires_at,provider_quote_hash
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'executing',to_timestamp($11),
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$16,to_timestamp($11),
          $12,$13,now() + make_interval(secs => $14),$15)
        RETURNING ${ROW}`,
       [
         id, args.gatewayAudience, args.orderId, bytes(args.dispatchNonce),
         bytes(args.dispatchHash), bytes(args.requestHash), args.payer,
         args.serviceSlug, args.skillId, bytes(args.listingManifestHash),
-        args.dispatchValidBefore, RUNTIME_INSTANCE_ID, leaseToken,
-        args.leaseSeconds ?? SYNC_LEASE.leaseSeconds, bytes(args.providerQuoteHash),
+        args.dispatchValidBefore,
+        execution.kind === "sync" ? RUNTIME_INSTANCE_ID : null, leaseToken,
+        execution.kind === "sync" ? execution.leaseSeconds ?? SYNC_LEASE.leaseSeconds : null,
+        bytes(args.providerQuoteHash),
+        execution.kind === "sync" ? "executing" : "external_job",
       ],
     );
+    if (execution.kind === "external-job") await execution.insertJob(client, id);
     commitSent = true;
     await client.query("COMMIT");
     return { transaction: inserted.rows[0]!, fresh: true };

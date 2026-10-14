@@ -46,9 +46,10 @@ product work.
 | 401 `quote_rejected` / `envelope` or `signature` | Wrong type, version, domain, lifetime, key id, or signer |
 | 409 `quote_rejected` / `outcome_policy`, `binding`, `price` | Unknown listing version, request-hash or payer-format mismatch, unreleasable price |
 | 422 `quote_rejected` / `request_invalid` + `fieldErrors` | Schema or readiness refusal; `[{path, rule, message, allowedValues?}]` |
-| 503 `quote_unavailable` / `capacity`, `sales_paused`, `service_unavailable`, `contract_drift` | New sales are temporarily stopped; retry later (`contract_drift`: the served skill contract differs from the admitted bundle until a replacement is installed) |
+| 503 `quote_unavailable` / `capacity`, `sales_paused`, `service_unavailable`, `contract_drift`, `external_jobs_unavailable` | New sales are temporarily stopped; retry later (`contract_drift`: the served skill contract differs from the admitted bundle until a replacement is installed; `external_jobs_unavailable`: an external-job listing while async admission is off, no encryption key is configured or no worker runs in the process) |
 
-New quotes stop when a listing version's nonterminal tasks reach its
+New quotes stop when a listing version's nonterminal tasks (synchronous
+executions and external jobs in every phase, overdue or not) reach its
 `maxOpenOrders`. That limit never refuses an already-funded dispatch.
 
 `ProviderIntakeRequestV1` (`{outcomeId, listingManifestHash, requestHash,
@@ -105,8 +106,14 @@ signed with the provider wallet its version recorded (a retained previous
 key after a rotation), and servicing calls may name a retained previous
 provider audience.
 
-`state` is `working` while the synchronous execution runs (stored as
-`executing`), then `completed` or `failed`; there is no inline `result`.
+`state` is `working` while a synchronous execution runs (stored as
+`executing`), then `completed` or `failed`; there is no inline `result`. An
+external job (stored as `external_job` with its own job phase) answers
+`submitted` while queued and `working` while it starts, reconciles or polls,
+overdue or not; there is no wire state for polling, overdue work or start
+ambiguity. A funded external-job dispatch is refused before admission
+(`service_unavailable`) only while the async-admission switch is off or no
+encryption key is configured; product readiness never refuses it.
 `operations` is `{schemaVersion: 1, revision, observedAt, fulfillment: null,
 support: null, recovery: null}`: the revision is persisted per task and stays
 0 for this constant projection, while `observedAt` is the database clock at

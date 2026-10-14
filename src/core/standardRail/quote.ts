@@ -1,6 +1,10 @@
 import type { ValidateFunction } from "ajv";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { pool } from "../db/pool.js";
+import { jobInputFits } from "../externalJobs/jobCodec.js";
+import { defaultExternalJobRuntime, type ExternalJobRuntime } from "../externalJobs/runtime.js";
+import { externalJobSalesStop } from "../externalJobs/sales.js";
 import { getService, getSkill } from "../serviceRegistry/registry.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { describeIntake } from "./intake.js";
@@ -43,12 +47,14 @@ export type ProviderDigestSigner = (digest: Hex) => Promise<Hex>;
 export class StandardQuoteService {
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly sign: ProviderDigestSigner;
+  private readonly externalJobs: ExternalJobRuntime;
 
   constructor(
     private readonly config: ProviderStandardRailConfig,
     private readonly chainId: number,
-    options: { sign?: ProviderDigestSigner } = {},
+    options: { sign?: ProviderDigestSigner; externalJobs?: ExternalJobRuntime } = {},
   ) {
+    this.externalJobs = options.externalJobs ?? defaultExternalJobRuntime(config);
     for (const outcome of config.outcomes.values()) {
       this.validators.set(
         outcome.listingManifestHash,
@@ -102,8 +108,19 @@ export class StandardQuoteService {
     const service = getService(outcome.serviceSlug);
     const skill = getSkill(outcome.serviceSlug, outcome.skillId);
     if (!service || !skill) throw new QuoteRefusal("quote", 409, "outcome_policy");
-    // External-job admission is not available in this build yet.
-    if (service.adapter.mode === "external-job") throw new QuoteUnavailable("service_unavailable");
+    if (service.adapter.mode === "external-job") {
+      // Never sell a job this provider could not admit, seal or progress.
+      const stop = await externalJobSalesStop(this.externalJobs, pool)
+        .catch(() => "service_unavailable" as const);
+      if (stop) throw new QuoteUnavailable(stop);
+      if (!jobInputFits(request)) {
+        throw new QuoteRefusal("quote", 422, "request_invalid", [{
+          path: "$",
+          rule: "max-bytes",
+          message: "The request is too large for this service.",
+        }]);
+      }
+    }
     if (skill.acceptingNewOrders === false) throw new QuoteUnavailable("sales_paused");
     // The served contract (price included) no longer matches the admitted
     // one: stop selling this version until a replacement bundle is installed.

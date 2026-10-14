@@ -45,9 +45,13 @@ belongs to the whole service. Registration validates both: a job adapter's
 version (1 to 64 letters, digits, `.`, `_`, `-`), its optional
 `idempotencyRetentionSeconds`, retained previous versions keyed by exactly
 their own version, and an explicit `deadlines.fulfillmentSeconds` of at least
-`dispatchSeconds + 180` on every skill. This build does not yet quote or
-admit external-job listings: their quotes answer `503 quote_unavailable` and
-their dispatches are refused before admission.
+`dispatchSeconds + 180` on every skill. While async admission is active
+(`docs/configuration.md`), a funded external-job dispatch is admitted as one
+queued job and answered `submitted` before any product call; product
+readiness is not consulted for it (the job waits for the product instead).
+New external-job quotes need the switch on, an active encryption key and a
+running worker in the process; this build has no worker yet, so they answer
+`503 quote_unavailable` (`external_jobs_unavailable`).
 
 The adapter contract is intentionally terminal:
 

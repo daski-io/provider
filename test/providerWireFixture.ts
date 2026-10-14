@@ -116,6 +116,16 @@ export function noteService(execute: () => Promise<ServiceResult>): ServiceModul
   };
 }
 
+/** The same listing served by an external-job adapter that is never called here. */
+export function noteJobService(): ServiceModule {
+  const module = noteService(async () => { throw new Error("a synchronous call is never made"); });
+  const unreachable = async (): Promise<never> => { throw new Error("no product call is made at admission"); };
+  return {
+    ...module,
+    adapter: { mode: "external-job", version: "v1", start: unreachable, recoverStart: unreachable, poll: unreachable },
+  };
+}
+
 /** A stored claim for the context order, as the provider's database holds it. */
 export function claimRow(overrides: Partial<ProviderTransaction> = {}): ProviderTransaction {
   return {

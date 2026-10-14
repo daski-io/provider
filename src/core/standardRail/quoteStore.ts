@@ -128,14 +128,17 @@ export async function loadProviderQuote(quoteHash: Hex): Promise<ProviderQuotePa
 }
 
 /**
- * Funded obligations for one listing version that are not yet terminal. New
- * quotes stop at the listing capacity; funded dispatches are never refused
- * by this count.
+ * Funded obligations for one listing version that are not yet terminal:
+ * synchronous executions and external jobs in every phase, queued and
+ * reconciling, polled or merely waiting, overdue or not, for their whole
+ * lifetime. This is the gateway's own reservation scope (the listing
+ * version). New quotes stop at the listing capacity; funded dispatches are
+ * never refused by this count.
  */
 export async function countOpenObligations(listingManifestHash: Hex): Promise<number> {
   const result = await pool.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM provider_transactions
-      WHERE listing_manifest_hash=$1 AND state='executing'`,
+      WHERE listing_manifest_hash=$1 AND state IN ('executing','external_job')`,
     [bytes(listingManifestHash)],
   );
   return Number(result.rows[0]?.count ?? "0");

@@ -142,5 +142,12 @@ describePostgres("external jobs across upgrades against PostgreSQL", () => {
     expect(await harness.claim(job.taskId)).toMatchObject({ state: "completed" });
     // Finished jobs keep no encrypted state, so no key is needed for them.
     await expect(takeover(servicing([module], jobKeys("c3", "k3")))).resolves.toBeUndefined();
+    // An unfinished job may still need new state sealed: a build with only
+    // read-only keys cannot take it over.
+    const pending = await harness.admit();
+    await expect(takeover(servicing([module],
+      parseFieldEncryptionKeys({ activeKeyId: "primary", previousKeys: `k1=0x${"a1".repeat(32)}` }))))
+      .rejects.toThrow(/\(no active encryption key for unfinished external jobs\)/);
+    expect((await harness.job(pending.taskId)).phase).toBe("queued");
   });
 });

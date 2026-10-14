@@ -19,6 +19,7 @@ export function externalJobServicing(
   return {
     adapterVersions: (serviceSlug) => versions.get(serviceSlug) ?? new Set(),
     keyIds: new Set(keys.keys.keys()),
+    canSeal: keys.activeKeyId !== null,
   };
 }
 

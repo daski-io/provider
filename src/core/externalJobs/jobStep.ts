@@ -94,16 +94,19 @@ async function queued(step: Step, service: ServiceModule): Promise<void> {
     });
     return;
   }
+  // Open the input before recording an intent: an unreadable input never
+  // leaves a recorded start that was not called.
+  const opened = input(step);
   const intent = await recordStartIntent({
     job, from: "queued", retentionSeconds: step.adapter.idempotencyRetentionSeconds ?? null,
   });
-  if (intent) await start(step, intent);
+  if (intent) await start(step, intent, opened);
 }
 
 /** Call start under a recorded intent; any non-definitive answer reconciles. */
-async function start(step: Step, intent: StartIntent): Promise<void> {
+async function start(step: Step, intent: StartIntent, opened: Record<string, unknown>): Promise<void> {
   step.job = { ...step.job, ...intent };
-  const result = await call(step, "start", input(step), intent);
+  const result = await call(step, "start", opened, intent);
   if (result.kind === "lease_lost") return;
   const verdict = startVerdict(result);
   if (verdict.kind === "accepted") return accepted(step, "starting", verdict.job, verdict.pollAfterSeconds);
@@ -135,7 +138,8 @@ async function interrupted(step: Step): Promise<void> {
 }
 
 async function reconcile(step: Step): Promise<void> {
-  const result: CallResult = await call(step, "recoverStart", input(step));
+  const opened = input(step);
+  const result: CallResult = await call(step, "recoverStart", opened);
   if (result.kind === "lease_lost") return;
   const verdict = recoveryVerdict(result);
   if (verdict.kind === "accepted") return accepted(step, "reconciling", verdict.job, verdict.pollAfterSeconds);
@@ -143,7 +147,7 @@ async function reconcile(step: Step): Promise<void> {
     if ((await terminal(step, "reconciling", verdict.result)) === "done") return;
     return unresolved(step, { code: "invalid_response", retryAfterSeconds: null }, null);
   }
-  if (verdict.kind === "safe-to-start") return restart(step, verdict.basis);
+  if (verdict.kind === "safe-to-start") return restart(step, verdict.basis, opened);
   return unresolved(step, verdict.issue, verdict.retryAfterSeconds);
 }
 
@@ -154,7 +158,11 @@ async function reconcile(step: Step): Promise<void> {
  * and a same-key replay only with a declared retention whose persisted
  * horizon still leaves room for the call and a safety margin.
  */
-async function restart(step: Step, basis: "authoritative-absence" | "idempotent-replay"): Promise<void> {
+async function restart(
+  step: Step,
+  basis: "authoritative-absence" | "idempotent-replay",
+  opened: Record<string, unknown>,
+): Promise<void> {
   const { job, adapter } = step;
   const retention = adapter.idempotencyRetentionSeconds ?? null;
   if (job.overdue || job.candidate || (basis === "idempotent-replay" && retention === null)) {
@@ -173,7 +181,7 @@ async function restart(step: Step, basis: "authoritative-absence" | "idempotent-
   });
   if (!intent) return unresolved(step, null, null, "recover.restart_not_permitted");
   logWarn("Starting an external job again after recovery", { ...facts(job), basis });
-  await start(step, intent);
+  await start(step, intent, opened);
 }
 
 async function unresolved(

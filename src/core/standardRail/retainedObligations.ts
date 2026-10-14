@@ -19,6 +19,8 @@ export interface ExternalJobServicing {
   adapterVersions(serviceSlug: string): ReadonlySet<string>;
   /** The encryption key ids this build can open. */
   keyIds: ReadonlySet<string>;
+  /** Whether it can seal new job state (a reference or candidate): an active key. */
+  canSeal: boolean;
 }
 
 /** What a listing version still owes. */
@@ -114,7 +116,8 @@ const label = (hash: Hex) => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
  * key its orders' snapshots name; each version whose quotes may still be
  * dispatched, or with unfinished external jobs, also needs its admitted
  * definition (the jobs' result contract); and each unfinished job needs its
- * own adapter version and every encryption key its stored state names.
+ * own adapter version, every encryption key its stored state names and an
+ * active key to seal the reference or candidate it may still produce.
  * Diagnostics name versions by hash prefix, adapter versions and key ids,
  * never key material.
  */
@@ -144,6 +147,9 @@ export function assertObligationsServiceable(args: {
     }
     for (const keyId of [...obligation.encryptionKeyIds].sort()) {
       if (!args.externalJobs.keyIds.has(keyId)) problems.push(`${label(hash)} (encryption key ${keyId} not configured)`);
+    }
+    if (obligation.externalJobs > 0 && !args.externalJobs.canSeal) {
+      problems.push(`${label(hash)} (no active encryption key for unfinished external jobs)`);
     }
   }
   if (problems.length > 0) {

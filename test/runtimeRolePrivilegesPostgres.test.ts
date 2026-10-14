@@ -203,7 +203,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     const [polling] = await claim();
     await expect(modules.transitions.finishJob(polling!, "polling", { status: "completed" })).resolves.toBe("committed");
     await expect(modules.health.inspectExternalJobs(modules.pool.pool, {
-      adapterVersions: () => new Set(["v1"]), keyIds: new Set(["k1"]),
+      adapterVersions: () => new Set(["v1"]), keyIds: new Set(["k1"]), canSeal: true,
     }, 30)).resolves.toMatchObject({ active: 0 });
     await modules.pool.pool.query(
       "UPDATE provider_runtime_instances SET worker_heartbeat_at=now() WHERE instance_id=gen_random_uuid()",

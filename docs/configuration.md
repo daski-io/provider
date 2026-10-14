@@ -159,7 +159,9 @@ Rotation contract: new values always use the active key and name its id; a
 value is read only with the key its own id names. To rotate, configure a new
 active key under a new id and move the old one to
 `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`; keep it there while any unfinished
-job names it (finished jobs keep no encrypted state). Changing a key without
+job names it (finished jobs keep no encrypted state). Keep an active key
+while any job is unfinished: it seals the references and candidates those
+jobs still produce, and boot refuses without it. Changing a key without
 changing its id makes old values fail authentication instead of decrypting
 wrongly. Generate a key with `openssl rand -hex 32` and prefix `0x`. Keep keys
 out of Git, images, logs, manifests and support material.

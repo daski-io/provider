@@ -80,6 +80,7 @@ order it would take over (see `docs/configuration.md`):
 | `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
 | `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under an adapter version this build no longer has; keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish. |
 | `encryption key <id> not configured` | An unfinished job's stored state names a key this build lacks; restore it (after a rotation, in `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`). |
+| `no active encryption key for unfinished external jobs` | Unfinished jobs may still need a job reference or result candidate sealed, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key (a previous key alone only reads). |
 
 Never delete claims or quotes to pass the check.
 

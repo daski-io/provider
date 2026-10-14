@@ -19,7 +19,7 @@ import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/
 import { verifyRetainedObligations } from "../src/core/standardRail/retainedObligations.js";
 
 /** This suite's builds serve no external-job service and hold no job key. */
-const NO_EXTERNAL_JOBS = { adapterVersions: () => new Set<string>(), keyIds: new Set<string>() };
+const NO_EXTERNAL_JOBS = { adapterVersions: () => new Set<string>(), keyIds: new Set<string>(), canSeal: false };
 import { json, startRailHarness, type RailHarness } from "./dispatchHarness.js";
 import { acceptLifecycleAnswerAsGateway, gatewayLifecycleCall, LIFECYCLE_HEADERS } from "./gatewayLifecycleWire.js";
 import { dispatchOrder, quoteOrder, type GatewayOrder } from "./gatewayOrderFixture.js";

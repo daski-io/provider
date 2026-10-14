@@ -3,7 +3,8 @@
 ## Scope
 
 This repository is a deliberately narrow adapter between the Daski gateway and
-one or more fixed-price synchronous product operations.
+one or more fixed-price product operations: synchronous calls, or jobs a
+product already runs asynchronously (external-job mode).
 
 ```text
 buyer agent
@@ -27,9 +28,10 @@ service readiness hook, persists the quote, and signs the listing's fixed
 price for that request and payer. A later dispatch must bind to that
 persisted quote. Intake discovery shares the quote URL and creates nothing.
 
-It excludes dynamic quoting, background jobs, later input, cancellation,
-durable assets, owner actions, email, admin UI/API, direct A2A, and multi-replica
-execution recovery. Those belong in
+It excludes dynamic quoting, provider-owned workflows, later input,
+cancellation, durable assets, owner actions, email, admin UI/API, direct A2A,
+and intentional multi-replica operation; its one background loop is the
+bounded external-job worker below. Those belong in
 [provider-full](https://github.com/daski-io/provider-full).
 
 ## Composition
@@ -149,6 +151,74 @@ canonical hash and the completion time together, and a database trigger
 refuses any later change to them or to the claim's admitted bindings. Every
 attestation signs the frozen hash; rows from before the hash existed are
 attested from their stored result unchanged.
+
+## External-job worker
+
+An external-job service's product already runs the paid work as its own
+job. Core admits the funded order (above), then the worker in
+`src/core/externalJobs/` drives the job through its persisted phase:
+
+| Phase | Next work | Public state |
+| --- | --- | --- |
+| `queued` | Record the start intent, then call `start` | `submitted` |
+| `starting` | The intent is recorded and `start` in flight; after an interruption, reconcile | `working` |
+| `reconciling` | `recoverStart` (read-only) with the original key | `working` |
+| `polling` | `poll` (read-only) the original upstream job | `working` |
+| `completed` / `failed` | Serve the frozen result | `completed` / `failed` |
+
+- **Leases and fencing.** Each round claims due jobs (`next_run_at` passed,
+  no live lease) under a fresh lease token, serialized by an advisory lock
+  and limited to the configured number of live leases across every process
+  sharing the database. The holder renews its lease while one bounded call
+  runs and releases it with its outcome; every write runs in one short
+  transaction that first locks the row only while this holder still owns an
+  unexpired lease in the expected phase, so a stale worker cannot change
+  phase, schedule, reference or result. No transaction stays open across a
+  call.
+- **Calls.** Only `calls.ts` invokes an adapter, under the per-call limit and
+  the lease. Core stops waiting at either, even if the adapter ignores its
+  signal, and never writes the late answer. Any throw, abort, timeout or
+  invalid return from `start` is ambiguous and moves to `reconciling`; one
+  from `recoverStart` is unknown; one from `poll` is a retry. Outcomes,
+  issue codes, scheduling hints (whole seconds up to one day) and job
+  references (a plain JSON object of at most 16 KiB canonical JSON) are
+  validated by core.
+- **Start.** `queued` becomes `starting` only by recording the intent first,
+  in the same write as the first attempt time and the replay horizon (first
+  attempt plus the adapter's declared `idempotencyRetentionSeconds`); both
+  are fixed once and no retry extends them. A product outage defers a queued
+  job (`product_unavailable`) instead of starting or failing it. A job whose
+  lease expired while `starting` was interrupted and always reconciles.
+- **Recovery.** `recoverStart` may return the original job or result, or a
+  safe-to-start verdict, which core acts on only with the same key, never
+  past the deadline, never after the start is known to have executed, and,
+  for `idempotent-replay`, only with a declared retention whose persisted
+  horizon still leaves the call limit plus a 120-second margin (checked at
+  the database instant of the new intent). An empty eventually consistent
+  search is the adapter's `unknown`, never a basis.
+- **Scheduling.** A pending poll waits the poll interval (or the product's
+  hint) and resets the consecutive-failure count; it never spends the failure
+  budget. Failures and unresolved recoveries back off exponentially from 15
+  seconds to 30 minutes. A product's minimum delay is a floor, even past the
+  deadline. Core's own delays carry a small random spread.
+- **Deadline.** The fulfillment deadline (acceptance plus the dispatched
+  version's admitted window) is an overdue threshold, not proof of product
+  failure. A job that never recorded a start intent fails at it
+  (`provider_job_not_started`); started, accepted, ambiguous or invalid-result
+  work stays `working` with a durable `overdue_at` marker, starts nothing new
+  and keeps its read-only polling or reconciliation at the overdue cadence
+  (five minutes by default). A late valid result is still frozen once.
+- **Results.** A terminal result is judged against the dispatched version's
+  admitted result contract. A valid completed result or reviewed failure
+  evidence is frozen with the claim's terminal identity in one transaction,
+  and the job's encrypted state is cleared. A completed result that fails the
+  contract is an integration error: the job stays nonterminal with a bounded
+  encrypted candidate and a stable `result_diagnostic`, and only retrieval
+  continues (an immediate terminal start reconciles through its original
+  key).
+- **Restart.** Nothing is resubmitted because a process restarted: the
+  worker resumes due and abandoned work from PostgreSQL in its persisted
+  phase, with the adapter version that admitted it.
 
 ## Execution ownership and why one replica
 

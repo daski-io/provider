@@ -135,7 +135,8 @@ off unless every check in its JSON report passes:
 | `compatibility_barrier` | The database is not at this build's schema epoch or the barrier is incomplete. Boot this build (it migrates), then retry. |
 | `legacy_executions` | Pre-R1 executions still await the cutover; run `npm run daski:cutover` first. |
 | `retained_obligations` | This build cannot service an obligation (see the boot refusal below). |
-| `compatible_workers` | No running instance runs the external-job worker, or one is older. Expected for every build of this release. |
+| `compatible_workers` | No running instance runs the external-job worker, or an older process (without the worker, or at another schema epoch) still runs. Stop it, start this build, retry. |
+| `encryption_keys` | `PROVIDER_DATA_ENCRYPTION_KEY` is not configured for the command; external jobs cannot be sealed without it. |
 
 ## Startup refuses the database schema
 

@@ -180,12 +180,28 @@ npm run daski:async-admission -- --deactivate    # turn it off; admitted work is
 Activation locks the switch and, in the same transaction, requires the
 legacy-process barrier at this build's schema epoch (so no pre-R1 process can
 run), no pre-R1 execution awaiting the cutover, every retained obligation
-serviceable with this build's handlers and keys, and at least one running
+serviceable with this build's handlers and keys, at least one running
 instance with every running instance (fresh heartbeat in
-`provider_runtime_instances`) a compatible external-job worker. It records the
-checks as evidence. No build of this release runs that worker, so activation
-is refused (`compatible_workers`) until the external-job release is deployed.
-The command never migrates.
+`provider_runtime_instances`) a compatible external-job worker, and an active
+`PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`). It records the checks as
+evidence. Every process of this build runs the worker, so stop older
+processes before activating. The command never migrates.
+
+### External-job worker
+
+| Variable | Default / rule |
+| --- | --- |
+| `EXTERNAL_JOB_CALL_TIMEOUT_MS` | `30000` (1,000 to 120,000): one bounded `start`, `recoverStart` or `poll` call. |
+| `EXTERNAL_JOB_LEASE_SECONDS` | `90` (10 to 3,600): the database lease a call runs under; at least three renewals and at least one call plus two renewals. |
+| `EXTERNAL_JOB_LEASE_RENEW_MS` | `20000` (1,000 to 600,000): how often a held lease is renewed. |
+| `EXTERNAL_JOB_MAX_CONCURRENT_CALLS` | `4` (1 to 64): database-fenced calls in flight across every process sharing the database. |
+| `EXTERNAL_JOB_POLL_INTERVAL_SECONDS` | `60` (5 to 86,400): the ordinary wait between polls of a pending job, unless the product asks for more. |
+| `EXTERNAL_JOB_OVERDUE_POLL_SECONDS` | `300` (60 to 86,400): the slowest cadence for work past its fulfillment deadline. |
+
+These are worker defaults, not signed protocol constants. Transient failures
+back off from 15 seconds, doubling to at most 30 minutes, with a 10% random
+spread on core's own delays; a product's `pollAfterSeconds` or
+`retryAfterSeconds` (at most one day) is always honored as a minimum.
 
 ### Retained listing versions, keys and audiences
 

@@ -7,14 +7,17 @@ not chat history or a harness-specific file.
 ## Repository purpose
 
 This is the minimal Express + TypeScript starter for offering fixed-price,
-fully automated, synchronous services through Daski. It receives discovery,
-signed dispatch, payment evidence, status, terminal-outcome and authenticated
-buyer status/artifact lifecycle calls over the standard Exact-EVM rail.
+fully automated services through Daski. It receives discovery, signed
+dispatch, payment evidence, status, terminal-outcome and authenticated buyer
+status/artifact lifecycle calls over the standard Exact-EVM rail.
 
-Use this repository only when every paid operation returns a terminal result
-within 50 seconds and does not create a durable customer asset or later
-lifecycle. For dynamic quotes, jobs, human input, retries across restarts,
-assets/actions, admin, email, direct A2A, or multi-replica workers, use
+Use this repository only when every paid operation is fixed-price and
+automated, needs no later buyer input, cancellation, asset or operator
+workflow, and either returns a terminal result within the 50-second
+synchronous budget or is a product-owned asynchronous job that core can
+start, recover by its stable key and poll (external-job mode). For dynamic
+quotes, provider-owned multi-step workflows, human input, assets/actions,
+admin, email, direct A2A, or intentional multi-replica workers, use
 `https://github.com/daski-io/provider-full`.
 
 The only installed service is `src/services/dummy`, a Testnet-only paid echo
@@ -25,6 +28,9 @@ provider-specific services or retired payment rails into this repository.
 
 - `src/core/` owns Daski protocol, identity, payment/evidence verification,
   the minimal PostgreSQL rail ledger, security, discovery, and HTTP runtime.
+- `src/core/externalJobs/` owns external-job admission, the durable worker
+  (leases, phases, scheduling, recovery) and encrypted job state; it is the
+  only code that calls an external-job adapter (`calls.ts`).
 - `src/services/<slug>/` owns one service's manifest, validation, adapter,
   product configuration/client, docs, and co-located tests.
 - `src/providerServices.ts` is the single installed-service composition.
@@ -90,8 +96,12 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   a request before payment but cannot change the price or start work.
 - Validate input both at the rail schema and in the adapter. Reject unknown
   fields and apply explicit size/range limits.
-- An adapter returns only `completed` or `failed` and honors its `AbortSignal`.
-  It must finish within the 50-second core budget.
+- A synchronous adapter returns only `completed` or `failed`, honors its
+  `AbortSignal` and finishes within the 50-second synchronous budget. An
+  external-job adapter (`mode: "external-job"`) returns only the typed
+  outcome unions; any throw, abort, timeout or invalid return from `start`
+  is ambiguous and reconciled with `recoverStart` (read-only) under the
+  original key, never retried blindly. Only core schedules a start.
 - `resultSchema` describes the complete completed `ServiceResult`; core
   validates results against the admitted schema before freezing them. Failure
   evidence is only a code listed in the module's `failureCodes`.
@@ -142,9 +152,11 @@ durable PostgreSQL, runtime-injected secrets, and `/health/ready` for traffic.
 Operate one active application replica. Synchronous executions carry a
 persisted owner and an expiring lease: a restart or an overlapping compatible
 process never fails a live call, and only an expired lease is failed
-(`provider_execution_abandoned`); there is no job recovery or resumption. The
-first upgrade from a pre-R1 image is the stop-and-drain cutover in
-`docs/onboarding.md` (`npm run daski:cutover`).
+(`provider_execution_abandoned`); a synchronous call is never resumed.
+External jobs are durable: their worker finds due and abandoned work in
+PostgreSQL after a restart and resumes it in its persisted phase without
+resubmitting. The first upgrade from a pre-R1 image is the stop-and-drain
+cutover in `docs/onboarding.md` (`npm run daski:cutover`).
 
 Testnet is the normal first target. Mainnet requires production configuration,
 canonical reviewed contracts, separate runtime/migration database roles,

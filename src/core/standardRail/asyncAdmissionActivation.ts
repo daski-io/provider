@@ -2,12 +2,14 @@ import type { Queryable } from "../db/queryable.js";
 import { RUNTIME_SCHEMA_EPOCH, verifyCompatibilityBarrier } from "../db/runtimeEpoch.js";
 import { RUNTIME_TABLE_PRIVILEGES } from "../db/runtimePrivileges.js";
 import { liveRuntimeInstances } from "../runtimeInstance.js";
+import type { FieldEncryptionKeyRing } from "../security/fieldEncryption.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { countLegacyExecutions } from "./legacyCutover.js";
 import { verifyRetainedObligations } from "./retainedObligations.js";
 
 export interface ActivationCheck {
-  name: "compatibility_barrier" | "legacy_executions" | "retained_obligations" | "compatible_workers";
+  name: "compatibility_barrier" | "legacy_executions" | "retained_obligations" | "compatible_workers"
+    | "encryption_keys";
   ok: boolean;
   detail: string;
 }
@@ -24,13 +26,14 @@ const outcome = async (name: ActivationCheck["name"], work: () => Promise<string
  * Everything async admission requires, checked read-only: the legacy-process
  * barrier is installed at this build's epoch (so no pre-R1 process can run),
  * no pre-R1 execution awaits the cutover, this build can service every
- * retained obligation with its handlers and keys, and every running instance
- * is a compatible external-job worker (at least one). The external-job
- * release extends this list (encryption keys, external-job services).
+ * retained obligation with its handlers and keys, every running instance
+ * is a compatible external-job worker (at least one), and an active key can
+ * seal new jobs' input.
  */
 export async function asyncActivationChecks(
   db: Queryable,
   config: ProviderStandardRailConfig,
+  keys: FieldEncryptionKeyRing,
 ): Promise<ActivationCheck[]> {
   return [
     await outcome("compatibility_barrier", async () => {
@@ -56,6 +59,10 @@ export async function asyncActivationChecks(
       }
       return `${live.length} compatible running instances`;
     }),
+    await outcome("encryption_keys", async () => {
+      if (!keys.activeKeyId) throw new Error("PROVIDER_DATA_ENCRYPTION_KEY is not configured");
+      return `active key ${keys.activeKeyId}`;
+    }),
   ];
 }
 
@@ -68,12 +75,13 @@ export async function asyncActivationChecks(
 export async function activateAsyncAdmission(
   connect: () => Promise<Queryable & { release(): void }>,
   config: ProviderStandardRailConfig,
+  keys: FieldEncryptionKeyRing,
 ): Promise<{ enabled: boolean; checks: ActivationCheck[] }> {
   const client = await connect();
   try {
     await client.query("BEGIN");
     await client.query("SELECT enabled FROM provider_async_admission WHERE singleton FOR UPDATE");
-    const checks = await asyncActivationChecks(client, config);
+    const checks = await asyncActivationChecks(client, config, keys);
     if (checks.some((check) => !check.ok)) {
       await client.query("ROLLBACK");
       return { enabled: false, checks };

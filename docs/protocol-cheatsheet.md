@@ -254,8 +254,12 @@ artifact; a result that fails becomes `{"status": "failed", "errorCode":
 errorCode}`: messages are dropped and unlisted codes become
 `service_execution_failed`. Core's own codes are `service_execution_failed`,
 `service_result_invalid`, `provider_execution_abandoned` (a synchronous
-execution whose lease expired) and `provider_restarted_during_execution` (an
-interrupted pre-R1 execution, as resolved by the cutover).
+execution whose lease expired), `provider_restarted_during_execution` (an
+interrupted pre-R1 execution, as resolved by the cutover) and
+`provider_job_not_started` (an external job whose fulfillment deadline passed
+before any start was attempted). An external job whose completed result fails
+the admitted contract never becomes `service_result_invalid`: it stays
+`working` while its result is retrieved again (`docs/architecture.md`).
 
 The terminal transition writes the state, the frozen result, its
 `canonicalHash` (`result_hash`) and the completion time in one conditional

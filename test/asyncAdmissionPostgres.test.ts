@@ -10,6 +10,7 @@ import {
   type DisposableDatabase,
   type DisposableRole,
 } from "./postgresHarness.js";
+import { jobKeys } from "./externalJobFixture.js";
 import { providerProcessEnv } from "./providerProcessEnv.js";
 import { railConfig } from "./standardRailServiceFixture.js";
 
@@ -35,8 +36,8 @@ describePostgres("database-backed async-admission switch", () => {
      VALUES ($1,$2,'test',$3::jsonb)`,
     [id, epoch, JSON.stringify(capabilities)],
   );
-  const activate = () => modules.activation.activateAsyncAdmission(
-    () => modules.pool.migrationPool.connect(), config,
+  const activate = (keys = jobKeys()) => modules.activation.activateAsyncAdmission(
+    () => modules.pool.migrationPool.connect(), config, keys,
   );
   const failed = (checks: Array<{ name: string; ok: boolean }>) =>
     checks.filter((check) => !check.ok).map((check) => check.name);
@@ -79,20 +80,26 @@ describePostgres("database-backed async-admission switch", () => {
       .rejects.toThrow(/permission denied/);
   });
 
-  it("refuses while no compatible external-job worker runs, as every build of this release", async () => {
-    const stop = await modules.instances.registerRuntimeInstance(modules.pool.pool, "test");
-    try {
-      const result = await activate();
-      expect(result.enabled).toBe(false);
-      expect(failed(result.checks)).toEqual(["compatible_workers"]);
-      expect(result.checks.find((check) => check.name === "compatible_workers")?.detail)
-        .toBe("1 running instances are not compatible external-job workers");
-    } finally {
-      await stop();
-    }
-    await expect(activate()).resolves.toMatchObject({ enabled: false });
+  it("refuses while an instance without the external-job worker runs, or none runs", async () => {
+    // A process from before the worker existed still declares none.
+    await worker("00000000-0000-4000-8000-0000000000c1", { syncExecutionLeases: true, externalJobWorker: false });
+    const result = await activate();
+    expect(result.enabled).toBe(false);
+    expect(failed(result.checks)).toEqual(["compatible_workers"]);
+    expect(result.checks.find((check) => check.name === "compatible_workers")?.detail)
+      .toBe("1 running instances are not compatible external-job workers");
+    await owner.query("UPDATE provider_runtime_instances SET stopped_at=now() WHERE stopped_at IS NULL");
     expect(failed((await activate()).checks)).toEqual(["compatible_workers"]);
     await expect(modules.admission.readAsyncAdmission(modules.pool.pool)).resolves.toMatchObject({ enabled: false });
+    // This build's own instance runs the worker.
+    expect(modules.instances.BUILD_CAPABILITIES.externalJobWorker).toBe(true);
+  });
+
+  it("refuses without an active encryption key to seal new jobs", async () => {
+    await worker("00000000-0000-4000-8000-0000000000d1", { syncExecutionLeases: true, externalJobWorker: true });
+    const result = await activate({ activeKeyId: null, keys: new Map() });
+    expect(result.enabled).toBe(false);
+    expect(failed(result.checks)).toEqual(["encryption_keys"]);
   });
 
   it("refuses while a pre-R1 execution awaits the cutover or the barrier is weakened", async () => {
@@ -135,7 +142,7 @@ describePostgres("database-backed async-admission switch", () => {
     expect(row.enabled).toBe(true);
     expect(row.evidence.checks.map((check: { name: string; ok: boolean }) => [check.name, check.ok])).toEqual([
       ["compatibility_barrier", true], ["legacy_executions", true],
-      ["retained_obligations", true], ["compatible_workers", true],
+      ["retained_obligations", true], ["compatible_workers", true], ["encryption_keys", true],
     ]);
     await modules.activation.deactivateAsyncAdmission(modules.pool.migrationPool);
     await expect(modules.admission.readAsyncAdmission(modules.pool.pool)).resolves.toMatchObject({ enabled: false });
@@ -155,8 +162,10 @@ describePostgres("database-backed async-admission switch", () => {
     expect(status.status, status.stderr).toBe(0);
     expect(report(status.stdout)).toMatchObject({ asyncAdmission: { enabled: false } });
     // Its own catalog is empty, so the earlier claim's version is not
-    // installed either; both refusals are reported.
-    expect(failed(report(status.stdout).checks)).toEqual(["retained_obligations", "compatible_workers"]);
+    // installed either, and it runs with no encryption key; every refusal
+    // is reported.
+    expect(failed(report(status.stdout).checks))
+      .toEqual(["retained_obligations", "compatible_workers", "encryption_keys"]);
     const refused = command("--activate");
     expect(refused.status).toBe(1);
     expect(report(refused.stdout).asyncAdmission.enabled).toBe(false);

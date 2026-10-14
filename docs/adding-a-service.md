@@ -50,8 +50,9 @@ their own version, and an explicit `deadlines.fulfillmentSeconds` of at least
 queued job and answered `submitted` before any product call; product
 readiness is not consulted for it (the job waits for the product instead).
 New external-job quotes need the switch on, an active encryption key and a
-running worker in the process; this build has no worker yet, so they answer
-`503 quote_unavailable` (`external_jobs_unavailable`).
+running worker in the process; otherwise they answer `503 quote_unavailable`
+(`external_jobs_unavailable`). The worker then calls the adapter as
+`docs/architecture.md` describes.
 
 The adapter contract is intentionally terminal:
 

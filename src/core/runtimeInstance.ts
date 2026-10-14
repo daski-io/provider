@@ -14,13 +14,13 @@ export const RUNTIME_INSTANCE_ID = randomUUID();
 /** What a running instance declares; async activation reads it. */
 export interface RuntimeCapabilities {
   syncExecutionLeases: boolean;
-  /** Runs the durable external-job worker; no build of this release does. */
+  /** Runs the durable external-job worker (src/core/externalJobs/worker.ts). */
   externalJobWorker: boolean;
 }
 
 export const BUILD_CAPABILITIES: Readonly<RuntimeCapabilities> = {
   syncExecutionLeases: true,
-  externalJobWorker: false,
+  externalJobWorker: true,
 };
 
 export const INSTANCE_HEARTBEAT_MS = 15_000;

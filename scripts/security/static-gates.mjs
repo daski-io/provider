@@ -170,24 +170,24 @@ for (const path of [
   }
 }
 // External-job runtime (L09): exactly these lite modules, no full-starter
-// workflow. The HTTP paths admit, answer and read jobs but never call an
-// external-job adapter: dispatch commits before any upstream call, and
-// status and lifecycle reads stay one database read.
+// workflow. Only the worker's bounded call runner invokes an external-job
+// adapter; the HTTP paths admit, answer and read jobs without one, so
+// dispatch commits before any upstream call and status and lifecycle reads
+// stay one database read.
 const REVIEWED_EXTERNAL_JOB_MODULES = [
-  "admission.ts", "idempotency.ts", "jobCodec.ts", "keyRing.ts", "phases.ts", "runtime.ts", "sales.ts",
+  "admission.ts", "calls.ts", "idempotency.ts", "jobClaims.ts", "jobCodec.ts", "jobStep.ts",
+  "jobTransitions.ts", "keyRing.ts", "outcomes.ts", "phases.ts", "runtime.ts", "sales.ts",
+  "scheduling.ts", "settings.ts", "stepSupport.ts", "worker.ts",
 ].map((name) => `src/core/externalJobs/${name}`);
 const externalJobModules = files(join(root, "src/core/externalJobs")).map(projectPath).sort();
 if (JSON.stringify(externalJobModules) !== JSON.stringify([...REVIEWED_EXTERNAL_JOB_MODULES].sort())) {
   failures.push(`external-job modules must be exactly: ${REVIEWED_EXTERNAL_JOB_MODULES.join(", ")}`);
 }
-for (const path of [
-  "src/core/standardRail/dispatch.ts", "src/core/standardRail/dispatchAdmission.ts",
-  "src/core/standardRail/dispatchStatus.ts", "src/core/standardRail/dispatchResponse.ts",
-  "src/core/standardRail/lifecycle.ts", "src/core/standardRail/lifecycleRequest.ts",
-  "src/core/standardRail/quote.ts", "src/core/externalJobs/admission.ts", "src/core/externalJobs/sales.ts",
-]) {
-  if (/\.(?:start|recoverStart|poll)\s*\(/.test(read(path))) {
-    failures.push(`${path} must not call an external-job adapter`);
+for (const file of files(join(root, "src/core"))) {
+  const path = projectPath(file);
+  if (path === "src/core/externalJobs/calls.ts" || extname(file) !== ".ts") continue;
+  if (/\.(?:start|recoverStart|poll)\s*\(/.test(readFileSync(file, "utf8"))) {
+    failures.push(`${path} must not call an external-job adapter; only externalJobs/calls.ts does`);
   }
 }
 // The service adapter API: exactly the two reviewed modes and the reviewed

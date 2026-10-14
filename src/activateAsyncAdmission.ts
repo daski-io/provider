@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
+import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
 import { redactSensitiveText } from "./core/security/redaction.js";
 import { registerService } from "./core/serviceRegistry/registry.js";
 import { readAsyncAdmission } from "./core/standardRail/asyncAdmission.js";
@@ -31,13 +32,14 @@ async function main(): Promise<void> {
     deriveProviderLaunchPolicy(services),
     process.env,
   );
+  const keys = externalJobKeyRing(config, standard.retainedSigningKeys.values());
   let checks: ActivationCheck[] | null = null;
   if (activate) {
-    checks = (await activateAsyncAdmission(() => migrationPool.connect(), standard)).checks;
+    checks = (await activateAsyncAdmission(() => migrationPool.connect(), standard, keys)).checks;
   } else if (deactivate) {
     await deactivateAsyncAdmission(migrationPool);
   } else {
-    checks = await asyncActivationChecks(migrationPool, standard);
+    checks = await asyncActivationChecks(migrationPool, standard, keys);
   }
   const state = await readAsyncAdmission(migrationPool);
   process.stdout.write(`${JSON.stringify({ asyncAdmission: state, ...(checks ? { checks } : {}) })}\n`);

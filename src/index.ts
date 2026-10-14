@@ -4,7 +4,10 @@ import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
-import { registerRuntimeInstance } from "./core/runtimeInstance.js";
+import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
+import { workerSettingsFromConfig } from "./core/externalJobs/settings.js";
+import { ExternalJobWorker } from "./core/externalJobs/worker.js";
+import { registerRuntimeInstance, RUNTIME_INSTANCE_ID } from "./core/runtimeInstance.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
@@ -19,6 +22,7 @@ import { DEFAULT_FULFILLMENT_SECONDS } from "./core/standardRail/catalogOutcomes
 import { countLegacyExecutions } from "./core/standardRail/legacyCutover.js";
 import { pruneSettledQuotes } from "./core/standardRail/quoteStore.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
+import { ResultContracts } from "./core/standardRail/resultContracts.js";
 import { verifyRetainedObligations } from "./core/standardRail/retainedObligations.js";
 import { startSyncLeaseSweeper } from "./core/standardRail/syncLease.js";
 import { configuredServices } from "./providerServices.js";
@@ -28,6 +32,7 @@ let stopIdentity: (() => void) | null = null;
 let stopRail: (() => void) | null = null;
 let stopLeases: (() => void) | null = null;
 let stopInstance: (() => Promise<void>) | null = null;
+let worker: ExternalJobWorker | null = null;
 
 async function main(): Promise<void> {
   logInfo("Starting Daski minimal provider", {
@@ -74,7 +79,16 @@ async function main(): Promise<void> {
     standard,
     config.CHAIN_ID === 8453 ? base : baseSepolia,
   );
-  await startServer(standard);
+  // External jobs are found again from the database: due and abandoned
+  // work resumes in its persisted phase, nothing is resubmitted.
+  worker = new ExternalJobWorker({
+    owner: RUNTIME_INSTANCE_ID,
+    settings: workerSettingsFromConfig(config),
+    keys: externalJobKeyRing(config, standard.retainedSigningKeys.values()),
+    resultContracts: new ResultContracts(standard),
+  });
+  worker.start();
+  await startServer(standard, worker.runtime(config.PROVIDER_AGENT_ID.toString()));
 
   process.on("SIGTERM", () => void shutdown("SIGTERM", 0));
   process.on("SIGINT", () => void shutdown("SIGINT", 0));
@@ -103,6 +117,7 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
   logInfo(`Shutting down after ${reason}`);
   try {
     await stopServer();
+    await worker?.stop();
     stopIdentity?.();
     stopRail?.();
     stopLeases?.();

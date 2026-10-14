@@ -14,10 +14,15 @@ export const SERVICE_RESULT_INVALID = "service_result_invalid";
 export const PROVIDER_RESTARTED_DURING_EXECUTION = "provider_restarted_during_execution";
 /** A synchronous execution whose owner stopped renewing its lease. */
 export const SYNC_EXECUTION_ABANDONED = "provider_execution_abandoned";
+/**
+ * An external job whose fulfillment deadline passed before any start was
+ * attempted: provably never started, so it may fail.
+ */
+export const EXTERNAL_JOB_NOT_STARTED = "provider_job_not_started";
 /** Codes core may always attest; services add their own reviewed codes. */
 export const CORE_FAILURE_CODES: ReadonlySet<string> = new Set([
   SERVICE_EXECUTION_FAILED, SERVICE_RESULT_INVALID, PROVIDER_RESTARTED_DURING_EXECUTION,
-  SYNC_EXECUTION_ABANDONED,
+  SYNC_EXECUTION_ABANDONED, EXTERNAL_JOB_NOT_STARTED,
 ]);
 export const FAILURE_CODE_PATTERN = /^[a-z][a-z0-9_]{1,63}$/;
 export const MAX_RESULT_BYTES = 1_000_000;
@@ -59,49 +64,69 @@ const invalid = (code: ResultDiagnostic["code"], keywords: string[] = []) =>
   new InvalidResult({ code, keywords });
 
 /**
- * The single result frozen for a terminal task. A completed result is the
- * complete canonical ServiceResult: normalized to the stored JSON form, held
- * to core's artifact and byte bounds, the response JSON budget, the
- * gateway's passive-output rule and the admitted resultSchema as one whole
- * object, so it is never frozen as completed when the gateway would refuse
- * to relay it. A failure becomes `{status: "failed", errorCode}` with a
- * reviewed code; adapter messages are dropped, so free text never becomes
- * evidence. Nothing an adapter returns can make this throw.
+ * What an adapter's terminal value is: a result to freeze (a valid
+ * completed result, or failure evidence with a reviewed code), a completed
+ * result that fails the admitted contract (with its stored-form snapshot as
+ * the candidate), or no ServiceResult at all. Nothing an adapter returns can
+ * make this throw.
  */
-export function terminalServiceResult(
-  value: unknown,
-  contract: ResultContract,
-): { result: ServiceResult; diagnostic?: ResultDiagnostic } {
+export type ResultJudgement =
+  | { kind: "frozen"; result: ServiceResult }
+  | { kind: "invalid"; diagnostic: ResultDiagnostic; candidate: unknown }
+  | { kind: "malformed"; diagnostic?: ResultDiagnostic };
+
+export function judgeServiceResult(value: unknown, contract: ResultContract): ResultJudgement {
   // Judge one JSON snapshot, which is exactly what is stored: getters,
   // proxies and undefined members cannot change or throw between checks.
   let snapshot: unknown;
   try {
     snapshot = JSON.parse(JSON.stringify(value) ?? "null");
   } catch {
-    return {
-      result: failureEvidence(SERVICE_EXECUTION_FAILED),
-      diagnostic: { code: "result_unstorable", keywords: [] },
-    };
+    return { kind: "malformed", diagnostic: { code: "result_unstorable", keywords: [] } };
   }
   const record = snapshot as Record<string, unknown> | null;
-  if (!record || typeof record !== "object" || Array.isArray(record)) {
-    return { result: failureEvidence(SERVICE_EXECUTION_FAILED) };
-  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) return { kind: "malformed" };
   if (record.status === "failed") {
     const code = record.errorCode;
     const reviewed = typeof code === "string" && FAILURE_CODE_PATTERN.test(code)
       && (contract.failureCodes.has(code) || CORE_FAILURE_CODES.has(code));
-    return { result: failureEvidence(reviewed ? code : SERVICE_EXECUTION_FAILED) };
+    return { kind: "frozen", result: failureEvidence(reviewed ? code : SERVICE_EXECUTION_FAILED) };
   }
-  if (record.status !== "completed") return { result: failureEvidence(SERVICE_EXECUTION_FAILED) };
+  if (record.status !== "completed") return { kind: "malformed" };
   try {
-    return { result: completedResult(record as ServiceResult, contract.validate) };
+    return { kind: "frozen", result: completedResult(record as ServiceResult, contract.validate) };
   } catch (error) {
     const diagnostic = error instanceof InvalidResult
       ? error.diagnostic
       : { code: "result_unstorable" as const, keywords: [] };
-    return { result: failureEvidence(SERVICE_RESULT_INVALID), diagnostic };
+    return { kind: "invalid", diagnostic, candidate: snapshot };
   }
+}
+
+/**
+ * The single result frozen for a terminal synchronous task. A completed
+ * result is the complete canonical ServiceResult: normalized to the stored
+ * JSON form, held to core's artifact and byte bounds, the response JSON
+ * budget, the gateway's passive-output rule and the admitted resultSchema as
+ * one whole object, so it is never frozen as completed when the gateway
+ * would refuse to relay it. A synchronous task has no later retrieval, so a
+ * result that fails becomes `service_result_invalid`. A failure becomes
+ * `{status: "failed", errorCode}` with a reviewed code; adapter messages are
+ * dropped, so free text never becomes evidence.
+ */
+export function terminalServiceResult(
+  value: unknown,
+  contract: ResultContract,
+): { result: ServiceResult; diagnostic?: ResultDiagnostic } {
+  const judged = judgeServiceResult(value, contract);
+  if (judged.kind === "frozen") return { result: judged.result };
+  if (judged.kind === "invalid") {
+    return { result: failureEvidence(SERVICE_RESULT_INVALID), diagnostic: judged.diagnostic };
+  }
+  return {
+    result: failureEvidence(SERVICE_EXECUTION_FAILED),
+    ...(judged.diagnostic ? { diagnostic: judged.diagnostic } : {}),
+  };
 }
 
 /** Everything the gateway checks before it relays an artifact, and the stored form's limits. */

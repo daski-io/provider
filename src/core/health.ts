@@ -37,7 +37,8 @@ export function readinessSnapshot(now = Date.now()): {
   };
 }
 
-async function serviceIsReady(service: ServiceModule): Promise<boolean> {
+/** One service's bounded, read-only readiness (three seconds); a throw or timeout is not ready. */
+export async function serviceIsReady(service: ServiceModule): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SERVICE_READINESS_TIMEOUT_MS);
   timeout.unref();

@@ -143,6 +143,13 @@ const envSchema = z.object({
   PROVIDER_DATA_ENCRYPTION_KEY_ID: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/).default("primary"),
   // Comma-separated previous read-only keys: key-id=0x<64 hex>. Secret.
   PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS: z.string().default(""),
+  // External-job worker defaults (src/core/externalJobs/settings.ts).
+  EXTERNAL_JOB_CALL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+  EXTERNAL_JOB_LEASE_SECONDS: z.coerce.number().int().min(10).max(3_600).default(90),
+  EXTERNAL_JOB_LEASE_RENEW_MS: z.coerce.number().int().min(1_000).max(600_000).default(20_000),
+  EXTERNAL_JOB_MAX_CONCURRENT_CALLS: z.coerce.number().int().min(1).max(64).default(4),
+  EXTERNAL_JOB_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(86_400).default(60),
+  EXTERNAL_JOB_OVERDUE_POLL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(300),
 
   RATE_LIMIT_HASH_KEY: z.string().min(32).refine(
     (value) => new Set(value).size >= 8 && !/replace/i.test(value),
@@ -209,6 +216,15 @@ const envSchema = z.object({
         : "PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS",
       message,
     );
+  }
+  if (env.EXTERNAL_JOB_LEASE_SECONDS * 1_000 < 3 * env.EXTERNAL_JOB_LEASE_RENEW_MS) {
+    reject("EXTERNAL_JOB_LEASE_SECONDS", "must cover at least three lease renewals");
+  }
+  if (
+    env.EXTERNAL_JOB_LEASE_SECONDS * 1_000
+      < env.EXTERNAL_JOB_CALL_TIMEOUT_MS + 2 * env.EXTERNAL_JOB_LEASE_RENEW_MS
+  ) {
+    reject("EXTERNAL_JOB_LEASE_SECONDS", "must cover a call plus two lease renewals");
   }
   if (env.HTTP_MAX_CONCURRENCY_PER_IP > env.HTTP_MAX_CONCURRENCY) {
     reject("HTTP_MAX_CONCURRENCY_PER_IP", "cannot exceed HTTP_MAX_CONCURRENCY");

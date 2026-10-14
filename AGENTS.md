@@ -123,7 +123,10 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   authorization material. Public errors are stable and generic.
 - Applied migrations are immutable and checksummed. New migrations are
   append-only, listed in the static-gate allowlist with the tables they
-  create, and every new table needs a reviewed runtime-role grant.
+  create, and every new table needs a reviewed runtime-role grant and the
+  statement-level `provider_runtime_epoch_barrier()` trigger. Raise
+  `RUNTIME_SCHEMA_EPOCH` and the `provider_schema_epoch` row only for a schema
+  change older runtimes cannot use safely.
 - Treat published contract hashes and fixed-price changes as coordinated Daski
   onboarding changes. Request and install a new signed runtime bundle; never
   edit catalog rows or issued artifacts.

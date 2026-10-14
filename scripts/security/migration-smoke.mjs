@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import pg from "pg";
 
@@ -20,8 +20,10 @@ if (!/^provider_smoke_[a-f0-9]{32}$/.test(schema)) {
 }
 const quoted = `"${schema}"`;
 const expected = [
+  "_migrations",
   "provider_quotes",
   "provider_runtime_listing_versions",
+  "provider_schema_epoch",
   "provider_transactions",
   "rate_limit_buckets",
   "standard_evidence_admissions",
@@ -30,14 +32,32 @@ const expected = [
 const migrations = readdirSync("src/core/db/migrations")
   .filter((name) => name.endsWith(".sql")).sort();
 const rejects = (sql) => client.query(sql).then(() => false, () => true);
-const client = new pg.Client({ connectionString: raw });
+// The runtime sets the epoch marker on every connection (src/core/db/runtimeEpoch.ts).
+const client = new pg.Client({ connectionString: raw, options: "-c daski.runtime_epoch=1" });
+// A session from before the barrier: no marker at all.
+const legacy = new pg.Client({ connectionString: raw });
+const barred = (sql) => legacy.query(sql).then(
+  () => false,
+  (error) => /provider compatibility barrier/.test(error.message),
+);
 
 await client.connect();
+await legacy.connect();
 try {
   await client.query(`CREATE SCHEMA ${quoted}`);
   await client.query(`SET search_path TO ${quoted}`);
+  await legacy.query(`SET search_path TO ${quoted}`);
+  // Exactly as the migration runner creates and records its ledger.
+  await client.query(`CREATE TABLE IF NOT EXISTS _migrations (
+    name TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   for (const name of migrations) {
-    await client.query(readFileSync(`src/core/db/migrations/${name}`, "utf8"));
+    const sql = readFileSync(`src/core/db/migrations/${name}`, "utf8");
+    await client.query("BEGIN");
+    await client.query(sql);
+    await client.query("INSERT INTO _migrations (name, checksum) VALUES ($1, $2)", [
+      name, createHash("sha256").update(sql).digest("hex"),
+    ]);
+    await client.query("COMMIT");
   }
   const tables = await client.query(
     "SELECT tablename FROM pg_tables WHERE schemaname=$1 ORDER BY tablename",
@@ -125,10 +145,40 @@ try {
   if (!await rejects(quote("NULL", 1_120, 1_120))) {
     throw new Error("quote window constraint was not enforced");
   }
+  // Legacy-process barrier: an unmarked session cannot write any provider
+  // table, even with a statement matching no rows (the pre-R1 startup sweep).
+  for (const sql of [
+    `UPDATE provider_transactions
+        SET state='failed',
+            result='{"status":"failed","errorCode":"provider_restarted_during_execution"}'::jsonb,
+            completed_at=now()
+      WHERE state='executing' AND id='no-such-task'`,
+    "DELETE FROM rate_limit_buckets WHERE bucket_key='no-such-bucket'",
+    `INSERT INTO rate_limit_buckets (bucket_key,tokens,last_refill,expires_at)
+       VALUES ('legacy',1,now(),now())`,
+    "UPDATE provider_runtime_listing_versions SET superseded_at=now() WHERE false",
+    "UPDATE provider_quotes SET gross_amount='1' WHERE false",
+    "UPDATE supplier_operations SET attempts=attempts WHERE false",
+    "UPDATE standard_evidence_admissions SET order_id=order_id WHERE false",
+    "UPDATE provider_schema_epoch SET epoch=1",
+    "INSERT INTO _migrations (name, checksum) VALUES ('legacy.sql', 'x')",
+    "TRUNCATE rate_limit_buckets",
+  ]) {
+    if (!await barred(sql)) throw new Error(`an unmarked session wrote a provider table: ${sql}`);
+  }
+  // A newer schema epoch refuses older markers until a newer runtime lowers it.
+  await client.query("UPDATE provider_schema_epoch SET epoch=2");
+  if (!await rejects("UPDATE rate_limit_buckets SET tokens=tokens WHERE false")) {
+    throw new Error("a runtime older than the schema epoch could write");
+  }
+  await client.query("SET daski.runtime_epoch = '2'");
+  await client.query("UPDATE provider_schema_epoch SET epoch=1");
+  await client.query("SET daski.runtime_epoch = '1'");
   process.stdout.write("minimal migration smoke passed\n");
 } finally {
   await client.query("ROLLBACK").catch(() => undefined);
   await client.query("SET search_path TO public").catch(() => undefined);
   await client.query(`DROP SCHEMA IF EXISTS ${quoted} CASCADE`).catch(() => undefined);
+  await legacy.end().catch(() => undefined);
   await client.end();
 }

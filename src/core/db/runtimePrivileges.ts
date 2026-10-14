@@ -16,6 +16,9 @@ export const RUNTIME_TABLE_PRIVILEGES: Readonly<Record<string, readonly TablePri
   rate_limit_buckets: ["SELECT", "INSERT", "UPDATE"],
   provider_runtime_listing_versions: ["SELECT"],
   provider_quotes: ["SELECT", "INSERT"],
+  // Read by the compatibility barrier on every provider write; only
+  // migrations change it.
+  provider_schema_epoch: ["SELECT"],
 };
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;

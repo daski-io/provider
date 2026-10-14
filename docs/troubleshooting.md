@@ -100,6 +100,16 @@ role ownership, `DELETE`, or DDL to work around it.
 An applied migration checksum mismatch means a tracked migration was edited
 after use. Restore it exactly and add a new numbered migration for the change.
 
+## Startup refuses the database schema
+
+| Message | Cause and fix |
+| --- | --- |
+| `provider compatibility barrier: this session declares no supported runtime epoch` | A process without this build's epoch marker wrote a provider table or read `_migrations`: a pre-R1 image (expected; it cannot boot or change rows against an upgraded database), a pooler that dropped the startup `options`, or a maintenance session without `PGOPTIONS='-c daski.runtime_epoch=1'`. Stop old processes; connect directly or forward `options`. |
+| `runtime epoch N is older than schema epoch M` | An older build is running against a schema an incompatible newer build migrated. Run a build that supports epoch M; do not lower the epoch. |
+| `database schema epoch M is newer than this build supports (N); refusing to start` | The same, caught at boot before any mutation. Roll forward rather than back. |
+| `compatibility barrier is incomplete` | A barrier trigger was disabled or dropped, or `_migrations` lost its forced row security. Restore it from migration 005; never boot with it removed. |
+| `database sessions do not carry this build's runtime-epoch marker` | The runtime connections lost the marker (see `docs/configuration.md`). |
+
 ## `/health/live` passes but `/health/ready` fails
 
 Liveness only proves the process exists. Readiness fails closed when the

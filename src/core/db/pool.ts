@@ -10,13 +10,16 @@ import {
   failureEvidence,
   PROVIDER_RESTARTED_DURING_EXECUTION,
 } from "../standardRail/serviceResult.js";
+import { withRuntimeEpochMarker } from "./runtimeEpoch.js";
 import { applyRuntimePrivileges } from "./runtimePrivileges.js";
 import { withSessionAdvisoryLock } from "./sessionAdvisoryLock.js";
 import { databaseTlsConfig } from "./tls.js";
 
+// Every connection states this build's runtime epoch (migration 005); the
+// database refuses provider writes and ledger reads from sessions without it.
 function poolConfig(connectionString: string, applicationName: string): pg.PoolConfig {
   return {
-    connectionString,
+    ...withRuntimeEpochMarker(connectionString),
     ssl: databaseTlsConfig(config.DATABASE_SSL_MODE, config.DATABASE_CA_CERT),
     max: config.DATABASE_POOL_MAX,
     connectionTimeoutMillis: config.DATABASE_ACQUIRE_TIMEOUT_MS,

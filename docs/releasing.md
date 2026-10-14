@@ -48,3 +48,26 @@ git -C ../gateway show <commit>:test/fixtures/provider-wire/manifest.json | sha2
 Known intentional difference: the intake vector answers `supported: true`;
 lite answers `supported: null` (availability not determined, as the gateway's
 intake documentation defines it) and the test pins that exact re-signed body.
+
+## Legacy-image barrier qualification
+
+The first R1 upgrade must exclude the released pre-R1 image (baseline
+`1d3fb23`). `test/legacyImageBarrierPostgres.test.ts` boots that actual
+compiled image against databases this build migrated and runs only when
+`LEGACY_PROVIDER_ROOT` names a built copy of it. Build the copy outside the
+checkout and remove it afterwards:
+
+```bash
+git worktree add --detach /tmp/provider-pre-r1 1d3fb23
+(cd /tmp/provider-pre-r1 && npm ci --ignore-scripts && npm run build)
+LEGACY_PROVIDER_ROOT=/tmp/provider-pre-r1 DATABASE_URL_TEST=<disposable loopback URL> \
+  npx vitest run test/legacyImageBarrierPostgres.test.ts
+git worktree remove --force /tmp/provider-pre-r1
+```
+
+It proves the old image boots on its own database (the control), then that
+after an R1 boot it cannot boot under a single owner, separate principals or a
+superuser, fails its startup sweep even with no executing row, cannot change
+rows from code that was already running, and that its privilege-reset routine,
+outside its boot path, changes only grants that the next R1 boot restores.
+Record the run with the release evidence.

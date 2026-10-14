@@ -134,14 +134,53 @@ The migrations create only:
 - `standard_evidence_admissions`;
 - `supplier_operations`;
 - `rate_limit_buckets`;
-- `provider_runtime_listing_versions`; and
-- `provider_quotes` (signed readiness quotes, retained for dispatch binding).
+- `provider_runtime_listing_versions`;
+- `provider_quotes` (signed readiness quotes, retained for dispatch binding);
+  and
+- `provider_schema_epoch` (the compatibility epoch the schema requires).
 
 `_migrations` is created by the migration runner. Migrations are append-only,
 checksummed, serialized with a PostgreSQL advisory lock, and pinned by the
 static-gate allowlist together with the tables each one creates. Production
 uses a schema-owning migration principal and a separate runtime principal that
 receives only the reviewed per-table grants in `src/core/db/runtimePrivileges.ts`.
+
+## Upgrade compatibility barrier
+
+The pre-R1 image ignores migration files it does not know and, at every boot,
+fails every `executing` row with one unconditional UPDATE. An executable cannot
+be taught a check it does not contain, so the database excludes it instead
+(migration 005):
+
+- Every connection this build opens carries the session setting
+  `daski.runtime_epoch` (its supported schema epoch) in its startup options.
+- A statement-level trigger on every provider table, the migration ledger
+  included, refuses any INSERT, UPDATE, DELETE or TRUNCATE from a session
+  whose marker is missing or older than `provider_schema_epoch.epoch`. It
+  fires once per statement, so the old sweep fails even when it matches no
+  rows.
+- Forced row security on `_migrations` refuses an unmarked read. The old
+  runner reads its ledger first, as the schema owner, so the old image stops
+  there: before its privilege reset, before its sweep, before it listens.
+  A superuser bypasses row security but still meets the triggers.
+
+Before its first mutation each executable (server, importer) refuses a schema
+epoch newer than its own; after migrating it verifies that the epoch is
+exactly its own, that every table it owns carries the enabled barrier
+trigger, that the ledger forces its policy, and that runtime sessions carry
+an admitted marker. A compatible additive migration keeps the epoch, so
+compatible builds may overlap; an incompatible schema raises it, which the
+database then enforces against every older process at once.
+
+This is a compatibility control against stale code, not protection from a
+database credential holder: any session may declare the marker. The actual
+pre-R1 compiled image is qualified against it in
+`test/legacyImageBarrierPostgres.test.ts` (see `docs/releasing.md`): it cannot
+boot under a single owner, separate principals or a superuser, and cannot
+change a row from code that was already running. Its privilege-reset routine
+can still rewrite grants if invoked outside its boot path (no in-database
+control can stop a schema owner's GRANT/REVOKE); that changes no row, makes
+this build fail closed, and is restored by this build's next boot.
 
 ## Network and process boundary
 

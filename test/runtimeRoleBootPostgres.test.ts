@@ -4,6 +4,7 @@ import { createServer, type AddressInfo } from "node:net";
 import pg from "pg";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { withRuntimeEpochMarker } from "../src/core/db/runtimeEpoch.js";
 import {
   acceptQuoteAsGateway,
   classifyStatusAnswer,
@@ -142,7 +143,8 @@ describePostgres("provider entrypoint booted under production database roles", (
       pricing: { USDC: { type: "one-time", fixed_amount: "10000" } },
       inputSchema,
     });
-    const owner = new pg.Client({ connectionString: databaseUrl(database.name, migrator) });
+    // An operator session states this build's runtime epoch, as the importer does.
+    const owner = new pg.Client(withRuntimeEpochMarker(databaseUrl(database.name, migrator)));
     await owner.connect();
     try {
       await owner.query(

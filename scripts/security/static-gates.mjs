@@ -75,6 +75,7 @@ const REVIEWED_MIGRATIONS = [
   ["002_provider_quotes.sql", ["provider_quotes"]],
   ["003_dispatch_admission.sql", []],
   ["004_terminal_identity.sql", []],
+  ["005_runtime_epoch_barrier.sql", ["provider_schema_epoch"]],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();
@@ -95,8 +96,25 @@ for (const [name, tables] of REVIEWED_MIGRATIONS) {
   for (const forbidden of ["customers", "emails", "assets", "admin_sessions", "durable_jobs"]) {
     if (created.includes(forbidden)) failures.push(`full-only table is present: ${forbidden}`);
   }
-  if (/\b(?:DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i.test(migration)) {
+  // TRUNCATE is refused as a statement; trigger event lists may name it.
+  if (/\b(?:DROP\s+TABLE|DELETE\s+FROM)\b|(?:^|;)\s*TRUNCATE\b/im.test(migration)) {
     failures.push(`${name} must not drop or erase durable state`);
+  }
+}
+// Legacy-process barrier (005): every table a migration creates, and the
+// runner's ledger, carries the statement-level runtime-epoch trigger.
+const allMigrations = REVIEWED_MIGRATIONS
+  .filter(([name]) => existsSync(join(root, "src/core/db/migrations", name)))
+  .map(([name]) => read(`src/core/db/migrations/${name}`)).join("\n");
+for (const table of ["_migrations", ...migratedTables]) {
+  const trigger = new RegExp(
+    `CREATE\\s+TRIGGER\\s+${table}_runtime_epoch\\s+BEFORE\\s+INSERT\\s+OR\\s+UPDATE\\s+OR\\s+DELETE`
+    + `\\s+OR\\s+TRUNCATE\\s+ON\\s+${table}\\s+FOR\\s+EACH\\s+STATEMENT\\s+EXECUTE\\s+FUNCTION`
+    + `\\s+provider_runtime_epoch_barrier\\(\\)`,
+    "i",
+  );
+  if (!trigger.test(allMigrations)) {
+    failures.push(`${table} must carry the runtime-epoch barrier trigger`);
   }
 }
 const privilegeSource = read("src/core/db/runtimePrivileges.ts");

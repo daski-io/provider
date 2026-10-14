@@ -3,15 +3,8 @@ import { pathToFileURL } from "node:url";
 import { getAddress, recoverMessageAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { config } from "./core/config.js";
-import {
-  checkDatabase,
-  closeMigrationPool,
-  configureRuntimePrivileges,
-  migrationPool,
-  pool,
-  runMigrations,
-  verifyDatabaseRoleSeparation,
-} from "./core/db/pool.js";
+import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
+import { prepareProviderDatabase } from "./core/db/startup.js";
 import {
   promoteRuntimeListingVersions,
   type RuntimeListingHead,
@@ -368,10 +361,7 @@ async function main(): Promise<void> {
   }
   assertNoDuplicateJsonKeys(source);
   const { artifact, gatewayOrigin } = await validateRuntimeBundleSet(JSON.parse(source));
-  if (!await checkDatabase()) throw new Error("provider database is unreachable");
-  await runMigrations();
-  await configureRuntimePrivileges();
-  await verifyDatabaseRoleSeparation();
+  await prepareProviderDatabase();
   // The runtime principal only reads the catalog; promotion writes it as the
   // schema-owning migration principal.
   await promoteRuntimeListingVersions(

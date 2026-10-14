@@ -56,6 +56,25 @@ added by a later migration stays inaccessible until it is reviewed into that
 list. `npm run daski:install-runtime` promotes catalog versions as the
 migration principal.
 
+Every connection this build opens declares its supported schema epoch through
+the session setting `daski.runtime_epoch`, sent in the connection's startup
+`options` (merged with any `options` already in the URL). The database refuses
+provider writes and migration-ledger reads from sessions without it, which is
+how pre-R1 processes are excluded (`docs/architecture.md`). A connection proxy
+that drops startup parameters therefore fails closed: boot stops with
+`database sessions do not carry this build's runtime-epoch marker`. Connect
+directly or through a pooler that forwards `options` in session mode.
+
+Maintenance sessions that write provider tables or read `_migrations` must
+declare the marker explicitly, for example
+`PGOPTIONS='-c daski.runtime_epoch=1' psql ...`. A logical backup by the
+non-superuser schema owner needs the same setting and
+`pg_dump --enable-row-security`, because the ledger forces row security;
+restoring that dump needs neither, since its triggers and policy are
+recreated after the data. Managed snapshots and superuser dumps are
+unaffected. Never set the marker at role or database level
+(`ALTER ROLE/DATABASE ... SET`): that would admit pre-R1 processes too.
+
 ## Chain and identity
 
 | Variable | Purpose and rule |

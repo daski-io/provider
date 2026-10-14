@@ -2,15 +2,8 @@ import { base, baseSepolia } from "viem/chains";
 import { startProviderIdentityMonitor } from "./core/chain/providerIdentity.js";
 import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
-import {
-  checkDatabase,
-  closeMigrationPool,
-  configureRuntimePrivileges,
-  failInterruptedTransactions,
-  pool,
-  runMigrations,
-  verifyDatabaseRoleSeparation,
-} from "./core/db/pool.js";
+import { closeMigrationPool, failInterruptedTransactions, pool } from "./core/db/pool.js";
+import { prepareProviderDatabase } from "./core/db/startup.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { logListingCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
@@ -36,10 +29,7 @@ async function main(): Promise<void> {
     chainId: config.CHAIN_ID,
     chainMode: config.CHAIN_MODE,
   });
-  if (!(await checkDatabase())) throw new Error("Database unreachable");
-  await runMigrations();
-  await configureRuntimePrivileges();
-  await verifyDatabaseRoleSeparation();
+  await prepareProviderDatabase();
   await closeMigrationPool();
 
   const services = configuredServices(config.CHAIN_ID);

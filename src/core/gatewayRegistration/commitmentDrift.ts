@@ -3,6 +3,7 @@ import type { RuntimeListingHead } from "./runtimeCatalog.js";
 export interface ListingCommitmentDrift {
   serviceId: string;
   skillId: string;
+  listingManifestHash: string;
   registeredSkillContractHash: string;
   servedSkillContractHash: string;
 }
@@ -21,6 +22,7 @@ export function findListingCommitmentDrift(
     drifts.push({
       serviceId: head.serviceId,
       skillId: head.skillId,
+      listingManifestHash: head.runtimeCommitmentHash,
       registeredSkillContractHash: registered,
       servedSkillContractHash: servedHash.toLowerCase(),
     });

@@ -37,6 +37,7 @@ describe("findListingCommitmentDrift", () => {
     )).toEqual([{
       serviceId: SERVICE,
       skillId: "echo",
+      listingManifestHash: `0x${"22".repeat(32)}`,
       registeredSkillContractHash: REGISTERED,
       servedSkillContractHash: SERVED,
     }]);

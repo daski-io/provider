@@ -4,7 +4,10 @@ import { createServer, type AddressInfo } from "node:net";
 import pg from "pg";
 import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { buildContractExtension } from "../src/core/agentCards/contractExtension.js";
 import { withRuntimeEpochMarker } from "../src/core/db/runtimeEpoch.js";
+import { canonicalHash } from "../src/core/standardRail/canonical.js";
+import { dummyService } from "../src/services/dummy/index.js";
 import {
   acceptQuoteAsGateway,
   classifyStatusAnswer,
@@ -143,6 +146,10 @@ describePostgres("provider entrypoint booted under production database roles", (
       pricing: { USDC: { type: "one-time", fixed_amount: "10000" } },
       inputSchema,
     });
+    // The head commits the contract this build serves, so its sales are open.
+    head.runtimeCommitment.skillContractHash = buildContractExtension(dummyService, origin, head.serviceId)
+      .skills.find((skill) => skill.skillId === "echo")!.skillContractHash;
+    head.runtimeCommitmentHash = canonicalHash(head.runtimeCommitment);
     // An operator session states this build's runtime epoch, as the importer does.
     const owner = new pg.Client(withRuntimeEpochMarker(databaseUrl(database.name, migrator)));
     await owner.connect();

@@ -8,6 +8,7 @@ import { clearServicesForTests, registerService } from "../src/core/serviceRegis
 import { canonicalHash } from "../src/core/standardRail/canonical.js";
 import { StandardQuoteService, FIXED_QUOTE_LIFETIME_SECONDS } from "../src/core/standardRail/quote.js";
 import { QuoteRefusal, QuoteUnavailable } from "../src/core/standardRail/quoteErrors.js";
+import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/salesStops.js";
 import {
   acceptIntakeAsGateway,
   acceptQuoteAsGateway,
@@ -45,6 +46,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearServicesForTests();
+  clearSalesStopsForTests();
   vi.useRealTimers();
 });
 
@@ -164,6 +166,19 @@ describe("signed fixed readiness quote", () => {
     registerService({ ...service, skills: [{ ...service.skills[0]!, acceptingNewOrders: false }] });
     expect(await refusal(quotes().quote(await gatewayQuoteRequest({ listing, request, payer }))))
       .toEqual(new QuoteUnavailable("sales_paused"));
+  });
+
+  it("stops new quotes, persisting nothing, for a listing whose served contract drifted", async () => {
+    stopNewSales(listing.listingManifestHash, "contract_drift");
+    expect(await refusal(quotes().quote(await gatewayQuoteRequest({ listing, request, payer }))))
+      .toEqual(new QuoteUnavailable("contract_drift"));
+    expect(insertedQuotes()).toHaveLength(0);
+    // Another listing version keeps selling.
+    const other = railOutcome({ listingManifestHash: `0x${"7d".repeat(32)}` as Hex });
+    const unaffected = new StandardQuoteService(railConfig([other]), 84532);
+    await expect(unaffected.quote(await gatewayQuoteRequest({
+      listing: gatewayListing(other), request, payer,
+    }))).resolves.toBeDefined();
   });
 });
 

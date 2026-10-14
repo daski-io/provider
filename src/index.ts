@@ -5,7 +5,7 @@ import { config } from "./core/config.js";
 import { closeMigrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
-import { logListingCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
+import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
 import {
   getAllServices,
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   // needs its signing key, and every version whose quotes may still be
   // dispatched needs its admitted definition and handler.
   await verifyRetainedObligations(pool, standard);
-  void logListingCommitmentDrift({
+  await stopSalesOnCommitmentDrift({
     gatewayOrigin: standard.gatewayOrigin,
     baseUrl: config.BASE_URL,
     services,

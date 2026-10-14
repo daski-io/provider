@@ -81,10 +81,13 @@ order it would take over (see `docs/configuration.md`):
 
 Never delete claims or quotes to pass the check.
 
-If boot logs `listing commitment drift`, this build's published skill contract
-changed after the installed bundle was issued. The process stays online so
-Daski can read the new AgentCard, but the gateway may quarantine the service.
-Request, review, and install a replacement bundle before accepting purchases.
+If boot logs `listing commitment drift` (diagnostic `listing_contract_drift`),
+this build's published skill contract changed after the installed bundle was
+issued. New quotes for that listing version stop with
+`503 {"error":"quote_unavailable","reason":"contract_drift"}`; funded orders,
+status and lifecycle reads keep being serviced with the admitted definition.
+The process stays online so Daski can read the new AgentCard. Request,
+review, and install a replacement bundle; sales resume at the next boot.
 
 ## PostgreSQL is unreachable
 
@@ -152,7 +155,9 @@ provider log's `reason`:
 - `request_invalid`: the request fails the published schema or the service's
   readiness hook; the field errors reach the buyer;
 - `capacity`: the listing version's nonterminal tasks reached
-  `maxOpenOrders`; new sales resume as they finish; and
+  `maxOpenOrders`; new sales resume as they finish;
+- `contract_drift`: the served skill contract differs from the installed
+  bundle (see above); and
 - `service_unavailable`: provider readiness, the readiness hook, or the
   database failed; fix the dependency rather than the check.
 

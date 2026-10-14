@@ -222,7 +222,11 @@ whenever it boots. Hand this sequence to the operator:
    to fail them as the old image would have (`provider_restarted_during_execution`).
    Rows younger than 120 seconds are left for a later run. No input or job
    handle is invented for them.
-6. Start the R1 build, check `/health/ready`, then resume sales.
+6. Install the newly issued R1 runtime bundles (`npm run daski:install-runtime`):
+   R1 changes every published skill contract, so until they are installed the
+   old listings stay stopped for new quotes (`contract_drift`) while their
+   orders are serviced.
+7. Start the R1 build, check `/health/ready`, then resume sales.
 
 The pre-R1 image is not a rollback target afterwards: a rollback is a tested
 compatible R1 image on the same schema, or R1 servicing with new sales off.
@@ -242,5 +246,6 @@ corrects the dummy `echo` result schema to the complete result its adapter
 returns (`skillContractHash` `0xdf0ac577…7a1f` becomes `0x4efd0a11…7f17`).
 Every installed listing therefore needs a newly issued runtime bundle through
 the normal review; the importer refuses an old bundle for the new build, and
-a running provider logs listing commitment drift until the new bundle is
-installed. Never edit or re-sign an issued bundle to match.
+a running provider logs listing commitment drift and stops new quotes for
+those listings (`contract_drift`) until the new bundle is installed, while it
+keeps servicing their orders. Never edit or re-sign an issued bundle to match.

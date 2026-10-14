@@ -301,6 +301,28 @@ published schema is wrong, change it and request a newly issued bundle. A
 failure whose code is not in the module's `failureCodes` is attested as
 `service_execution_failed`.
 
+## An external job stays `working` with `result_invalid`
+
+The product answered terminally, but the adapter's mapping failed the
+listing version's admitted `resultSchema` (or core's bounds or the
+passive-output rule). That is an integration error, not proof the product
+failed: the job stays `working`, nothing is signed as completed, the job
+keeps only retrieving its result (an immediate terminal start reconciles
+through its original key; nothing is started again), and the log line
+`External job result failed its admitted result contract` names the task and
+a stable `diagnostic` with schema keywords, never the result. The rejected
+result is kept encrypted on the job row when it fits the 1 MB bound. New
+quotes for that skill answer `503 quote_unavailable` /
+`invalid_result_mapping` while any unfinished job of the adapter version new
+sales use carries the diagnostic.
+
+Fix the mapping. When the job reference format is unchanged, keep the adapter
+`version`: the next retrieval of the same report then completes the job,
+clears the diagnostic and resumes sales. If the report can no longer be
+retrieved, the job stays nonterminal (lite has no operator workflow to close
+it); move new sales to a new adapter version and keep the old one in
+`previousExternalJobAdapters` so that job is still serviced.
+
 ## Agent or Windows tooling fails on line endings
 
 The repository declares LF in `.gitattributes`, and the skill validator also

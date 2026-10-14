@@ -53,6 +53,7 @@ export function wireQuery(db: WireDatabase) {
       return { rows: observed(db, db.claims.get(String(params[1]))) };
     }
     if (sql.includes("count(*)")) return { rows: [{ count: "0" }] };
+    if (sql.includes("result_diagnostic IS NOT NULL")) return { rows: [{ broken: false }] };
     if (sql.includes("FROM provider_async_admission")) {
       return { rows: [{ enabled: db.asyncAdmission, changed_at: db.asyncAdmission ? new Date(0) : null }] };
     }

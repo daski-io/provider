@@ -46,7 +46,7 @@ product work.
 | 401 `quote_rejected` / `envelope` or `signature` | Wrong type, version, domain, lifetime, key id, or signer |
 | 409 `quote_rejected` / `outcome_policy`, `binding`, `price` | Unknown listing version, request-hash or payer-format mismatch, unreleasable price |
 | 422 `quote_rejected` / `request_invalid` + `fieldErrors` | Schema or readiness refusal; `[{path, rule, message, allowedValues?}]` |
-| 503 `quote_unavailable` / `capacity`, `sales_paused`, `service_unavailable`, `contract_drift`, `external_jobs_unavailable` | New sales are temporarily stopped; retry later (`contract_drift`: the served skill contract differs from the admitted bundle until a replacement is installed; `external_jobs_unavailable`: an external-job listing while async admission is off, no encryption key is configured or no worker runs in the process) |
+| 503 `quote_unavailable` / `capacity`, `sales_paused`, `service_unavailable`, `contract_drift`, `external_jobs_unavailable` | New sales are temporarily stopped; retry later (`contract_drift`: the served skill contract differs from the admitted bundle until a replacement is installed; `external_jobs_unavailable`: an external-job listing while async admission is off, no encryption key is configured or no worker runs in the process; `invalid_result_mapping`: the adapter version new sales would use mapped a terminal product result to one its admitted contract refuses, until the job recovers or new sales move to another adapter version) |
 
 New quotes stop when a listing version's nonterminal tasks (synchronous
 executions and external jobs in every phase, overdue or not) reach its

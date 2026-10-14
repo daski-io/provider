@@ -10,7 +10,7 @@ export type QuoteRefusalReason =
 
 export type QuoteUnavailableReason =
   | "capacity" | "sales_paused" | "service_unavailable" | "contract_drift"
-  | "external_jobs_unavailable";
+  | "external_jobs_unavailable" | "invalid_result_mapping";
 
 /**
  * A definite, bounded refusal of a quote or intake request. The gateway turns

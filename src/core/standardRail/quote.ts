@@ -110,8 +110,9 @@ export class StandardQuoteService {
     if (!service || !skill) throw new QuoteRefusal("quote", 409, "outcome_policy");
     if (service.adapter.mode === "external-job") {
       // Never sell a job this provider could not admit, seal or progress.
-      const stop = await externalJobSalesStop(this.externalJobs, pool)
-        .catch(() => "service_unavailable" as const);
+      const stop = await externalJobSalesStop(this.externalJobs, pool, {
+        serviceSlug: outcome.serviceSlug, skillId: outcome.skillId, adapter: service.adapter,
+      }).catch(() => "service_unavailable" as const);
       if (stop) throw new QuoteUnavailable(stop);
       if (!jobInputFits(request)) {
         throw new QuoteRefusal("quote", 422, "request_invalid", [{

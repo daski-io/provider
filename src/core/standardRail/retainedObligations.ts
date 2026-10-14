@@ -25,10 +25,12 @@ export interface ListingObligation {
 const hex = (value: Buffer) => `0x${value.toString("hex")}` as Hex;
 
 /**
- * Obligations by listing version: claims of this gateway audience and quotes
- * whose window plus the version's fulfillment window and the margin has not
- * passed. A version this build cannot materialize is held to the longest
- * window the gateway admits.
+ * Obligations by listing version: claims of this gateway audience, and quotes
+ * that may still back a first dispatch. A quote's recorded retention
+ * (`retain_until`, set when it was issued) decides; a quote from before
+ * retention was recorded is held to its window plus its version's
+ * fulfillment window and the margin, and to the longest window the gateway
+ * admits when this build cannot materialize the version.
  */
 export async function loadListingObligations(
   db: Queryable,
@@ -47,17 +49,23 @@ export async function loadListingObligations(
     [gatewayAudience],
   );
   for (const row of claims.rows) entry(hex(row.listing)).claims = row.count;
-  const quotes = await db.query<{ listing: Buffer; latest: string; count: number; now: string }>(
-    `SELECT listing_manifest_hash AS listing, max(valid_before)::text AS latest, count(*)::int AS count,
+  const quotes = await db.query<{
+    listing: Buffer; retained: number; unrecorded: number; latest: string | null; now: string;
+  }>(
+    `SELECT listing_manifest_hash AS listing,
+            count(*) FILTER (WHERE retain_until > now())::int AS retained,
+            count(*) FILTER (WHERE retain_until IS NULL)::int AS unrecorded,
+            (max(valid_before) FILTER (WHERE retain_until IS NULL))::text AS latest,
             floor(extract(epoch FROM now()))::bigint::text AS now
        FROM provider_quotes GROUP BY 1`,
   );
   for (const row of quotes.rows) {
     const hash = hex(row.listing);
     const window = catalog.servicing.get(hash)?.fulfillmentSeconds ?? MAX_FULFILLMENT_SECONDS;
-    if (Number(row.latest) + window + QUOTE_DISPATCH_MARGIN_SECONDS > Number(row.now)) {
-      entry(hash).openQuotes = row.count;
-    }
+    const unrecordedOpen = row.unrecorded > 0 && row.latest !== null
+      && Number(row.latest) + window + QUOTE_DISPATCH_MARGIN_SECONDS > Number(row.now);
+    const open = row.retained + (unrecordedOpen ? row.unrecorded : 0);
+    if (open > 0) entry(hash).openQuotes = open;
   }
   return obligations;
 }

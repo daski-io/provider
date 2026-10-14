@@ -188,6 +188,21 @@ describePostgres("retained listing versions against PostgreSQL", () => {
     // A quote past every possible dispatch window owes nothing.
     await pool.query("UPDATE provider_quotes SET issued_at=1000, valid_before=1120 WHERE listing_manifest_hash=decode(repeat('b2',32),'hex')");
     await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
+    // A quote's recorded retention decides, even for an unknown version.
+    const recorded = (byte: string, retainUntil: string) => pool.query(
+      `INSERT INTO provider_quotes
+         (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,retain_until)
+       VALUES (decode(repeat($1,32),'hex'),'echo',decode(repeat('c2',32),'hex'),
+         decode(repeat('b3',32),'hex'),'10000',NULL,$2::bigint,$2::bigint + 120,${retainUntil})`,
+      [byte, nowSeconds()],
+    );
+    await recorded("c1", "now() - interval '1 second'");
+    await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
+    await recorded("c3", "now() + interval '1 day'");
+    await expect(verifyRetainedObligations(pool, known))
+      .rejects.toThrow(/0xc2c2c2c2…c2c2 \(listing version not installed\)/);
+    await pool.query("UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=decode(repeat('c3',32),'hex')");
+    await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
   });
 
   it("keeps serving reads while new sales are paused", async () => {

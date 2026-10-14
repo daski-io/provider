@@ -2,6 +2,7 @@ import type { Address, Hex } from "viem";
 import type { Queryable } from "../db/queryable.js";
 import { MAX_FULFILLMENT_SECONDS } from "../serviceRegistry/deadlines.js";
 import type { ProviderStandardRailConfig } from "./config.js";
+import { QUOTE_DISPATCH_MARGIN_SECONDS } from "./quoteStore.js";
 import type { UnserviceableReason } from "./servicingCatalog.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
@@ -12,14 +13,6 @@ export interface ServicingView {
   unserviceable: ReadonlyMap<Hex, UnserviceableReason>;
 }
 
-/**
- * How long past its own window an unreferenced quote may still back a first
- * dispatch: the gateway re-dispatches a timely-paid order until its first
- * release observation plus the snapshot's fulfillment window, and that
- * observation can trail payment. Thirty days covers release delays with room
- * to spare; quotes are small.
- */
-export const QUOTE_DISPATCH_MARGIN_SECONDS = 30 * 86_400;
 
 /** What a listing version still owes. */
 export interface ListingObligation {

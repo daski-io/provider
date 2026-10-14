@@ -1,6 +1,16 @@
 import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
+import type { Queryable } from "../db/queryable.js";
 import { canonicalHash } from "./canonical.js";
+
+/**
+ * How long past its listing version's fulfillment window an unreferenced
+ * quote may still back a first dispatch: the gateway re-dispatches a
+ * timely-paid order until its first release observation plus the snapshot's
+ * fulfillment window, and that observation can trail payment. Thirty days
+ * covers release delays with room to spare; quotes are small.
+ */
+export const QUOTE_DISPATCH_MARGIN_SECONDS = 30 * 86_400;
 
 const bytes = (value: Hex): Buffer => Buffer.from(value.slice(2), "hex");
 const hex = (value: Buffer): Hex => `0x${value.toString("hex")}` as Hex;
@@ -26,22 +36,59 @@ export const providerQuoteHash = (payload: ProviderQuotePayload): Hex => canonic
   validBefore: payload.validBefore,
 });
 
-/** Persist a quote before it is signed so a later dispatch can bind to it. */
-export async function persistProviderQuote(payload: ProviderQuotePayload): Promise<Hex> {
+/**
+ * Persist a quote before it is signed so a later dispatch can bind to it,
+ * retained until its window plus its version's fulfillment window plus the
+ * margin has passed (and forever once a claim names it).
+ */
+export async function persistProviderQuote(
+  payload: ProviderQuotePayload,
+  fulfillmentSeconds: number,
+): Promise<Hex> {
   const quoteHash = providerQuoteHash(payload);
   await pool.query(
     `INSERT INTO provider_quotes
        (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
-        issued_at,valid_before)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        issued_at,valid_before,retain_until)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,to_timestamp($8::bigint + $9::bigint))
      ON CONFLICT (quote_hash) DO NOTHING`,
     [
       bytes(quoteHash), payload.outcomeId, bytes(payload.listingManifestHash),
       bytes(payload.requestHash), payload.grossAmount, payload.payer,
-      payload.issuedAt, payload.validBefore,
+      payload.issuedAt, payload.validBefore, fulfillmentSeconds + QUOTE_DISPATCH_MARGIN_SECONDS,
     ],
   );
   return quoteHash;
+}
+
+/**
+ * Delete, in bounded batches, quotes that can no longer back a dispatch:
+ * past their recorded retention, issued before every installed version's
+ * fulfillment window plus the margin could reach them, and named by no
+ * claim. A trigger refuses any other deletion, whoever runs it. Runs as the
+ * schema owner (the runtime role cannot delete).
+ */
+export async function pruneSettledQuotes(
+  db: Queryable,
+  longestFulfillmentSeconds: number,
+  maxRows = 5_000,
+): Promise<number> {
+  let pruned = 0;
+  while (pruned < maxRows) {
+    const result = await db.query(
+      `DELETE FROM provider_quotes WHERE quote_hash IN (
+         SELECT q.quote_hash FROM provider_quotes q
+          WHERE q.retain_until IS NOT NULL AND q.retain_until < now()
+            AND q.valid_before + $1::bigint < extract(epoch FROM now())
+            AND NOT EXISTS (SELECT 1 FROM provider_transactions t
+                             WHERE t.provider_quote_hash = q.quote_hash)
+          LIMIT $2)`,
+      [longestFulfillmentSeconds + QUOTE_DISPATCH_MARGIN_SECONDS, Math.min(1_000, maxRows - pruned)],
+    );
+    pruned += result.rowCount ?? 0;
+    if ((result.rowCount ?? 0) === 0) break;
+  }
+  return pruned;
 }
 
 /**

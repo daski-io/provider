@@ -77,6 +77,7 @@ const REVIEWED_MIGRATIONS = [
   ["004_terminal_identity.sql", []],
   ["005_runtime_epoch_barrier.sql", ["provider_schema_epoch"]],
   ["006_sync_execution_leases.sql", []],
+  ["007_quote_retention.sql", []],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();

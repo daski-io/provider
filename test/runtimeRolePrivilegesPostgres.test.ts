@@ -105,7 +105,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       issuedAt: 1_000,
       validBefore: 1_120,
     };
-    const quoteHash = await modules.quotes.persistProviderQuote(quote);
+    const quoteHash = await modules.quotes.persistProviderQuote(quote, 900);
     await expect(modules.quotes.loadProviderQuote(quoteHash)).resolves.toEqual(quote);
     await expect(modules.quotes.countOpenObligations(hash("3"))).resolves.toBe(0);
     const claimed = await modules.transactions.claimTransaction({
@@ -119,6 +119,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       skillId: "echo",
       listingManifestHash: hash("3"),
       dispatchValidBefore: Math.floor(Date.now() / 1_000) + 300,
+      providerQuoteHash: quoteHash,
     });
     await expect(modules.leases.renewSyncLease(
       claimed.transaction.id, claimed.transaction.execution_lease_token!,

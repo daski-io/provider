@@ -143,6 +143,7 @@ export class StandardDispatchService {
         skillId: outcome.skillId,
         listingManifestHash: dispatch.listingManifestHash,
         dispatchValidBefore: parts.dispatch.validBefore,
+        providerQuoteHash: parts.quote.payload.providerQuoteHash,
         leaseSeconds: this.lease.leaseSeconds,
       });
     } catch (error) {

@@ -108,6 +108,8 @@ export async function claimTransaction(args: {
   skillId: string;
   listingManifestHash: Hex;
   dispatchValidBefore: number;
+  /** The persisted provider quote the order was paid against. */
+  providerQuoteHash: Hex;
   /** The initial execution lease; the owner renews it with the same length. */
   leaseSeconds?: number;
 }): Promise<{ transaction: ProviderTransaction; fresh: boolean }> {
@@ -133,16 +135,16 @@ export async function claimTransaction(args: {
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
          service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
-         execution_owner,execution_lease_token,execution_lease_expires_at
+         execution_owner,execution_lease_token,execution_lease_expires_at,provider_quote_hash
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'executing',to_timestamp($11),
-         $12,$13,now() + make_interval(secs => $14))
+         $12,$13,now() + make_interval(secs => $14),$15)
        RETURNING ${ROW}`,
       [
         id, args.gatewayAudience, args.orderId, bytes(args.dispatchNonce),
         bytes(args.dispatchHash), bytes(args.requestHash), args.payer,
         args.serviceSlug, args.skillId, bytes(args.listingManifestHash),
         args.dispatchValidBefore, RUNTIME_INSTANCE_ID, leaseToken,
-        args.leaseSeconds ?? SYNC_LEASE.leaseSeconds,
+        args.leaseSeconds ?? SYNC_LEASE.leaseSeconds, bytes(args.providerQuoteHash),
       ],
     );
     commitSent = true;

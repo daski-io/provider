@@ -135,7 +135,7 @@ export class StandardQuoteService {
       issuedAt,
       validBefore: issuedAt + FIXED_QUOTE_LIFETIME_SECONDS,
     };
-    const quoteHash = await persistProviderQuote(payload);
+    const quoteHash = await persistProviderQuote(payload, outcome.fulfillmentSeconds);
     return { ...payload, signature: await this.sign(quoteHash) };
   }
 

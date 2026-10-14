@@ -58,6 +58,7 @@ const claim = () => claimTransaction({
   skillId: "echo",
   listingManifestHash: hash("4"),
   dispatchValidBefore: 1_900_000_300,
+  providerQuoteHash: hash("5"),
 });
 
 describe("minimal transaction store", () => {
@@ -160,8 +161,11 @@ describe("minimal transaction store", () => {
     await claim();
     const [sql, params] = mocks.clientQuery.mock.calls[2] as [string, unknown[]];
     expect(sql).toMatch(/execution_owner,execution_lease_token,execution_lease_expires_at/);
-    expect(sql).toContain("now() + make_interval(secs => $14)");
-    expect(params.slice(11)).toEqual([expect.stringMatching(/^[0-9a-f-]{36}$/), expect.stringMatching(/^[0-9a-f-]{36}$/), 30]);
+    expect(sql).toContain("now() + make_interval(secs => $14),$15");
+    expect(params.slice(11)).toEqual([
+      expect.stringMatching(/^[0-9a-f-]{36}$/), expect.stringMatching(/^[0-9a-f-]{36}$/), 30,
+      Buffer.from(hash("5").slice(2), "hex"),
+    ]);
   });
 
   it("persists a terminal result only for the unexpired lease holder and serves a finalized row", async () => {

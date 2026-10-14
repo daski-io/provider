@@ -54,7 +54,8 @@ in `src/core/db/runtimePrivileges.ts`: no `DELETE`, `TRUNCATE`, DDL, or
 migration-ledger access, and read-only access to the runtime catalog. A table
 added by a later migration stays inaccessible until it is reviewed into that
 list. `npm run daski:install-runtime` promotes catalog versions as the
-migration principal.
+migration principal, and boot prunes settled provider quotes as it
+(`docs/architecture.md`).
 
 Every connection this build opens declares its supported schema epoch through
 the session setting `daski.runtime_epoch`, sent in the connection's startup

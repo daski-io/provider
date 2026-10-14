@@ -14,7 +14,12 @@ const target = vi.hoisted(() => {
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
-import { countOpenObligations, loadProviderQuote } from "../src/core/standardRail/quoteStore.js";
+import {
+  countOpenObligations,
+  loadProviderQuote,
+  pruneSettledQuotes,
+  QUOTE_DISPATCH_MARGIN_SECONDS,
+} from "../src/core/standardRail/quoteStore.js";
 import { completeTransaction } from "../src/core/standardRail/transactionStore.js";
 import { acceptQuoteAsGateway, gatewayQuoteRequest } from "./gatewayWire.js";
 import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
@@ -104,5 +109,52 @@ describePostgres("provider quotes in PostgreSQL", () => {
     await insert("task-b1", "bb", "executing");
     await expect(countOpenObligations(`0x${"aa".repeat(32)}` as Hex)).resolves.toBe(2);
     await expect(countOpenObligations(`0x${"bb".repeat(32)}` as Hex)).resolves.toBe(1);
+  });
+  it("retains each quote for its dispatch window and prunes only settled, unreferenced ones", async () => {
+    const listing = gatewayListing();
+    const service = new StandardQuoteService(railConfig(), 84532);
+    const body = await service.quote(await gatewayQuoteRequest({ listing, request: { message: "retain" }, payer }));
+    const accepted = await acceptQuoteAsGateway({ listing, body, request: { message: "retain" }, payer });
+    const issued = (await pool.query(
+      "SELECT extract(epoch FROM retain_until)::bigint::text AS retain FROM provider_quotes WHERE quote_hash=$1",
+      [Buffer.from(accepted.providerQuoteHash.slice(2), "hex")],
+    )).rows[0] as { retain: string };
+    // validBefore + the version's 900-second window + the 30-day margin.
+    expect(Number(issued.retain)).toBe(accepted.validBefore + 900 + QUOTE_DISPATCH_MARGIN_SECONDS);
+
+    const old = Math.floor(Date.now() / 1_000) - 400 * 86_400;
+    const quote = (byte: string, retainUntil: string) => pool.query(
+      `INSERT INTO provider_quotes
+         (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,retain_until)
+       VALUES (decode(repeat($1,32),'hex'),'echo',decode(repeat('11',32),'hex'),decode(repeat('12',32),'hex'),
+         '10000',NULL,$2::bigint,$2::bigint + 120,${retainUntil})`,
+      [byte, old],
+    );
+    await quote("f1", "now() - interval '1 day'");
+    await quote("f2", "now() + interval '1 day'");
+    await quote("f3", "NULL");
+    await quote("f4", "now() - interval '1 day'");
+    await pool.query(
+      `INSERT INTO provider_transactions (
+         id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+         execution_owner,execution_lease_token,execution_lease_expires_at,provider_quote_hash
+       ) VALUES ('task-quoted','https://gateway.example','ord_quoted',decode(repeat('f5',32),'hex'),
+         decode(repeat('f6',32),'hex'),decode(repeat('f7',32),'hex'),$1,'dummy','echo',
+         decode(repeat('11',32),'hex'),'executing',now() + interval '5 minutes',
+         gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour',decode(repeat('f4',32),'hex'))`,
+      [payer],
+    );
+    const remaining = async () => (await pool.query<{ hash: string }>(
+      "SELECT encode(quote_hash,'hex') AS hash FROM provider_quotes WHERE quote_hash <> $1 ORDER BY 1",
+      [Buffer.from(accepted.providerQuoteHash.slice(2), "hex")],
+    )).rows.map((row) => row.hash.slice(0, 2)).filter((prefix) => /^f[1-4]$/.test(prefix));
+    // A window longer than the quote's age keeps even a settled quote.
+    await expect(pruneSettledQuotes(pool, 500 * 86_400)).resolves.toBe(0);
+    await expect(pruneSettledQuotes(pool, 900)).resolves.toBe(1);
+    expect(await remaining()).toEqual(["f2", "f3", "f4"]);
+    await expect(pool.query("DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('f4',32),'hex')"))
+      .rejects.toThrow("retained while it may back a dispatch");
+    expect(await loadProviderQuote(accepted.providerQuoteHash)).not.toBeNull();
   });
 });

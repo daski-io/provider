@@ -84,12 +84,14 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
     expect(json(answer)).not.toHaveProperty("result");
     const row = (await pool.query(
       `SELECT result,extract(epoch FROM dispatch_valid_before)::bigint AS valid_before,
-              operations_revision FROM provider_transactions WHERE order_id=$1`,
+              operations_revision,provider_quote_hash FROM provider_transactions WHERE order_id=$1`,
       [order.orderId],
     )).rows[0];
     expect(accepted.attestation?.resultHash).toBe(canonicalHash(row.result));
     expect(Number(row.valid_before)).toBe(envelope.validBefore);
     expect(row.operations_revision).toBe(0);
+    // The claim names the persisted quote it was paid against, so it is kept.
+    expect(`0x${(row.provider_quote_hash as Buffer).toString("hex")}`).toBe(order.providerQuoteHash);
   });
 
   it("accepts a fresh dispatch long after quote expiry when the payment settled in time", async () => {

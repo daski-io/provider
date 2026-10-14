@@ -43,10 +43,11 @@ export function wireQuery(db: WireDatabase) {
     }
     if (sql.includes("count(*)")) return { rows: [{ count: "0" }] };
     if (sql.includes("INSERT INTO provider_quotes")) {
-      const [hash, outcomeId, listing, request, gross, payer, issuedAt, validBefore] = params;
+      const [hash, outcomeId, listing, request, gross, payer, issuedAt, validBefore, retainSeconds] = params;
       db.quotes.set(hex(hash), {
         outcome_id: outcomeId, listing_manifest_hash: listing, request_hash: request,
         gross_amount: gross, payer, issued_at: String(issuedAt), valid_before: String(validBefore),
+        retain_seconds: retainSeconds,
       });
       return { rows: [], rowCount: 1 };
     }
@@ -83,12 +84,12 @@ export function wireConnect(db: WireDatabase) {
       if (sql.includes("FOR UPDATE")) return { rows: observed(db, db.claims.get(String(params[1]))) };
       if (sql.includes("INSERT INTO provider_transactions")) {
         const [, gatewayAudience, orderId, nonce, dispatchHash, requestHash, payer, slug, skill, listing,
-          , owner, leaseToken] = params;
+          , owner, leaseToken, , providerQuoteHash] = params;
         const row = {
           id: db.taskId, gateway_audience: gatewayAudience, order_id: orderId, dispatch_nonce: nonce,
           dispatch_hash: dispatchHash, request_hash: requestHash, payer, service_slug: slug, skill_id: skill,
           listing_manifest_hash: listing, state: "executing", result: null, result_hash: null,
-          execution_owner: owner, execution_lease_token: leaseToken,
+          execution_owner: owner, execution_lease_token: leaseToken, provider_quote_hash: providerQuoteHash,
           created_at: new Date(db.clock * 1_000), completed_at: null, operations_revision: 0,
           operations_projection: { fulfillment: null, support: null, recovery: null },
         };

@@ -68,16 +68,19 @@ try {
     throw new Error(`unexpected migrated tables: ${actual.join(", ")}`);
   }
   await client.query(`SET search_path TO ${quoted}`);
-  const claim = (id, validBefore, lease = "gen_random_uuid(),gen_random_uuid(),now() + interval '30 seconds'") =>
+  const claim = (
+    id, validBefore, lease = "gen_random_uuid(),gen_random_uuid(),now() + interval '30 seconds'",
+    quoteHash = "NULL",
+  ) =>
     `INSERT INTO provider_transactions (
        id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,
        payer,service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
-       execution_owner,execution_lease_token,execution_lease_expires_at
+       execution_owner,execution_lease_token,execution_lease_expires_at,provider_quote_hash
      ) VALUES (
        '${id}','https://gateway.example','${id}',decode(md5('${id}') || md5('${id}'),'hex'),
        decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),
        '0x1111111111111111111111111111111111111111','smoke','echo',
-       decode(repeat('44',32),'hex'),'executing',${validBefore},${lease}
+       decode(repeat('44',32),'hex'),'executing',${validBefore},${lease},${quoteHash}
      )`;
   await client.query(claim("task-smoke", "now() + interval '5 minutes'"));
   if (!await rejects(claim("task-leaseless", "now() + interval '5 minutes'", "NULL,NULL,NULL"))) {
@@ -156,6 +159,31 @@ try {
   if (!await rejects(quote("NULL", 1_120, 1_120))) {
     throw new Error("quote window constraint was not enforced");
   }
+  // Quote retention: only a quote past its retention that no claim names can
+  // be deleted, and a claim keeps the quote it was admitted against.
+  const retained = (byte, retainUntil) => `INSERT INTO provider_quotes
+      (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
+       issued_at,valid_before,retain_until)
+    VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
+      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,${retainUntil})`;
+  const deleteQuote = (byte) => `DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('${byte}',32),'hex')`;
+  await client.query(retained("e1", "NULL"));
+  await client.query(retained("e2", "now() + interval '1 day'"));
+  await client.query(retained("e3", "now() - interval '1 day'"));
+  await client.query(retained("e4", "now() - interval '1 day'"));
+  await client.query(`UPDATE provider_transactions SET provider_quote_hash=decode(repeat('e4',32),'hex')
+      WHERE id='task-smoke'`).then(
+    () => { throw new Error("a claim's provider quote changed"); },
+    (error) => { if (!/keeps its provider quote/.test(error.message)) throw error; },
+  );
+  await client.query(claim(
+    "task-quoted", "now() + interval '5 minutes'", undefined, "decode(repeat('e4',32),'hex')",
+  ));
+  for (const byte of ["e1", "e2", "e4"]) {
+    if (!await rejects(deleteQuote(byte))) throw new Error(`a retained provider quote was deleted: ${byte}`);
+  }
+  await client.query(deleteQuote("e3"));
+
   // Legacy-process barrier: an unmarked session cannot write any provider
   // table, even with a statement matching no rows (the pre-R1 startup sweep).
   for (const sql of [

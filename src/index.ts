@@ -2,7 +2,7 @@ import { base, baseSepolia } from "viem/chains";
 import { startProviderIdentityMonitor } from "./core/chain/providerIdentity.js";
 import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
-import { closeMigrationPool, pool } from "./core/db/pool.js";
+import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
@@ -17,7 +17,9 @@ import {
   type ProviderStandardRailConfig,
 } from "./core/standardRail/config.js";
 import { deriveProviderLaunchPolicy } from "./core/standardRail/launchPolicy.js";
+import { DEFAULT_FULFILLMENT_SECONDS } from "./core/standardRail/catalogOutcomes.js";
 import { countLegacyExecutions } from "./core/standardRail/legacyCutover.js";
+import { pruneSettledQuotes } from "./core/standardRail/quoteStore.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
 import { verifyRetainedObligations } from "./core/standardRail/retainedObligations.js";
 import { startSyncLeaseSweeper } from "./core/standardRail/syncLease.js";
@@ -34,7 +36,6 @@ async function main(): Promise<void> {
     chainMode: config.CHAIN_MODE,
   });
   await prepareProviderDatabase();
-  await closeMigrationPool();
 
   const services = configuredServices(config.CHAIN_ID);
   for (const service of services) registerService(service);
@@ -48,6 +49,8 @@ async function main(): Promise<void> {
   // needs its signing key, and every version whose quotes may still be
   // dispatched needs its admitted definition and handler.
   await verifyRetainedObligations(pool, standard);
+  await pruneQuotes(standard);
+  await closeMigrationPool();
   await stopSalesOnCommitmentDrift({
     gatewayOrigin: standard.gatewayOrigin,
     baseUrl: config.BASE_URL,
@@ -97,6 +100,23 @@ function validateComposition(
       .map((skill) => `${service.manifest.slug}/${skill.id}`)));
   if ([...configured].some((key) => !installedPaid.has(key))) {
     throw new Error("Runtime catalog contains an uninstalled paid skill");
+  }
+}
+
+/**
+ * Housekeeping as the schema owner: drop quotes that can no longer back a
+ * dispatch (quoteStore.ts). Best effort; a failure never blocks servicing.
+ */
+async function pruneQuotes(standard: ProviderStandardRailConfig): Promise<void> {
+  const longest = Math.max(
+    DEFAULT_FULFILLMENT_SECONDS,
+    ...[...standard.servicing.values()].map((outcome) => outcome.fulfillmentSeconds),
+  );
+  try {
+    const pruned = await pruneSettledQuotes(migrationPool, longest);
+    if (pruned > 0) logInfo("Pruned settled provider quotes", { count: pruned });
+  } catch (error) {
+    logError("Settled provider quotes could not be pruned", errorExtra(error));
   }
 }
 

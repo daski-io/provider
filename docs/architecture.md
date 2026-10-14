@@ -181,6 +181,17 @@ static-gate allowlist together with the tables each one creates. Production
 uses a schema-owning migration principal and a separate runtime principal that
 receives only the reviewed per-table grants in `src/core/db/runtimePrivileges.ts`.
 
+A provider quote can back a dispatch long after it expires, because the
+gateway re-dispatches a timely-paid order until its first release observation
+plus the snapshot's fulfillment window. Each quote therefore records
+`retain_until` (its `validBefore` plus its listing version's fulfillment
+window plus 30 days), and every claim records the provider quote it was
+admitted against. Boot prunes, as the schema owner and in bounded batches,
+only quotes past that retention, older than every installed version's window
+plus the margin, and named by no claim; a trigger refuses any other quote
+deletion, whoever attempts it. Claims, terminal results and their reads are
+never pruned.
+
 ## Upgrade compatibility barrier
 
 The pre-R1 image ignores migration files it does not know and, at every boot,

@@ -1,2 +1,5 @@
 # Keep checksummed migrations and cross-platform tooling byte-stable.
 * text=auto eol=lf
+# Vendored byte for byte from daski-io/gateway and pinned by sha256: never
+# rewrite line endings on checkout.
+test/fixtures/provider-wire/** -text

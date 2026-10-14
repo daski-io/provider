@@ -8,6 +8,12 @@ paths = [
 ]
 
 [[allowlists]]
+description = "Gateway provider-wire fixtures, vendored byte for byte: every key is synthetic, derived from a public label, test-only and holds nothing"
+paths = [
+  '''test/fixtures/provider-wire/.*\.json$''',
+]
+
+[[allowlists]]
 description = "Public development keys and deterministic security-test sentinels"
 regexTarget = "secret"
 regexes = [

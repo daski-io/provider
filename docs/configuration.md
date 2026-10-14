@@ -131,6 +131,16 @@ the importer once per service; an identical commitment is an idempotent no-op.
 
 Mainnet bypass/proxy CIDRs must be IPv4 `/24` or IPv6 `/64`, or narrower.
 
+The global and rail limits apply to discovery, quotes and other ordinary
+routes. Dispatch and dispatch status are servicing calls for funded orders:
+they skip product readiness and both DB-backed limits, keep the concurrency
+and body bounds (status bodies are capped at 64 KiB), and count only
+unauthenticated failures per source (120 per minute) toward a process-local
+abuse limit. Over-limit, over-capacity or malformed servicing calls get an
+empty `503`, never a JSON refusal. Behind a proxy, set `TRUST_PROXY_HOPS` and
+`TRUST_PROXY_CIDRS` so sources are told apart, and list the reviewed gateway
+egress in `RATE_LIMIT_BYPASS_IPS` when its addresses are known.
+
 ## Outbound product/RPC policy
 
 | Variable | Default / rule |

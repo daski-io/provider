@@ -68,14 +68,66 @@ request        object matching the reviewed JSON Schema
 evidenceBundle StandardEvidenceBundleV2 (deposit + release)
 ```
 
-Core verifies the gateway signature and every domain/payment/request binding.
-On success it returns a provider-signed terminal response whose state is
-`completed` or `failed`. Calls that fail admission receive a generic error and
-never invoke the service.
+Every POST carries a fresh envelope (new nonce and window); the original
+`QuoteV1` is forwarded each time, possibly long after it expired. Core
+authenticates the envelope, then looks up the claim for (gateway audience,
+order) before anything else:
 
-The gateway can query `/standard-rail/dispatch/status` with a signed
-`DispatchStatusQueryV1`. The query is bound to the original order and dispatch
-hash. A changed replay is rejected.
+- an exact replay of an admitted envelope returns that claim's current
+  signed snapshot, even after the envelope expired;
+- a different envelope for an admitted order never replaces it and is
+  answered ambiguously; and
+- only for a new claim does core verify that the envelope is current, the
+  outcome and payer bindings, `QuoteV1`, the persisted provider quote named
+  by `QuoteV1.providerQuoteHash` (outcome, listing, request hash, amount,
+  payer compared as addresses, and a provider window covering the gateway
+  window), the request schema, readiness, chain evidence and sanctions.
+
+There is no quote-age limit: settlement timeliness is judged by the deposit
+block timestamp against the `QuoteV1` window. A claim cannot commit at or
+after the dispatch envelope's `validBefore`; PostgreSQL enforces that at
+commit time. Funded dispatches are never refused for listing capacity or
+paused sales. While provider readiness is down, a new synchronous dispatch is
+refused before admission so the gateway retries it later.
+
+A successful dispatch or status answer has exactly these keys:
+
+```text
+taskId, dispatchHash, signature, state, operations
+terminalAttestation   (completed and failed only)
+```
+
+`state` is `working` while the synchronous execution runs (stored as
+`executing`), then `completed` or `failed`; there is no inline `result`.
+`operations` is `{schemaVersion: 1, revision, observedAt, fulfillment: null,
+support: null, recovery: null}`: the revision is persisted per task and stays
+0 for this constant projection, while `observedAt` is the database clock at
+each read. `signature` is the provider authority's EIP-191 signature of the
+raw `canonicalHash({taskId, dispatchHash, state, operations})`, recomputed
+for every answer. `terminalAttestation` is `{payload: {taskId, dispatchHash,
+state, resultHash, completedAt}, signature}`, where `resultHash` is the
+`canonicalHash` of the stored result and the signature is EIP-191 over the
+raw `canonicalHash(payload)` by the terminal attestation key.
+
+| Provider knowledge | Answer |
+| --- | --- |
+| Definite refusal before any admission | 4xx/5xx `{"error":"dispatch_rejected","reason":...}`; the gateway retries with a new envelope |
+| Admission exists, or its commit is uncertain | The signed snapshot, else an empty-body `503` so the gateway status-polls the original hash |
+| Signed, fresh status query; no claim for the order | Exactly `404 {"error":"dispatch_status_unavailable","reason":"outcome_policy"}` |
+
+Refusal reasons: `validator`, `signature`, `envelope_lifetime`,
+`outcome_policy`, `self_purchase`, `quote_window`, `price`, `evidence`, and
+`service_unavailable`. Transport faults on dispatch or status (wrong media
+type, compression, duplicate keys, oversize bodies, concurrency or abuse
+limits) are answered with the empty `503`, never a JSON refusal.
+
+The gateway reconciles with `/standard-rail/dispatch/status` and a signed
+`DispatchStatusQueryV1` `{orderId, dispatchHash, issuedAt, validBefore}`. Its
+signature and freshness are verified before any lookup. A different claim for
+the order answers `409 dispatch_status_rejected/binding_conflict`; a bad
+signature, stale or malformed query, unreadable database or signing failure is
+never the no-claim answer. Status reads are one indexed read: no product
+call, no write, no purchase rate limit, and no product-readiness gate.
 
 ## Service result
 

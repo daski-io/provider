@@ -70,29 +70,46 @@ a newly reviewed bundle; catalog history is never rewritten.
 ## Dispatch state machine
 
 ```text
-new signed dispatch
+signed dispatch (always a fresh envelope)
        |
        v
-verify all bindings and admitted chain evidence
+authenticate envelope ---- fails -> definite refusal (JSON error)
        |
        v
-PostgreSQL serializable claim ---- changed replay -> reject
-       |                    \
-       |                     same replay -> durable current/terminal response
+claim for (gateway audience, order)?
+       |-- same dispatch hash ----> current signed snapshot (even after expiry)
+       |-- different hash --------> ambiguous empty 503 (never replaced)
+       |-- unreadable ------------> ambiguous empty 503
+       v none
+verify current envelope, outcome, QuoteV1, persisted provider quote,
+request, readiness, chain evidence, sanctions ---- fails -> definite refusal
+       |
        v
-executing -- adapter result --> completed | failed
+claim commit (fenced at envelope validBefore) -- expired -> definite refusal
+       |                                     \-- outcome unknown -> re-read or 503
+       v
+executing (public "working") -- adapter result --> completed | failed
        |
        +-- process restart --> failed(provider_restarted_during_execution)
 ```
 
+A JSON `error` from dispatch therefore always means "definitely not
+admitted"; once a claim exists or its commit is uncertain, the gateway gets the
+signed snapshot or an empty 503 and reconciles through status. Every snapshot
+is re-read and re-signed with a fresh database-clock `observedAt`; the
+operations revision is persisted per task and a revision can only change with
+its projection (database-enforced).
+
 Core verifies before claim: envelope shape, duplicate keys, environment,
 chain, audience, signer, lifetime, exact outcome, service/skill, quote,
 request hashes/schema, payer, self-purchase policy, deposit/release ordering,
-contract provenance, finality, source agreement, and sanctions state.
+contract provenance, finality, source agreement, and sanctions state. Listing
+capacity, paused sales and quote age never refuse a funded dispatch.
 
 The verified payer is supplied to the adapter as context. It is not inferred
 from input. The request body is not persisted. A terminal result is persisted
-and signed so a legitimate same-dispatch replay is deterministic.
+and attested so a legitimate same-dispatch replay or status read is
+deterministic.
 
 ## Why one replica
 
@@ -127,6 +144,12 @@ duplicate JSON keys and pathologically deep or large documents, applies
 header/body/time/concurrency limits, persists
 shared rail rate limits, and emits generic public errors. Health is rate-limited
 locally so it remains available when PostgreSQL is degraded.
+
+Dispatch and its status are servicing calls for already-funded orders. They
+keep bounded ingress, authentication, and a per-source limit on
+unauthenticated failures, but skip product readiness and the purchase/global
+rate limits, and no middleware answers them with a JSON refusal. New quotes,
+by contrast, require complete provider readiness and pass the purchase limit.
 
 Product HTTP must use the bounded outbound helpers, which enforce reviewed
 HTTPS destinations, DNS/IP safety, redirect policy, timeouts, response-size

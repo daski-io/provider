@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Hex } from "viem";
 import {
   assertDepositWithinQuoteWindow,
-  assertDispatchWithinQuoteSettlementWindow,
   assertFixedQuotePolicy,
   selectDepositAuthorization,
 } from "../src/core/standardRail/paymentBinding.js";
@@ -94,19 +93,5 @@ describe("fixed quote policy", () => {
       quoteMaximumLifetimeSeconds: 1,
       quoteMinimumPaymentWindowSeconds: 0,
     })).toThrow("fixed one-shot quote policy");
-  });
-});
-
-describe("dispatch settlement lateness", () => {
-  it("allows one dispatch deadline after the payment window", () => {
-    expect(() => assertDispatchWithinQuoteSettlementWindow(
-      { issuedAt: 1_420 }, { validBefore: 1_120 }, { dispatchDeadlineSeconds: 300 },
-    )).not.toThrow();
-  });
-
-  it("rejects a dispatch that resurrects a stale settlement", () => {
-    expect(() => assertDispatchWithinQuoteSettlementWindow(
-      { issuedAt: 1_421 }, { validBefore: 1_120 }, { dispatchDeadlineSeconds: 300 },
-    )).toThrow("too long after the quote payment window");
   });
 });

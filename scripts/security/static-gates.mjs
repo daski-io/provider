@@ -73,6 +73,7 @@ const REVIEWED_MIGRATIONS = [
     "rate_limit_buckets", "provider_runtime_listing_versions",
   ]],
   ["002_provider_quotes.sql", ["provider_quotes"]],
+  ["003_dispatch_admission.sql", []],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();

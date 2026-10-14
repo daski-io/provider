@@ -1,30 +1,52 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { base, baseSepolia } from "viem/chains";
 import type { Config } from "../config.js";
 import { logError, logWarn } from "../logger.js";
-import { assertExactKeys } from "./canonical.js";
+import { respondAmbiguously } from "../security/servicingIngress.js";
 import type { ProviderStandardRailConfig } from "./config.js";
-import { StandardDispatchService } from "./dispatch.js";
+import { StandardDispatchService, type DispatchDependencies } from "./dispatch.js";
+import {
+  DispatchRejectedError,
+  DispatchStatusNoClaimError,
+  DispatchStatusRejectedError,
+  type DispatchRejectionReason,
+} from "./dispatchErrors.js";
 import { StandardQuoteService } from "./quote.js";
 import { boundedRefusalBody, QuoteRefusal, QuoteUnavailable } from "./quoteErrors.js";
-import type {
-  DispatchStatusQueryV1,
-  QuoteV1,
-  SignedEnvelope,
-  StandardEvidenceBundleV2,
-  StandardRailDispatchV2,
-} from "./types.js";
+
+const REJECTION_STATUS: Readonly<Record<DispatchRejectionReason, number>> = {
+  validator: 400,
+  signature: 401,
+  envelope_lifetime: 409,
+  outcome_policy: 409,
+  quote_window: 409,
+  price: 409,
+  self_purchase: 409,
+  evidence: 409,
+  service_unavailable: 503,
+};
+const STATUS_REJECTION_STATUS = { query_invalid: 400, signature: 401, binding_conflict: 409 } as const;
+
+const errorClass = (error: unknown) => error instanceof Error ? error.name : "UnknownError";
+const causeClass = (error: unknown) =>
+  errorClass((error as { cause?: unknown } | null)?.cause ?? null);
 
 export function createStandardRailRouter(
   core: Config,
   config: ProviderStandardRailConfig,
+  options: {
+    recordServicingFailure?: (req: Request) => void;
+    dispatch?: DispatchDependencies;
+  } = {},
 ): Router {
   const dispatch = new StandardDispatchService(
     config,
     core.CHAIN_ID === 8453 ? base : baseSepolia,
     core.CHAIN_ID,
+    options.dispatch,
   );
   const quotes = new StandardQuoteService(config, core.CHAIN_ID);
+  const recordFailure = options.recordServicingFailure ?? (() => undefined);
   const router = Router();
 
   router.get("/outcomes", (_req, res) => {
@@ -69,63 +91,58 @@ export function createStandardRailRouter(
         res.status(503).json({ error: "quote_unavailable", reason: error.reason });
         return;
       }
-      logError("Standard quote failed", {
-        errorClass: error instanceof Error ? error.name : "UnknownError",
-      });
+      logError("Standard quote failed", { errorClass: errorClass(error) });
       res.setHeader("Retry-After", "30");
       res.status(503).json({ error: "quote_unavailable", reason: "service_unavailable" });
     }
   });
 
+  // C03: a JSON `error` here only ever means "definitely not admitted".
   router.post("/dispatch", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     try {
-      assertExactKeys(
-        req.body,
-        ["dispatch", "quote", "request", "evidenceBundle"],
-        "dispatch request",
-      );
-      const body = req.body as {
-        dispatch?: SignedEnvelope<StandardRailDispatchV2, 2>;
-        quote?: SignedEnvelope<QuoteV1>;
-        request?: Record<string, unknown>;
-        evidenceBundle?: StandardEvidenceBundleV2;
-      };
-      if (!body.dispatch || !body.quote || !body.request || !body.evidenceBundle) {
-        res.status(400).json({ error: "invalid_dispatch" });
+      res.json(await dispatch.accept(req.body));
+    } catch (error) {
+      if (error instanceof DispatchRejectedError) {
+        if (!error.authenticated) recordFailure(req);
+        logWarn("Standard dispatch refused before admission", { reason: error.reason });
+        if (error.reason === "service_unavailable") res.setHeader("Retry-After", "30");
+        res.status(REJECTION_STATUS[error.reason])
+          .json({ error: "dispatch_rejected", reason: error.reason });
         return;
       }
-      res.json(await dispatch.accept({
-        dispatch: body.dispatch,
-        quote: body.quote,
-        request: body.request,
-        evidenceBundle: body.evidenceBundle,
-      }));
-    } catch (error) {
-      logWarn("Standard dispatch rejected", {
-        errorClass: error instanceof Error ? error.name : "UnknownError",
+      logError("Standard dispatch answered ambiguously", {
+        errorClass: errorClass(error),
+        causeClass: causeClass(error),
       });
-      res.status(409).json({ error: "dispatch_rejected" });
+      respondAmbiguously(res);
     }
   });
 
   router.post("/dispatch/status", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     try {
-      assertExactKeys(req.body, ["query"], "dispatch status request");
-      const query = (req.body as {
-        query?: SignedEnvelope<DispatchStatusQueryV1>;
-      }).query;
-      if (!query) {
-        res.status(400).json({ error: "invalid_dispatch_status" });
+      res.json(await dispatch.status(req.body));
+    } catch (error) {
+      if (error instanceof DispatchStatusNoClaimError) {
+        res.status(404).json({ error: "dispatch_status_unavailable", reason: "outcome_policy" });
         return;
       }
-      res.json(await dispatch.status(query));
-    } catch (error) {
-      logWarn("Dispatch status rejected", {
-        errorClass: error instanceof Error ? error.name : "UnknownError",
+      if (error instanceof DispatchStatusRejectedError) {
+        if (!error.authenticated) recordFailure(req);
+        logWarn("Dispatch status query rejected", { reason: error.reason });
+        res.status(STATUS_REJECTION_STATUS[error.reason])
+          .json({ error: "dispatch_status_rejected", reason: error.reason });
+        return;
+      }
+      logError("Dispatch status answered ambiguously", {
+        errorClass: errorClass(error),
+        causeClass: causeClass(error),
       });
-      res.status(404).json({ error: "dispatch_status_unavailable" });
+      respondAmbiguously(res);
     }
   });
 
   return router;
 }
+

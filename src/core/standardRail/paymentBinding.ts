@@ -26,8 +26,12 @@ export function selectDepositAuthorization<T extends AuthorizationUsedLog>(
   return bound[0]!;
 }
 
-/// Settlement must happen inside the quote's payment window. Thirty seconds
-/// covers sequencer clock skew ahead of the quoting clock.
+/// Settlement must happen inside the quote's payment window, judged by the
+/// authenticated deposit block timestamp rather than by when the dispatch
+/// arrives: the gateway may dispatch a timely payment long after the quote
+/// expired. The EIP-3009 authorization cannot settle after its validBefore,
+/// which the gateway caps at the quote's validBefore. Thirty seconds covers
+/// sequencer clock skew ahead of the quoting clock.
 export function assertDepositWithinQuoteWindow(
   depositTimestamp: number,
   quote: { issuedAt: number; validBefore: number },
@@ -54,18 +58,5 @@ export function assertFixedQuotePolicy(outcome: {
     || outcome.quoteMinimumPaymentWindowSeconds !== 0
   ) {
     throw new Error("Outcome must use the fixed one-shot quote policy");
-  }
-}
-
-/// A fresh dispatch signature must not resurrect an old settlement: the
-/// gateway gets one dispatch-deadline period after the quote payment window
-/// closes (finality plus assembly) to deliver the dispatch.
-export function assertDispatchWithinQuoteSettlementWindow(
-  dispatch: { issuedAt: number },
-  quote: { validBefore: number },
-  outcome: { dispatchDeadlineSeconds: number },
-): void {
-  if (dispatch.issuedAt > quote.validBefore + outcome.dispatchDeadlineSeconds) {
-    throw new Error("Dispatch was issued too long after the quote payment window");
   }
 }

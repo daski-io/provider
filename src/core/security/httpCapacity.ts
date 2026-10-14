@@ -6,6 +6,8 @@ export function concurrencyBudget(args: {
   maxConcurrent: number;
   maxConcurrentPerIp: number;
   bypassIps: string[];
+  /** Answer an over-budget request; defaults to a JSON 503. */
+  reject?: (req: Request, res: Response) => void;
 }) {
   let active = 0;
   const activeByIp = new Map<string, number>();
@@ -18,7 +20,8 @@ export function concurrencyBudget(args: {
       || (!bypassed && sourceActive >= args.maxConcurrentPerIp)
     ) {
       res.setHeader("Retry-After", "1");
-      res.status(503).json({ error: "server_busy" });
+      if (args.reject) args.reject(req, res);
+      else res.status(503).json({ error: "server_busy" });
       return;
     }
     active++;

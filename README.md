@@ -53,7 +53,8 @@ provider does. PostgreSQL is the small durable rail ledger that prevents a
 signed dispatch or admitted chain event from being replayed after a process
 restart. It stores:
 
-- transaction identity, state, and terminal result;
+- transaction identity, state, terminal result, and operations revision;
+- signed readiness quotes that later dispatches bind to;
 - admitted public deposit and release evidence;
 - shared rate-limit buckets; and
 - optional external-mutation intent for operations that use the supplier
@@ -102,12 +103,13 @@ and evidence bindings during onboarding.
    exact request and payer. There is no dynamic pricing.
 3. The gateway admits payment and sends a short-lived signed dispatch with the
    quote, exact request, payer, order, audience, and chain evidence.
-4. Core verifies every binding and atomically claims the dispatch in
-   PostgreSQL.
+4. Core verifies every binding, including the persisted provider quote, and
+   atomically claims the order in PostgreSQL before the envelope expires.
 5. Your adapter maps the skill to one reviewed API endpoint or MCP tool and
    returns `completed` or `failed` within 50 seconds.
-6. Core persists the terminal result and returns a provider-signed terminal
-   attestation. Replays receive the same durable result.
+6. Core persists the terminal result and returns a provider-signed snapshot
+   with a terminal attestation. Exact replays and status reads receive the
+   same durable result, freshly observed and re-signed.
 
 If an external mutation can time out ambiguously and cannot be reconciled
 within that same execution window, use `provider-full`. Never guess whether an

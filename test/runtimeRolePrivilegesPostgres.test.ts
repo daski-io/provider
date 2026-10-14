@@ -116,7 +116,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       serviceSlug: "dummy",
       skillId: "echo",
       listingManifestHash: hash("3"),
-      maxOpenOrders: 10,
+      dispatchValidBefore: Math.floor(Date.now() / 1_000) + 300,
     });
     await expect(modules.transactions.completeTransaction(claimed.transaction.id, {
       status: "completed",

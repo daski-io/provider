@@ -12,15 +12,41 @@ import { healthRouter, providerReady } from "./health.js";
 import { logError, logInfo } from "./logger.js";
 import { concurrencyBudget, configureHttpTimeouts } from "./security/httpCapacity.js";
 import { installHttpSecurityBoundary } from "./security/httpBoundary.js";
+import { strictJsonTransport } from "./security/jsonTransport.js";
 import { makeRateLimiter } from "./security/rateLimit.js";
-import { assertNoDuplicateJsonKeys } from "./standardRail/canonical.js";
+import {
+  exceptServicing,
+  forServicing,
+  isServicingRequest,
+  rejectRequest,
+  respondAmbiguously,
+  servicingAbuseLimiter,
+} from "./security/servicingIngress.js";
 import type { ProviderStandardRailConfig } from "./standardRail/config.js";
+import type { DispatchDependencies } from "./standardRail/dispatch.js";
 import { createStandardRailRouter } from "./standardRail/routes.js";
+
+/**
+ * Unauthenticated servicing failures tolerated per source each minute. The
+ * gateway never fails authentication, so this bounds garbage floods only;
+ * behind a proxy, sources are distinguished by the trusted-proxy settings.
+ */
+const SERVICING_FAILURES_PER_MINUTE = 120;
 
 let server: ReturnType<Express["listen"]> | null = null;
 
-/** Build the complete HTTP stack; `startServer` only adds the listener. */
-export function createApp(standard: ProviderStandardRailConfig): Express {
+/**
+ * Build the complete HTTP stack; `startServer` only adds the listener.
+ *
+ * Dispatch and its status are servicing calls for already-funded orders.
+ * They keep bounded ingress, authentication and a failure-only abuse limit,
+ * but skip product readiness and the purchase/global rate limits, and no
+ * middleware may answer them with a JSON refusal (C03).
+ */
+export function createApp(
+  standard: ProviderStandardRailConfig,
+  options: { dispatch?: DispatchDependencies } = {},
+): Express {
   const app = express();
   installHttpSecurityBoundary(app);
   app.use("/health", localHealthLimiter());
@@ -32,69 +58,48 @@ export function createApp(standard: ProviderStandardRailConfig): Express {
     maxConcurrent: config.HTTP_MAX_CONCURRENCY,
     maxConcurrentPerIp: config.HTTP_MAX_CONCURRENCY_PER_IP,
     bypassIps,
+    reject: (req, res) => rejectRequest(req, res, 503, "server_busy"),
   }));
-  app.use(makeRateLimiter({
+  const servicingAbuse = servicingAbuseLimiter({
+    maxFailuresPerMinute: SERVICING_FAILURES_PER_MINUTE,
+    bypassIps,
+  });
+  app.use(forServicing(servicingAbuse.guard));
+  app.use(exceptServicing(makeRateLimiter({
     namespace: "global",
     capacity: config.RATE_LIMIT_GLOBAL_CAPACITY,
     perMinute: config.RATE_LIMIT_GLOBAL_PER_MIN,
     bypassIps,
-  }));
-
-  app.use(
-    "/standard-rail",
-    (req, res, next) => {
-      if (req.method !== "POST") return next();
-      const mediaType = req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-      const encoding = req.header("content-encoding")?.trim().toLowerCase();
-      if (mediaType !== "application/json" || (encoding && encoding !== "identity")) {
-        res.status(415).json({ error: "uncompressed_application_json_required" });
-        return;
-      }
-      next();
-    },
-    express.json({
-      limit: "2mb",
-      inflate: false,
-      verify: (req, _res, body) => {
-        (req as Request & { rawBody?: Buffer }).rawBody = body;
-      },
-    }),
-    (req, res, next) => {
-      const body = (req as Request & { rawBody?: Buffer }).rawBody;
-      try {
-        if (body?.length) assertNoDuplicateJsonKeys(body.toString("utf8"));
-        next();
-      } catch {
-        res.status(400).json({ error: "invalid_json" });
-      }
-    },
-  );
+  })));
+  app.use("/standard-rail", strictJsonTransport());
 
   app.use("/.well-known", wellKnownRouter);
   app.use("/agent-cards", agentCardRouter);
   app.use("/skills", skillsDocsRouter);
   app.get("/llms.txt", llmsTxtHandler);
-  app.use(
-    "/standard-rail",
-    async (_req, res, next) => {
-      if (!(await providerReady())) {
-        res.setHeader("Retry-After", "30");
-        res.status(503).json({ error: "provider_not_ready" });
-        return;
-      }
-      next();
-    },
-    makeRateLimiter({
-      namespace: "standard-rail",
-      capacity: config.RATE_LIMIT_RAIL_CAPACITY,
-      perMinute: config.RATE_LIMIT_RAIL_PER_MIN,
-      bypassIps,
-    }),
-    createStandardRailRouter(config, standard),
-  );
+  const purchaseLimiter = makeRateLimiter({
+    namespace: "standard-rail",
+    capacity: config.RATE_LIMIT_RAIL_CAPACITY,
+    perMinute: config.RATE_LIMIT_RAIL_PER_MIN,
+    bypassIps,
+  });
+  // New sales need complete provider readiness; servicing reads never do.
+  const salesReadiness = async (_req: Request, res: Response, next: NextFunction) => {
+    if (!(await providerReady())) {
+      res.setHeader("Retry-After", "30");
+      res.status(503).json({ error: "provider_not_ready" });
+      return;
+    }
+    next();
+  };
+  app.use(["/standard-rail/outcomes", "/standard-rail/quote"], salesReadiness, purchaseLimiter);
+  app.use("/standard-rail", createStandardRailRouter(config, standard, {
+    recordServicingFailure: servicingAbuse.recordFailure,
+    dispatch: options.dispatch,
+  }));
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
-  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     const status = (error as { status?: unknown; type?: unknown }).status;
     const clientError = typeof status === "number" && status >= 400 && status < 500
       && typeof (error as { type?: unknown }).type === "string";
@@ -102,6 +107,10 @@ export function createApp(standard: ProviderStandardRailConfig): Express {
       errorClass: error instanceof Error ? error.name : "UnknownError",
       ...(clientError ? { status } : {}),
     });
+    if (isServicingRequest(req)) {
+      respondAmbiguously(res);
+      return;
+    }
     if (res.headersSent) return;
     if (clientError) {
       res.status(status as number).json({ error: status === 413 ? "payload_too_large" : "invalid_json" });

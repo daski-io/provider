@@ -138,16 +138,41 @@ drifted; keep NTP healthy.
 
 ## Dispatch is rejected
 
-Public responses are deliberately generic. Correlate only safe request ids and
-structured error classes. Frequent causes are wrong content type/encoding,
-duplicate JSON keys, stale envelope, wrong audience/environment/chain/signer,
-changed replay, quote/request hash mismatch, outcome/schema/price drift,
-non-final or disagreeing evidence, sanctions lookup failure, self-purchase,
-capacity, or service input rejection.
+A dispatch answered with JSON `{"error":"dispatch_rejected","reason":...}` was
+definitely not admitted; the gateway retries with a new envelope. The reason
+is a reviewed code:
+
+- `signature`/`envelope_lifetime`/`validator`: signer, audience, environment,
+  chain, clock, an envelope that expired before its claim could commit, or a
+  malformed request;
+- `outcome_policy`/`self_purchase`: the listing version is not the installed
+  catalog head, or the payer is a provider wallet;
+- `quote_window`/`price`: the forwarded `QuoteV1` or the persisted provider
+  quote it names does not bind this order (unknown or zero quote hash,
+  different request, payer or window), or the amount differs;
+- `evidence`: chain evidence, settlement timing (judged by the deposit block
+  timestamp), sanctions, or evidence already admitted for another order; and
+- `service_unavailable`: provider readiness or the database failed before
+  anything was admitted.
+
+Listing capacity, paused sales, and quote age never refuse a funded dispatch.
+An empty-body `503` is deliberate ambiguity: admission exists, may exist, or
+could not be checked, so the gateway reconciles through status instead of
+sending a new envelope.
 
 Do not log the signed envelope, request, evidence bundle, private key, or raw
 product response to diagnose it. Reproduce with synthetic data in unit tests or
 coordinate a redacted Testnet trace with Daski.
+
+## Status answers 404 `outcome_policy`
+
+`404 {"error":"dispatch_status_unavailable","reason":"outcome_policy"}` means a
+fresh, signature-verified status query found no claim at all for that order.
+The gateway acts on it only after the original envelope's `validBefore` plus
+60 seconds, and the database refuses any claim that would commit at or after
+`validBefore`, so the answer cannot be overtaken by a slow request. A bad
+signature, stale query, different existing claim (`409 binding_conflict`),
+database failure, or signing failure is never this answer.
 
 ## Product call times out or is ambiguous
 
@@ -162,10 +187,12 @@ outcome successful or blindly repeat the mutation.
 
 ## Same order returns a different result or is rejected
 
-An exact same signed dispatch returns the persisted state/result. A dispatch
-with the same order id but a different dispatch hash is an attack or protocol
-error and is rejected. Ensure the gateway retries the original bytes and does
-not regenerate request, nonce, quote, or evidence fields.
+An exact same signed dispatch returns the persisted state and attestation,
+re-signed with a fresh observation, even after its envelope expired. A
+different envelope for an order that already has a claim is never admitted:
+it gets the ambiguous `503`, and status for its hash answers `409
+binding_conflict`. The original claim stays authoritative; reconcile with the
+original dispatch hash.
 
 After a provider restart, an interrupted `executing` row becomes terminal
 `failed` with `provider_restarted_during_execution`. The minimal runtime must

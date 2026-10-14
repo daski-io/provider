@@ -16,6 +16,8 @@ vi.mock("../src/core/db/pool.js", () => ({
 }));
 
 import {
+  AdmissionExpiredError,
+  AdmissionUncertainError,
   claimTransaction,
   completeTransaction,
 } from "../src/core/standardRail/transactionStore.js";
@@ -36,6 +38,9 @@ function transaction(dispatchHash = hash("2")) {
     result: null,
     created_at: new Date(),
     completed_at: null,
+    operations_revision: 0,
+    operations_projection: { fulfillment: null, support: null, recovery: null },
+    observed_at: "1900000000",
   };
 }
 
@@ -49,7 +54,7 @@ const claim = () => claimTransaction({
   serviceSlug: "dummy",
   skillId: "echo",
   listingManifestHash: hash("4"),
-  maxOpenOrders: 1,
+  dispatchValidBefore: 1_900_000_300,
 });
 
 describe("minimal transaction store", () => {
@@ -61,25 +66,28 @@ describe("minimal transaction store", () => {
     });
   });
 
-  it("claims a fresh dispatch in one serializable transaction", async () => {
+  it("claims a funded dispatch without consulting capacity and records its deadline", async () => {
     const row = transaction();
     mocks.clientQuery
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ count: "0" }] })
       .mockResolvedValueOnce({ rows: [row] })
       .mockResolvedValueOnce({ rows: [] });
 
     await expect(claim()).resolves.toEqual({ transaction: row, fresh: true });
-    expect(mocks.clientQuery.mock.calls[0]?.[0]).toContain("SERIALIZABLE");
-    expect(mocks.clientQuery.mock.calls[4]?.[0]).toContain("INSERT INTO provider_transactions");
-    expect(mocks.clientQuery.mock.calls[5]?.[0]).toBe("COMMIT");
-    expect(mocks.release).toHaveBeenCalledOnce();
+    const statements = mocks.clientQuery.mock.calls.map(([sql]) => String(sql));
+    expect(statements[0]).toBe("BEGIN");
+    expect(statements[1]).toContain("FOR UPDATE");
+    expect(statements[2]).toContain("INSERT INTO provider_transactions");
+    expect(statements[2]).toContain("to_timestamp($11)");
+    expect(mocks.clientQuery.mock.calls[2]?.[1]?.[10]).toBe(1_900_000_300);
+    expect(statements[3]).toBe("COMMIT");
+    expect(statements.join("\n")).not.toMatch(/count\(|advisory/);
+    expect(mocks.release).toHaveBeenCalledWith(false);
   });
 
-  it("returns an exact same replay without executing a second claim", async () => {
-    const row = transaction();
+  it("returns an existing claim unchanged for the caller to compare", async () => {
+    const row = transaction(hash("9"));
     mocks.clientQuery
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [row] })
@@ -90,18 +98,52 @@ describe("minimal transaction store", () => {
     expect(mocks.clientQuery.mock.calls[2]?.[0]).toBe("COMMIT");
   });
 
-  it("rejects a changed dispatch replay and rolls back", async () => {
+  it("reports the commit-time admission deadline as a definite non-admission", async () => {
     mocks.clientQuery
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [transaction(hash("9"))] })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [transaction()] })
+      .mockRejectedValueOnce(Object.assign(new Error("deadline"), {
+        code: "23514",
+        constraint: "provider_transactions_admission_deadline",
+      }));
 
-    await expect(claim()).rejects.toThrow("Changed dispatch replay rejected");
-    expect(mocks.clientQuery.mock.calls[2]?.[0]).toBe("ROLLBACK");
-    expect(mocks.release).toHaveBeenCalledOnce();
+    await expect(claim()).rejects.toBeInstanceOf(AdmissionExpiredError);
+    expect(mocks.release).toHaveBeenCalledWith(false);
   });
 
-  it("persists a terminal result only from executing state", async () => {
+  it("treats a lost COMMIT acknowledgement as uncertain and discards the session", async () => {
+    mocks.clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [transaction()] })
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"));
+
+    const error = await claim().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AdmissionUncertainError);
+    expect((error as AdmissionUncertainError).taskId).toMatch(/^task-/);
+    expect(mocks.release).toHaveBeenCalledWith(true);
+  });
+
+  it("resolves a unique race to the winning claim and rethrows other pre-commit failures", async () => {
+    const winner = transaction();
+    mocks.clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: "23505" }))
+      .mockResolvedValueOnce({ rows: [] });
+    mocks.poolQuery.mockResolvedValueOnce({ rows: [winner] });
+    await expect(claim()).resolves.toEqual({ transaction: winner, fresh: false });
+
+    mocks.clientQuery.mockReset()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(new Error("statement timeout"))
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(claim()).rejects.toThrow("statement timeout");
+    expect(mocks.clientQuery.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+  });
+
+  it("persists a terminal result only from executing state and serves a finalized row", async () => {
     const completed = {
       ...transaction(),
       state: "completed" as const,
@@ -112,7 +154,10 @@ describe("minimal transaction store", () => {
     await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);
     expect(mocks.poolQuery.mock.calls[0]?.[0]).toContain("state='executing'");
 
-    mocks.poolQuery.mockResolvedValueOnce({ rows: [] });
+    mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [completed] });
+    await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);
+
+    mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
     await expect(completeTransaction("task-1", completed.result))
       .rejects.toThrow("Transaction completion claim was lost");
   });

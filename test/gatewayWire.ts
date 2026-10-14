@@ -1,5 +1,6 @@
 import { getAddress, recoverMessageAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { z } from "zod";
 import { canonicalHash, unsignedEnvelopeHash } from "../src/core/standardRail/canonical.js";
 import type { SignedEnvelope } from "../src/core/standardRail/types.js";
 
@@ -214,4 +215,154 @@ export async function acceptIntakeAsGateway(
     throw new Error("Invalid intake signer");
   }
   return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch, status and operations (gateway src/standardRail/providerDispatch.ts,
+// operationsSchema.ts and operationsStore.ts at 8f15201).
+
+
+const time = z.number().int().nonnegative();
+export const operationsSchema = z.object({
+  schemaVersion: z.literal(1),
+  revision: time,
+  observedAt: time,
+  fulfillment: z.unknown().nullable(),
+  support: z.unknown().nullable(),
+  recovery: z.unknown().nullable(),
+}).strict().refine((value) =>
+  value.fulfillment === null && value.support === null && value.recovery === null,
+"lite publishes no operations sections");
+
+interface TerminalPayload {
+  taskId: string;
+  dispatchHash: Hex;
+  state: string;
+  resultHash: Hex;
+  completedAt: number;
+}
+
+const DISPATCH_STATES = [
+  "dispatching", "submitted", "working", "input-required", "completed", "failed", "canceled",
+];
+
+/** Port of validateDispatchResponse + terminalEvidence + persistOperations' freshness. */
+export async function acceptDispatchSnapshotAsGateway(args: {
+  value: unknown;
+  dispatchHash: Hex;
+  providerAuthorityKey?: Address;
+  providerTerminalAttestationKey?: Address;
+  now?: number;
+}) {
+  const now = args.now ?? nowSeconds();
+  const body = args.value as Record<string, unknown> & {
+    terminalAttestation?: { payload?: Record<string, unknown>; signature?: unknown };
+  };
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("malformed");
+  const terminal = ["completed", "failed", "canceled"].includes(String(body.state));
+  const expected = terminal
+    ? "dispatchHash,operations,signature,state,taskId,terminalAttestation"
+    : "dispatchHash,operations,signature,state,taskId";
+  if (sortedKeys(body) !== expected) throw new Error("provider dispatch response fields are invalid");
+  if (
+    typeof body.taskId !== "string" || body.taskId.length === 0 || body.taskId.length > 128
+    || body.dispatchHash !== args.dispatchHash || typeof body.signature !== "string"
+    || !DISPATCH_STATES.includes(String(body.state))
+  ) throw new Error("provider_dispatch_response_malformed");
+  const operations = operationsSchema.parse(body.operations);
+  const responseHash = canonicalHash({
+    taskId: body.taskId,
+    dispatchHash: args.dispatchHash,
+    state: body.state,
+    operations,
+  });
+  const signer = await recoverMessageAddress({ message: { raw: responseHash }, signature: body.signature as Hex });
+  if (getAddress(signer) !== getAddress(args.providerAuthorityKey ?? providerAuthority)) {
+    throw new Error("provider_dispatch_response_signature_invalid");
+  }
+  if (operations.observedAt > now + 30 || operations.observedAt < now - 300) {
+    throw new Error("provider_operations_observation_stale");
+  }
+  if (!terminal) return { body, operations, attestation: null as TerminalPayload | null };
+  const attestation = body.terminalAttestation!;
+  if (!attestation?.payload || typeof attestation.signature !== "string"
+    || sortedKeys(attestation) !== "payload,signature"
+    || sortedKeys(attestation.payload) !== "completedAt,dispatchHash,resultHash,state,taskId") {
+    throw new Error("provider_terminal_attestation_missing");
+  }
+  const completedAt = attestation.payload.completedAt;
+  if (
+    typeof completedAt !== "number" || !Number.isSafeInteger(completedAt) || completedAt <= 0
+    || completedAt > now + 30 || typeof attestation.payload.resultHash !== "string"
+    || !/^0x[0-9a-fA-F]{64}$/.test(attestation.payload.resultHash)
+  ) throw new Error("provider_terminal_attestation_time_invalid");
+  const terminalSigner = await recoverMessageAddress({
+    message: { raw: canonicalHash(attestation.payload) },
+    signature: attestation.signature as Hex,
+  });
+  if (
+    getAddress(terminalSigner) !== getAddress(args.providerTerminalAttestationKey ?? providerAuthority)
+    || attestation.payload.taskId !== body.taskId
+    || attestation.payload.dispatchHash !== args.dispatchHash
+    || attestation.payload.state !== body.state
+  ) throw new Error("provider_terminal_attestation_invalid");
+  return { body, operations, attestation: attestation.payload as unknown as TerminalPayload | null };
+}
+
+export interface ProviderAnswer {
+  status: number;
+  contentType: string | null;
+  contentEncoding: string | null;
+  text: string;
+}
+
+function boundedJson(answer: ProviderAnswer): unknown {
+  const mediaType = answer.contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType !== "application/json" || (answer.contentEncoding && answer.contentEncoding !== "identity")) {
+    throw new Error("BOUNDED_JSON_MEDIA_TYPE_INVALID");
+  }
+  if (!answer.text) throw new Error("BOUNDED_JSON_EMPTY");
+  return JSON.parse(answer.text);
+}
+
+/** How the gateway's dispatch() treats a provider answer to a dispatch POST. */
+export function classifyDispatchAnswer(answer: ProviderAnswer): "accepted" | "refused" | "ambiguous" {
+  let body: unknown;
+  try {
+    body = boundedJson(answer);
+  } catch {
+    return "ambiguous";
+  }
+  if (answer.status >= 200 && answer.status < 300) return "accepted";
+  if (answer.status >= 400 && answer.status < 600 && body && typeof body === "object"
+    && !Array.isArray(body) && "error" in body
+    && (body as { error: unknown }).error !== null && (body as { error: unknown }).error !== undefined) {
+    return "refused";
+  }
+  return "ambiguous";
+}
+
+/** How queryProviderDispatchStatus treats a status answer. */
+export function classifyStatusAnswer(answer: ProviderAnswer): "snapshot" | "no_claim" | "unavailable" {
+  if (answer.status >= 200 && answer.status < 300) return "snapshot";
+  if (answer.status === 404) {
+    try {
+      const body = boundedJson(answer) as Record<string, unknown>;
+      if (body && typeof body === "object" && !Array.isArray(body) && body.error != null
+        && body.reason === "outcome_policy") return "no_claim";
+    } catch {
+      return "unavailable";
+    }
+  }
+  return "unavailable";
+}
+
+/** The DispatchStatusQueryV1 the gateway signs for reconciliation. */
+export function gatewayStatusQuery(orderId: string, dispatchHash: Hex, issuedAt = nowSeconds()) {
+  return signGatewayEnvelope({
+    artifactType: "DispatchStatusQueryV1",
+    issuedAt,
+    validBefore: issuedAt + 60,
+    payload: { orderId, dispatchHash, issuedAt, validBefore: issuedAt + 60 },
+  });
 }

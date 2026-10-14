@@ -96,6 +96,11 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   rate-limit, and terminal-result state. Do not replace it with memory state.
 - Dispatch claims, financial/evidence state, and external mutation intent use
   conditional writes, transactions, locks, and stable idempotency keys.
+- A dispatch JSON `error` means "definitely not admitted". Once a claim exists
+  or its commit is uncertain, answer the signed snapshot or the empty-body
+  503; only a verified status query with no claim gets the `outcome_policy`
+  404. Never refuse a funded dispatch for capacity, paused sales, or quote
+  age, and never cache a signed response.
 - For a non-convergent product mutation, journal intent before the call and
   reconcile authoritative product state after ambiguity. If reconciliation
   cannot complete synchronously, use `provider-full`; never guess or blindly

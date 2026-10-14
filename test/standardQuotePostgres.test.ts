@@ -77,10 +77,11 @@ describePostgres("provider quotes in PostgreSQL", () => {
     const insert = (id: string, listingByte: string, state: "executing" | "completed") => pool.query(
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-         service_slug,skill_id,listing_manifest_hash,state,result,completed_at
+         service_slug,skill_id,listing_manifest_hash,state,result,completed_at,
+         dispatch_valid_before
        ) VALUES ($1,'https://gateway.example',$1,decode(md5($1) || md5($1),'hex'),
          decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),$2,'dummy','echo',
-         decode(repeat($3,32),'hex'),$4,$5,$6)`,
+         decode(repeat($3,32),'hex'),$4,$5,$6,now() + interval '5 minutes')`,
       [id, payer, listingByte, state, state === "completed" ? '{"status":"completed"}' : null,
         state === "completed" ? new Date() : null],
     );

@@ -48,21 +48,37 @@ try {
     throw new Error(`unexpected migrated tables: ${actual.join(", ")}`);
   }
   await client.query(`SET search_path TO ${quoted}`);
-  await client.query(
-    `INSERT INTO provider_transactions (
+  const claim = (id, validBefore) => `INSERT INTO provider_transactions (
        id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,
-       payer,service_slug,skill_id,listing_manifest_hash,state
+       payer,service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
      ) VALUES (
-       'task-smoke','https://gateway.example','order-smoke',decode(repeat('11',32),'hex'),
+       '${id}','https://gateway.example','${id}',decode(md5('${id}') || md5('${id}'),'hex'),
        decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),
        '0x1111111111111111111111111111111111111111','smoke','echo',
-       decode(repeat('44',32),'hex'),'executing'
-     )`,
-  );
+       decode(repeat('44',32),'hex'),'executing',${validBefore}
+     )`;
+  await client.query(claim("task-smoke", "now() + interval '5 minutes'"));
+  for (const [id, validBefore] of [["task-late", "now() - interval '1 second'"], ["task-open", "NULL"]]) {
+    await client.query("BEGIN");
+    await client.query(claim(id, validBefore));
+    if (!await rejects("COMMIT")) {
+      throw new Error("a claim committed at or after its dispatch deadline");
+    }
+  }
   const invalid = await client.query(
     `UPDATE provider_transactions SET state='completed' WHERE id='task-smoke'`
   ).then(() => false, () => true);
   if (!invalid) throw new Error("terminal-result constraint was not enforced");
+  const changed = `'{"fulfillment":null,"recovery":null,"support":{"reviewId":"r"}}'`;
+  if (!await rejects(`UPDATE provider_transactions SET operations_projection=${changed}
+      WHERE id='task-smoke'`)) {
+    throw new Error("changed operations content kept its revision");
+  }
+  await client.query(`UPDATE provider_transactions SET operations_revision=1,
+      operations_projection=${changed} WHERE id='task-smoke'`);
+  if (!await rejects("UPDATE provider_transactions SET operations_revision=0 WHERE id='task-smoke'")) {
+    throw new Error("operations revision decreased");
+  }
   const quote = (payer, issuedAt = 1_000, validBefore = 1_120) => `INSERT INTO provider_quotes
       (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
        issued_at,valid_before)

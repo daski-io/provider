@@ -88,6 +88,7 @@ export async function createReport(
   configuredBase: string,
   token: string,
   request: { topic: string },
+  signal: AbortSignal,
 ): Promise<{ reportId: string; summary: string }> {
   const base = reviewedEndpoint(configuredBase, REVIEWED_BASE);
   const url = appendReviewedOperation(base, "reports");
@@ -98,6 +99,7 @@ export async function createReport(
       "content-type": "application/json",
     },
     body: JSON.stringify(request),
+    signal,
   }, {
     timeoutMs: 20_000,
     maxResponseBytes: 64_000,
@@ -114,9 +116,13 @@ raw response text in an exception. For a private network product, add a
 deliberately reviewed private-target client rather than disabling the public
 SSRF checks globally.
 
-The adapter checks `context.signal` before and after the product call and uses
-a product timeout comfortably below the core deadline. Do not rely on the
-50-second outer timeout to clean up an unbounded socket or SDK call.
+The adapter passes `context.signal` as `init.signal` and uses a product
+timeout comfortably below the core deadline. `boundedFetch` composes the two:
+either one ends the request, the response-body read included, on the plain
+and the IP-pinned path alike. An abort only stops waiting; it never proves
+the product did not apply the request, so a mutating call reconciles through
+its idempotency key rather than retrying. Do not rely on the 50-second outer
+timeout to clean up an unbounded socket or SDK call.
 
 ### API rules
 

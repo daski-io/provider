@@ -30,6 +30,22 @@ interface OriginState {
 
 const origins = new Map<string, OriginState>();
 
+/** The caller's signal aborted the request; the origin did not fail. */
+export class OutboundAbortedError extends Error {
+  constructor(cause: unknown) {
+    super("outbound request was aborted by its caller", { cause });
+    this.name = "OutboundAbortedError";
+  }
+}
+
+/**
+ * Bounded outbound HTTP. The caller's `init.signal` and the helper's own
+ * timeout both bound the whole exchange, response body included, on the
+ * fetch and the pinned paths alike. An abort only stops this process from
+ * waiting: it never proves the remote action did not happen, so a mutating
+ * caller must reconcile, not retry blindly. A caller abort is not counted
+ * against the origin's circuit.
+ */
 export async function boundedFetch(
   input: string | URL,
   init: RequestInit = {},
@@ -48,6 +64,8 @@ export async function boundedFetch(
     pinnedIp = target.addresses[0] ?? null;
     if (!pinnedIp) throw new Error("outbound target resolved without a usable address");
   }
+  const caller = init.signal ?? undefined;
+  if (caller?.aborted) throw new OutboundAbortedError(caller.reason);
   const state = origins.get(url.origin) ?? { active: 0, failures: 0, openUntil: 0 };
   origins.set(url.origin, state);
   if (state.openUntil > Date.now()) throw new Error(`outbound circuit open for ${url.origin}`);
@@ -67,6 +85,7 @@ export async function boundedFetch(
           body: init.body,
           timeoutMs,
           maxResponseBytes: maxBytes,
+          signal: caller,
         })
       : await fetchResponse(url, init, timeoutMs, maxBytes);
     const declared = Number(response.headers.get("content-length") ?? "0");
@@ -96,6 +115,7 @@ export async function boundedFetch(
       json: <T>() => JSON.parse(body.toString("utf8")) as T,
     };
   } catch (error) {
+    if (caller?.aborted) throw new OutboundAbortedError(caller.reason);
     recordFailure(state);
     throw error;
   } finally {
@@ -109,24 +129,31 @@ async function fetchResponse(
   timeoutMs: number,
   maxBytes: number,
 ): Promise<{ status: number; statusText: string; ok: boolean; headers: Headers; body: Buffer }> {
-  const response = await fetch(url, {
-    ...init,
-    redirect: "error",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  // One signal for the request and the whole body read: the caller's
+  // cancellation, composed with the helper's own deadline.
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  const response = await fetch(url, { ...init, redirect: "error", signal });
   const reader = response.body?.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   if (reader) {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) {
-        await reader.cancel();
-        throw new Error(`outbound response exceeds ${maxBytes} bytes`);
+    const cancel = () => void reader.cancel(signal.reason).catch(() => undefined);
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (signal.aborted) throw signal.reason ?? new Error("outbound request was aborted");
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new Error(`outbound response exceeds ${maxBytes} bytes`);
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
+    } finally {
+      signal.removeEventListener("abort", cancel);
     }
   }
   return {

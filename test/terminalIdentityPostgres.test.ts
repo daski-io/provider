@@ -197,5 +197,17 @@ describePostgres("frozen terminal identity against PostgreSQL", () => {
       "UPDATE provider_transactions SET result_hash=$1 WHERE id='task-unhashed'",
       [frozen({ status: "completed" })],
     )).rejects.toThrow("provider_transactions_pending_unhashed");
+    // A terminal identity arises only from the freezing transition, never an insert.
+    await expect(pool.query(
+      `INSERT INTO provider_transactions (
+         id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+         service_slug,skill_id,listing_manifest_hash,state,result,result_hash,completed_at,
+         dispatch_valid_before
+       ) VALUES ('task-born-terminal','https://gateway.example','ord_00000000-0000-4000-8000-0000000000c5',
+         decode(repeat('c5',32),'hex'),decode(repeat('c5',32),'hex'),decode(repeat('33',32),'hex'),
+         '0x1111111111111111111111111111111111111111','dummy','echo',decode(repeat('44',32),'hex'),
+         'completed','{"status":"completed"}',$1,now(),now() + interval '5 minutes')`,
+      [frozen({ status: "completed" })],
+    )).rejects.toThrow("a claim is admitted as executing");
   });
 });

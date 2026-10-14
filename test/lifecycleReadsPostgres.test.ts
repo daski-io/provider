@@ -187,4 +187,34 @@ describePostgres("lifecycle reads against PostgreSQL", () => {
     expect(statements.filter((sql) => sql.includes("FROM provider_transactions"))).toHaveLength(600);
     expect(after.rows[0]!.buckets).toBe(before.rows[0]!.buckets);
   }, 60_000);
+
+  // Runs last: it exhausts the loopback source's lifecycle failure bucket.
+  it("keeps lifecycle failures out of the budget paid dispatches depend on", async () => {
+    const { orderId, taskId } = await finished();
+    const dispatched = await finished();
+    // Buyer content the gateway forwards under a valid grant charges nothing.
+    for (let index = 0; index < 150; index += 1) {
+      const answer = await read(rail, await call(orderId, taskId, "status", "read", { x: "y".repeat(40_000) }));
+      expect(answer.status).toBe(400);
+    }
+    expect((await read(rail, await call(orderId, taskId, "status", "read"))).status).toBe(200);
+    // Forged grants are unauthenticated: they exhaust lifecycle's own bucket only.
+    const forged = { ...(await call(orderId, taskId, "status", "read")) };
+    forged.grant = { ...forged.grant, signature: `0x${"11".repeat(64)}1b` as Hex };
+    let refused = 0;
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const answer = await read(rail, forged);
+      if (answer.status === 503) break;
+      expect(answer.status).toBe(401);
+      refused += 1;
+    }
+    expect(refused).toBeGreaterThanOrEqual(120);
+    const blocked = await read(rail, await call(orderId, taskId, "status", "read"));
+    expect([blocked.status, blocked.text]).toEqual([503, '{"error":"lifecycle_unavailable"}']);
+    const status = await rail.status(dispatched.orderId, `0x${(await pool.query(
+      "SELECT encode(dispatch_hash,'hex') AS hash FROM provider_transactions WHERE order_id=$1",
+      [dispatched.orderId],
+    )).rows[0].hash}` as Hex);
+    expect(status.status).toBe(200);
+  }, 60_000);
 });

@@ -99,6 +99,43 @@ describe("synchronous terminal results", () => {
     }
   });
 
+  it("never freezes as completed what the gateway would refuse to relay", () => {
+    // The gateway's passive-output rule: no active web content and no control
+    // character other than tab, line feed and carriage return in any string.
+    const echoing = (text: string) => ({
+      status: "completed",
+      message: "Echo completed.",
+      artifacts: [{ name: "echo_result", mimeType: "application/json", data: { message: text } }],
+    });
+    for (const text of ["online=1", "Fill the <form>", "javascript:void(0)", "a\u000bb", "<script>"]) {
+      const terminal = terminalServiceResult(echoing(text), contract);
+      expect(terminal.result, text).toEqual({ status: "failed", errorCode: SERVICE_RESULT_INVALID });
+      expect(terminal.diagnostic?.code, text).toBe("result_active_content");
+    }
+    for (const text of ["line one\nline two\ttabbed\r", "price < 5 and on time", "formal"]) {
+      expect(terminalServiceResult(echoing(text), contract).result.status, text).toBe("completed");
+    }
+  });
+
+  it("cannot be made to throw by a hostile adapter value", async () => {
+    const generic = { status: "failed", errorCode: SERVICE_EXECUTION_FAILED };
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    for (const value of [
+      { get status(): string { throw new Error("getter detail"); } },
+      revoked.proxy,
+      { status: "completed", amount: 10n },
+      (() => { const cyclic: Record<string, unknown> = { status: "completed" }; cyclic.self = cyclic; return cyclic; })(),
+    ]) {
+      expect(() => terminalServiceResult(value, contract)).not.toThrow();
+      await expect(executeSynchronously(returning(value), context, {}, contract)).resolves.toEqual(generic);
+    }
+    // A getter cannot answer differently between checks: one snapshot is judged.
+    let reads = 0;
+    const shifty = { get status() { reads += 1; return reads === 1 ? "completed" : "failed"; }, message: "ok" };
+    expect(terminalServiceResult(shifty, contract).result).toEqual({ status: "completed", message: "ok" });
+  });
+
   it("attests failures as a reviewed code without free text", () => {
     const failure = (errorCode: unknown, message = "Secret upstream detail 0xdeadbeef") =>
       terminalServiceResult({ status: "failed", errorCode, message }, contract).result;

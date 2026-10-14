@@ -196,6 +196,11 @@ describe("bounded JSON-RPC endpoint", () => {
     const call = () => rpc.isValidSignature(contractAccount, `0x${"11".repeat(32)}`, "0x1234", signal);
     reply = () => ({ body: JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 3, message: "execution reverted" } }) });
     await expect(call()).resolves.toEqual({ kind: "reverted" });
+    // The contract's own execution failures are final, as the gateway judges them.
+    for (const message of ["out of gas", "invalid opcode: INVALID", "stack underflow (0 <=> 1)"]) {
+      reply = () => ({ body: JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message } }) });
+      await expect(call(), message).resolves.toEqual({ kind: "reverted" });
+    }
     reply = () => ({ body: rpcResult(`0x${"00".repeat(20_000)}`) });
     await expect(call()).resolves.toEqual({ kind: "returned", data: "0x" });
     reply = () => ({ body: rpcResult(17) });

@@ -18,10 +18,13 @@ import {
   LifecycleUnavailableError,
 } from "./lifecycleErrors.js";
 import {
+  assertReadCapability,
+  isReadCapability,
   parseLifecycleCall,
   READ_ACTIONS,
-  verifyLifecycleAuthorization,
+  validateLifecycleCall,
   verifyLifecycleGrant,
+  verifyPayerSignedRead,
   type LifecycleCall,
 } from "./lifecycleRequest.js";
 import { httpPayerRpcEndpoint } from "./payerRpc.js";
@@ -79,15 +82,27 @@ export class StandardLifecycleService {
     };
   }
 
+  /**
+   * The grant first, then the call's shapes as the gateway's own call. A read
+   * capability is held to its read-only rule; any other action is refused as
+   * unsupported before a payer signature is checked or anything is looked up,
+   * because lite performs none and nothing may happen. Reads verify the payer
+   * signature, then read the task once.
+   */
   async handle(body: unknown): Promise<LifecycleAnswer> {
-    const call = parseLifecycleCall(body);
-    const grant = await verifyLifecycleGrant(call, this.config, this.chainId);
-    await verifyLifecycleAuthorization(call, grant, {
-      config: this.config,
-      chainId: this.chainId,
-      payerSignatures: this.payerSignatures,
-    });
+    const unverified = parseLifecycleCall(body);
+    const grant = await verifyLifecycleGrant(unverified, this.config, this.chainId);
+    const call = validateLifecycleCall(unverified);
+    const readCapability = isReadCapability(call.authorization);
+    if (readCapability) assertReadCapability(call);
     if (!READ_ACTIONS.has(call.action)) throw new LifecycleRefusal("unsupported_action");
+    if (!readCapability) {
+      await verifyPayerSignedRead(call, grant, {
+        config: this.config,
+        chainId: this.chainId,
+        payerSignatures: this.payerSignatures,
+      });
+    }
     const task = await this.task(call);
     return this.answer(task, call.action === "artifact");
   }

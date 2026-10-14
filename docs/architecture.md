@@ -160,8 +160,11 @@ JSON refusal (no handler ran); only dispatch and status handlers answer
 ambiguously, and new synchronous dispatches still refuse before admission
 while readiness is down. Lifecycle has no admission to be ambiguous about:
 anything it cannot serve right now, including a busy or rate-limited call and
-an escaped error, is the named `503 lifecycle_unavailable`. New quotes require
-complete provider readiness and pass the purchase limit.
+an escaped error, is the named `503 lifecycle_unavailable`. Lifecycle calls
+carry the buyer's own request object, so they use a separate failure bucket
+charged only by unauthenticated grants; nothing a buyer sends through the
+gateway can exhaust the budget that paid dispatches depend on. New quotes
+require complete provider readiness and pass the purchase limit.
 
 The lifecycle route verifies the gateway's `ProviderLifecycleGrantV1` before
 it interprets the authorization, then serves `status` and `artifact` only:

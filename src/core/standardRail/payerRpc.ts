@@ -102,10 +102,16 @@ async function jsonRpc(
   return parsed as JsonRpcReply;
 }
 
-/** EIP-1474 execution error (code 3) or a node's revert message. */
-function isRevert(error: JsonRpcReply["error"]): boolean {
+/**
+ * The contract's own explicit failure, judged as the gateway judges it
+ * (payerSignature.ts isExplicitCallFailure): the EIP-1474 execution error
+ * code 3, or a node's revert, out-of-gas or invalid-execution message. Such
+ * an answer is final; anything else is the endpoint's failure.
+ */
+function isExplicitCallFailure(error: JsonRpcReply["error"]): boolean {
   if (!error) return false;
-  return error.code === 3 || (typeof error.message === "string" && /revert/i.test(error.message));
+  return error.code === 3 || (typeof error.message === "string"
+    && /revert|out of gas|invalid opcode|invalid jump|stack (?:under|over)flow/i.test(error.message));
 }
 
 /** A bounded JSON-RPC endpoint on an operator-configured HTTPS URL. */
@@ -133,7 +139,7 @@ export function httpPayerRpcEndpoint(url: string): PayerRpcEndpoint {
         throw error;
       }
       if (reply.error) {
-        if (isRevert(reply.error)) return { kind: "reverted" };
+        if (isExplicitCallFailure(reply.error)) return { kind: "reverted" };
         throw new RpcTransportError("eth_call failed");
       }
       if (typeof reply.result !== "string" || !HEX_DATA.test(reply.result)) {

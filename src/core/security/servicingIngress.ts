@@ -71,17 +71,23 @@ export function respondLifecycleUnavailable(res: Response): void {
   res.status(503).json(LIFECYCLE_UNAVAILABLE_BODY);
 }
 
-const NAMESPACE = "servicing-failures";
+/**
+ * Lifecycle calls carry buyer-chosen content the gateway forwards under its
+ * own grant, so they never share the budget that dispatch and status, the
+ * paid-order path, depend on.
+ */
+const namespaceOf = (req: Request) =>
+  servicingPath(req) === "lifecycle" ? "servicing-failures:lifecycle" : "servicing-failures";
 
 /**
  * Abuse limit for servicing calls that never charges verified gateway work:
  * only requests that fail before authentication (malformed, wrong domain,
- * bad signature, transport faults) spend a token from the shared PostgreSQL
- * bucket, and the guard only reads it. A source with no tokens left gets a
- * JSON 429 before parsing; it never reached a handler, so nothing was
- * admitted. A lifecycle read is told the named lifecycle_unavailable instead,
- * which the gateway relays as retryable. A store failure fails open:
- * authentication still applies.
+ * bad signature, and for dispatch and status transport faults) spend a
+ * token from a PostgreSQL bucket per source, and the guard only reads it. A
+ * source with no tokens left gets a JSON 429 before parsing; it never reached
+ * a handler, so nothing was admitted. A lifecycle read uses its own bucket and
+ * is told the named lifecycle_unavailable instead, which the gateway relays as
+ * retryable. A store failure fails open: authentication still applies.
  */
 export function servicingAbuseLimiter(args: {
   capacity: number;
@@ -94,7 +100,7 @@ export function servicingAbuseLimiter(args: {
       if (isIpInRanges(ip, args.bypassIps)) return next();
       let allowed = true;
       try {
-        allowed = await hasRateLimitToken(NAMESPACE, ip, args.capacity, args.perMinute);
+        allowed = await hasRateLimitToken(namespaceOf(req), ip, args.capacity, args.perMinute);
       } catch {
         allowed = true;
       }
@@ -110,7 +116,7 @@ export function servicingAbuseLimiter(args: {
     recordFailure(req: Request): void {
       const ip = requestClientIp(req);
       if (isIpInRanges(ip, args.bypassIps)) return;
-      void consumeRateLimitToken(NAMESPACE, ip, args.capacity, args.perMinute).catch(() => {
+      void consumeRateLimitToken(namespaceOf(req), ip, args.capacity, args.perMinute).catch(() => {
         logWarn("Servicing failure could not be recorded");
       });
     },

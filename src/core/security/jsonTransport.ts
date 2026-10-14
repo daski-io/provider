@@ -22,8 +22,10 @@ function isPlainUtf8Json(header: string | undefined): boolean {
  * Strict request transport for /standard-rail POSTs (C01): bounded,
  * uncompressed UTF-8 `application/json`, with duplicate keys and pathological
  * documents rejected before any handler runs. These refusals are definite:
- * the request never reached a handler, so nothing was admitted. A servicing
- * call refused here is reported to the abuse limiter.
+ * the request never reached a handler, so nothing was admitted. A refused
+ * dispatch or status call is reported to the abuse limiter. A lifecycle call
+ * is not: the gateway forwards the buyer's own `request` object in it, so an
+ * oversized or unsafe one proves nothing about the sender.
  */
 export function strictJsonTransport(options: { recordServicingFailure?: (req: Request) => void } = {}) {
   // Status queries and lifecycle calls are small signed envelopes; only a
@@ -33,7 +35,9 @@ export function strictJsonTransport(options: { recordServicingFailure?: (req: Re
     other: express.json({ limit: "2mb", inflate: false, verify: captureRawBody }),
   };
   const refuse = (req: Request, res: Response, status: number, error: string) => {
-    if (isServicingRequest(req)) options.recordServicingFailure?.(req);
+    if (isServicingRequest(req) && servicingPath(req) !== "lifecycle") {
+      options.recordServicingFailure?.(req);
+    }
     res.status(status).json({ error });
   };
   return (req: Request, res: Response, next: NextFunction): void => {

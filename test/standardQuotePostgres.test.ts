@@ -15,6 +15,7 @@ import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js"
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
 import { countOpenObligations, loadProviderQuote } from "../src/core/standardRail/quoteStore.js";
+import { completeTransaction } from "../src/core/standardRail/transactionStore.js";
 import { acceptQuoteAsGateway, gatewayQuoteRequest } from "./gatewayWire.js";
 import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
 import { echoService, gatewayListing, railConfig } from "./standardRailServiceFixture.js";
@@ -78,17 +79,20 @@ describePostgres("provider quotes in PostgreSQL", () => {
   });
 
   it("counts only nonterminal tasks of the same listing version as open obligations", async () => {
-    const insert = (id: string, listingByte: string, state: "executing" | "completed") => pool.query(
-      `INSERT INTO provider_transactions (
-         id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
-         service_slug,skill_id,listing_manifest_hash,state,result,completed_at,
-         dispatch_valid_before
-       ) VALUES ($1,'https://gateway.example',$1,decode(md5($1) || md5($1),'hex'),
-         decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),$2,'dummy','echo',
-         decode(repeat($3,32),'hex'),$4,$5,$6,now() + interval '5 minutes')`,
-      [id, payer, listingByte, state, state === "completed" ? '{"status":"completed"}' : null,
-        state === "completed" ? new Date() : null],
-    );
+    // Claims are admitted as executing; a completed one is finished the way
+    // the runtime does it, freezing its result hash.
+    const insert = async (id: string, listingByte: string, state: "executing" | "completed") => {
+      await pool.query(
+        `INSERT INTO provider_transactions (
+           id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+           service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+         ) VALUES ($1,'https://gateway.example',$1,decode(md5($1) || md5($1),'hex'),
+           decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),$2,'dummy','echo',
+           decode(repeat($3,32),'hex'),'executing',now() + interval '5 minutes')`,
+        [id, payer, listingByte],
+      );
+      if (state === "completed") await completeTransaction(id, { status: "completed" });
+    };
     await insert("task-a1", "aa", "executing");
     await insert("task-a2", "aa", "executing");
     await insert("task-a3", "aa", "completed");

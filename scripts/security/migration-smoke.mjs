@@ -58,6 +58,17 @@ try {
        decode(repeat('44',32),'hex'),'executing',${validBefore}
      )`;
   await client.query(claim("task-smoke", "now() + interval '5 minutes'"));
+  const bornTerminal = await client.query(`INSERT INTO provider_transactions (
+       id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,service_slug,
+       skill_id,listing_manifest_hash,state,result,result_hash,completed_at,dispatch_valid_before
+     ) VALUES ('task-born-terminal','https://gateway.example','task-born-terminal',
+       decode(repeat('55',32),'hex'),decode(repeat('22',32),'hex'),decode(repeat('33',32),'hex'),
+       '0x1111111111111111111111111111111111111111','smoke','echo',decode(repeat('44',32),'hex'),
+       'completed','{"status":"completed"}'::jsonb,decode(repeat('66',32),'hex'),now(),
+       now() + interval '5 minutes')`).then(() => "admitted", (error) => error.message);
+  if (bornTerminal !== "a claim is admitted as executing") {
+    throw new Error("a claim was admitted already terminal");
+  }
   for (const [id, validBefore] of [["task-late", "now() - interval '1 second'"], ["task-open", "NULL"]]) {
     await client.query("BEGIN");
     await client.query(claim(id, validBefore));

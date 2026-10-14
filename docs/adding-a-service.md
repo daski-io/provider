@@ -166,12 +166,23 @@ Unexpected exceptions and timeouts are also converted to
 `service_execution_failed`.
 
 Before freezing a completed result, core holds the whole object to the
-artifact rules above, the response JSON budget and the listing version's
-admitted `resultSchema`. A result that fails becomes the terminal failure
-`service_result_invalid` (a synchronous task has no later retrieval) and logs
-`Synchronous result failed its admitted result contract` with a stable
-`diagnostic` and schema keywords, never the result itself. Test the adapter
-output against the published schema, as the dummy's co-located tests do.
+artifact rules above, the response JSON budget, the gateway's passive-output
+rule and the listing version's admitted `resultSchema`. A result that fails
+becomes the terminal failure `service_result_invalid` (a synchronous task has
+no later retrieval) and logs `Synchronous result failed its admitted result
+contract` with a stable `diagnostic` and schema keywords, never the result
+itself. Test the adapter output against the published schema, as the dummy's
+co-located tests do.
+
+The passive-output rule is the gateway's own check before it relays any
+artifact: no markup tags such as `<script>` or `<form>`, no `javascript:` or
+`data:text/html` URLs, no `on…=` handler attributes, no control characters
+other than tab, line feed and carriage return, no `__proto__`-style keys.
+If buyer input flows into the result, decline input that would break it
+before payment: core exports `isPassiveText` and `isPassiveOutput` from
+`serviceRegistry/types.ts`, and the dummy's `requestReadiness` hook uses them
+so an echo of `<form>` is refused at quote time instead of becoming a paid
+failure.
 
 ## 7. Compose and onboard the service
 

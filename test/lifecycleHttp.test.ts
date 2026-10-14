@@ -282,18 +282,57 @@ describe("lifecycle reads under both authorization forms (C-T03)", () => {
   });
 
   it("answers unsupported mutations with exactly unsupported_action and no effect (L-T13)", async () => {
-    for (const [action, request] of [
-      ["cancel", {}],
-      ["input", { inputText: "Keep the title.", data: { message: "hi" } }],
-      ["support", { requestId: "support-1", message: "Please confirm." }],
+    for (const [action, request, key] of [
+      ["cancel", {}, payerKey],
+      ["input", { inputText: "Keep the title.", data: { message: "hi" } }, payerKey],
+      ["support", { requestId: "support-1", message: "Please confirm." }, payerKey],
+      // A contract-account payer: refused as unsupported without any RPC.
+      ["cancel", {}, otherKey],
     ] as const) {
-      const answer = await post(await signedCall(TASKS.working, action, request));
+      const answer = await post(await signedCall(TASKS.working, action, request, key));
       expect([answer.status, answer.text]).toEqual([409, '{"error":"unsupported_action"}']);
       expect(classifyLifecycleRefusal(action, answer)).toBe("ORDER_ACTION_UNSUPPORTED");
     }
     expect(lookups()).toBe(0);
+    expect(contractEndpoint.calls).toBe(0);
     expect(db.query.mock.calls.some(([sql]) => /\b(?:INSERT|UPDATE|DELETE)\b/.test(String(sql))
       && !String(sql).includes("rate_limit_buckets"))).toBe(false);
+  });
+
+  it("never charges a failure budget for buyer content the gateway forwarded", async () => {
+    const charged = () => db.query.mock.calls
+      .filter(([sql]) => String(sql).includes("INSERT INTO rate_limit_buckets"))
+      .map(([, params]) => String((params as unknown[])[0]).split(":").slice(0, -1).join(":"));
+    // The gateway forwards any object as a read capability's request.
+    const huge = await post(await readCall(TASKS.working, "status", { request: { x: "y".repeat(40_000) } }));
+    expect([huge.status, json(huge)]).toEqual([400, { error: "lifecycle_rejected", reason: "request_invalid" }]);
+    const oversized = await post(await readCall(TASKS.working, "status", { request: { x: "y".repeat(70_000) } }));
+    expect(oversized.status).toBe(413);
+    const unsafe = await post(JSON.stringify(await readCall(TASKS.working, "status"))
+      .replace('"request":{}', '"request":{"__proto__":{}}'));
+    expect(unsafe.status).toBe(400);
+    expect(charged()).toEqual([]);
+    // A forged grant is an unauthenticated failure, charged to lifecycle's own bucket.
+    const forged = await post(await readCall(TASKS.working, "status", {
+      grant: { privateKey: `0x${"66".repeat(32)}` as Hex },
+    }));
+    expect(forged.status).toBe(401);
+    await vi.waitFor(() => expect(charged()).toEqual(["servicing-failures:lifecycle"]));
+  });
+
+  it("accepts a payer authorization that was valid when the gateway issued the grant", async () => {
+    const at = nowSeconds();
+    const readWith = async (issuedAt: number) => post(await gatewayLifecycleCall({
+      orderId: TASKS.working.order_id, providerTaskId: TASKS.working.id, action: "status", payer,
+      issuedAt: at,
+      authorization: await payerAuthorization({
+        payerKey, orderId: TASKS.working.order_id, action: "status", request: {}, issuedAt,
+      }),
+    }));
+    // Expired 10 s before the grant: inside the 30 s clock tolerance.
+    expect((await readWith(at - 310)).status).toBe(200);
+    expect((await readWith(at - 331)).status).toBe(403);
+    expect((await readWith(at + 31)).status).toBe(403);
   });
 
   it("names temporary failures lifecycle_unavailable and never answers 500", async () => {
@@ -329,5 +368,14 @@ describe("lifecycle reads under both authorization forms (C-T03)", () => {
       issuedAt: nowSeconds(), validBefore: nowSeconds() + 60, payload: {},
     });
     expect((await post({ ...(await readCall(TASKS.working, "status")), grant: wrongType })).status).toBe(401);
+    const oversized = await post({
+      ...(await readCall(TASKS.working, "status")),
+      request: { padding: "x".repeat(70_000) },
+    });
+    expect([oversized.status, json(oversized)]).toEqual([413, { error: "payload_too_large" }]);
+    const compressed = await post(await readCall(TASKS.working, "status"), {
+      ...LIFECYCLE_HEADERS, "content-encoding": "gzip",
+    });
+    expect(compressed.status).toBe(415);
   });
 });

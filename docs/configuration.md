@@ -153,7 +153,10 @@ routes. Dispatch, dispatch status and lifecycle reads are servicing calls for
 funded orders: they skip the product-readiness gate and both request-charged
 limits, and keep the concurrency and body bounds (status and lifecycle bodies
 are capped at 64 KiB). A lifecycle call refused for concurrency or by the
-failure bucket gets the named `503 lifecycle_unavailable`. Instead,
+failure bucket gets the named `503 lifecycle_unavailable`. Lifecycle has its
+own failure bucket, charged only by grants that do not authenticate: its
+body carries the buyer's own request, so a transport fault or an invalid
+request there never spends a token. Instead,
 a shared PostgreSQL bucket per source admits 120 unauthenticated failures
 (malformed, wrong-domain or badly signed calls and transport faults) per
 minute; verified calls only read it. Middleware refusals of servicing calls

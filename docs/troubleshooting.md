@@ -226,8 +226,13 @@ the listing version's admitted `resultSchema`, the response JSON budget, the
 1 MB bound or the artifact rules (`https` credential-free URLs, lowercase
 names). The log line `Synchronous result failed its admitted result contract`
 names the task and a stable `diagnostic` (`result_schema_mismatch`,
-`result_out_of_bounds`, `result_unstorable` or `result_artifact_invalid`)
-with schema keywords, never the result. Fix the adapter mapping or, if the
+`result_out_of_bounds`, `result_active_content`, `result_unstorable` or
+`result_artifact_invalid`)
+with schema keywords, never the result. `result_active_content` means a
+string broke the gateway's passive-output rule (markup tags such as `<form>`,
+`javascript:` URLs, `on…=` attributes or control characters), which the gateway
+would refuse to relay; decline such input before payment with a
+`requestReadiness` hook, as the dummy does. Fix the adapter mapping or, if the
 published schema is wrong, change it and request a newly issued bundle. A
 failure whose code is not in the module's `failureCodes` is attested as
 `service_execution_failed`.

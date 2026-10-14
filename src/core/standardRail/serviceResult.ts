@@ -1,5 +1,5 @@
 import type { ValidateFunction } from "ajv";
-import type { ServiceResult } from "../serviceRegistry/types.js";
+import { isPassiveOutput, type ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "./canonical.js";
 import { assertBoundedJsonValue, RESPONSE_JSON_BUDGET } from "./jsonBounds.js";
 
@@ -38,7 +38,7 @@ export interface ResultContract {
 /** A stable diagnostic name plus schema-derived keywords; never result content. */
 export interface ResultDiagnostic {
   code: "result_artifact_invalid" | "result_unstorable" | "result_out_of_bounds"
-    | "result_schema_mismatch";
+    | "result_active_content" | "result_schema_mismatch";
   keywords: string[];
 }
 
@@ -55,16 +55,29 @@ const invalid = (code: ResultDiagnostic["code"], keywords: string[] = []) =>
 /**
  * The single result frozen for a terminal task. A completed result is the
  * complete canonical ServiceResult: normalized to the stored JSON form, held
- * to core's artifact and byte bounds, the response JSON budget and the
- * admitted resultSchema as one whole object. A failure becomes
- * `{status: "failed", errorCode}` with a reviewed code; adapter messages are
- * dropped, so free text never becomes evidence.
+ * to core's artifact and byte bounds, the response JSON budget, the
+ * gateway's passive-output rule and the admitted resultSchema as one whole
+ * object, so it is never frozen as completed when the gateway would refuse
+ * to relay it. A failure becomes `{status: "failed", errorCode}` with a
+ * reviewed code; adapter messages are dropped, so free text never becomes
+ * evidence. Nothing an adapter returns can make this throw.
  */
 export function terminalServiceResult(
   value: unknown,
   contract: ResultContract,
 ): { result: ServiceResult; diagnostic?: ResultDiagnostic } {
-  const record = value as Record<string, unknown> | null;
+  // Judge one JSON snapshot, which is exactly what is stored: getters,
+  // proxies and undefined members cannot change or throw between checks.
+  let snapshot: unknown;
+  try {
+    snapshot = JSON.parse(JSON.stringify(value) ?? "null");
+  } catch {
+    return {
+      result: failureEvidence(SERVICE_EXECUTION_FAILED),
+      diagnostic: { code: "result_unstorable", keywords: [] },
+    };
+  }
+  const record = snapshot as Record<string, unknown> | null;
   if (!record || typeof record !== "object" || Array.isArray(record)) {
     return { result: failureEvidence(SERVICE_EXECUTION_FAILED) };
   }
@@ -76,7 +89,7 @@ export function terminalServiceResult(
   }
   if (record.status !== "completed") return { result: failureEvidence(SERVICE_EXECUTION_FAILED) };
   try {
-    return { result: completedResult(record, contract.validate) };
+    return { result: completedResult(record as ServiceResult, contract.validate) };
   } catch (error) {
     const diagnostic = error instanceof InvalidResult
       ? error.diagnostic
@@ -85,27 +98,28 @@ export function terminalServiceResult(
   }
 }
 
-function completedResult(record: Record<string, unknown>, validate: ValidateFunction): ServiceResult {
-  let normalized: ServiceResult;
+/** Everything the gateway checks before it relays an artifact, and the stored form's limits. */
+function completedResult(result: ServiceResult, validate: ValidateFunction): ServiceResult {
   try {
-    normalized = storableJson(record) as ServiceResult;
+    assertStorable(result);
   } catch {
     throw invalid("result_unstorable");
   }
   try {
-    if (Buffer.byteLength(JSON.stringify(normalized), "utf8") > MAX_RESULT_BYTES) {
+    if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_RESULT_BYTES) {
       throw new Error("Result exceeds the byte bound");
     }
-    assertBoundedJsonValue(normalized, RESPONSE_JSON_BUDGET, "Result");
+    assertBoundedJsonValue(result, RESPONSE_JSON_BUDGET, "Result");
   } catch {
     throw invalid("result_out_of_bounds");
   }
-  assertArtifacts(normalized);
-  if (!validate(normalized)) {
+  if (!isPassiveOutput(result)) throw invalid("result_active_content");
+  assertArtifacts(result);
+  if (!validate(result)) {
     const keywords = [...new Set((validate.errors ?? []).map((error) => error.keyword))].slice(0, 8);
     throw invalid("result_schema_mismatch", keywords);
   }
-  return normalized;
+  return result;
 }
 
 function assertArtifacts(result: ServiceResult): void {
@@ -134,13 +148,11 @@ function assertArtifacts(result: ServiceResult): void {
 }
 
 /**
- * The stored and attested form: the JSON normalization (which drops
- * undefined members), refused when PostgreSQL jsonb or canonical hashing
- * could not represent it, so an admitted claim never strands on an
- * unstorable terminal write.
+ * The stored and attested form is the JSON snapshot; refuse one PostgreSQL
+ * jsonb or canonical hashing could not represent, so an admitted claim never
+ * strands on an unstorable terminal write.
  */
-function storableJson(value: unknown): unknown {
-  const normalized = JSON.parse(JSON.stringify(value)) as unknown;
+function assertStorable(snapshot: unknown): void {
   const visit = (node: unknown): void => {
     if (typeof node === "string") {
       if (node.includes("\u0000")) throw new Error("Result contains U+0000");
@@ -157,7 +169,6 @@ function storableJson(value: unknown): unknown {
       }
     }
   };
-  visit(normalized);
-  canonicalHash(normalized);
-  return normalized;
+  visit(snapshot);
+  canonicalHash(snapshot);
 }

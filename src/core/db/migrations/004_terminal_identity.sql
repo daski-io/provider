@@ -1,10 +1,11 @@
 -- Frozen terminal identity.
 --
 -- Every terminal attestation of a task, dispatch and lifecycle alike, must
--- carry the same state, result hash and completion time forever. The
--- transition out of 'executing' therefore writes the state, the result, its
--- canonical hash and the completion time together, and nothing changes them
--- afterwards. The admitted bindings of a claim never change either.
+-- carry the same state, result hash and completion time forever. A claim is
+-- admitted as 'executing'; the transition out of it writes the state, the
+-- result, its canonical hash and the completion time together, and nothing
+-- changes them afterwards. The admitted bindings of a claim never change
+-- either.
 --
 -- Rows that became terminal before this migration keep a NULL hash: their
 -- identity is the canonical hash of the stored result exactly as it was
@@ -18,6 +19,14 @@ ALTER TABLE provider_transactions
 CREATE FUNCTION provider_transactions_terminal_identity() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.state <> 'executing' THEN
+      RAISE EXCEPTION 'a claim is admitted as executing'
+        USING ERRCODE = 'check_violation',
+              CONSTRAINT = 'provider_transactions_terminal_identity';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.id IS DISTINCT FROM OLD.id
      OR NEW.gateway_audience IS DISTINCT FROM OLD.gateway_audience
      OR NEW.order_id IS DISTINCT FROM OLD.order_id
@@ -53,5 +62,5 @@ END;
 $$;
 
 CREATE TRIGGER provider_transactions_terminal_identity
-  BEFORE UPDATE ON provider_transactions
+  BEFORE INSERT OR UPDATE ON provider_transactions
   FOR EACH ROW EXECUTE FUNCTION provider_transactions_terminal_identity();

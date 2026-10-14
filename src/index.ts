@@ -4,6 +4,7 @@ import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
+import { registerRuntimeInstance } from "./core/runtimeInstance.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
@@ -29,6 +30,7 @@ let shuttingDown = false;
 let stopIdentity: (() => void) | null = null;
 let stopRail: (() => void) | null = null;
 let stopLeases: (() => void) | null = null;
+let stopInstance: (() => Promise<void>) | null = null;
 
 async function main(): Promise<void> {
   logInfo("Starting Daski minimal provider", {
@@ -59,6 +61,7 @@ async function main(): Promise<void> {
 
   // Only executions whose lease expired are failed; another process's live
   // call is never swept. Pre-R1 rows wait for the operator's cutover.
+  stopInstance = await registerRuntimeInstance(pool, config.DEPLOYMENT_REVISION ?? "unknown");
   stopLeases = await startSyncLeaseSweeper();
   const legacy = await countLegacyExecutions(pool);
   if (legacy > 0) {
@@ -129,6 +132,7 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
     stopIdentity?.();
     stopRail?.();
     stopLeases?.();
+    await stopInstance?.();
     await closeMigrationPool();
     await pool.end();
   } catch (error) {

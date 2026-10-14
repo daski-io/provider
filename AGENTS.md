@@ -127,6 +127,8 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   statement-level `provider_runtime_epoch_barrier()` trigger. Raise
   `RUNTIME_SCHEMA_EPOCH` and the `provider_schema_epoch` row only for a schema
   change older runtimes cannot use safely.
+- The async-admission switch changes only through `npm run
+  daski:async-admission`; migrations, the importer and boot never enable it.
 - Treat published contract hashes and fixed-price changes as coordinated Daski
   onboarding changes. Request and install a new signed runtime bundle; never
   edit catalog rows or issued artifacts.

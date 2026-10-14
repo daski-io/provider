@@ -21,7 +21,9 @@ if (!/^provider_smoke_[a-f0-9]{32}$/.test(schema)) {
 const quoted = `"${schema}"`;
 const expected = [
   "_migrations",
+  "provider_async_admission",
   "provider_quotes",
+  "provider_runtime_instances",
   "provider_runtime_listing_versions",
   "provider_schema_epoch",
   "provider_transactions",
@@ -201,9 +203,19 @@ try {
     "UPDATE standard_evidence_admissions SET order_id=order_id WHERE false",
     "UPDATE provider_schema_epoch SET epoch=1",
     "INSERT INTO _migrations (name, checksum) VALUES ('legacy.sql', 'x')",
+    "UPDATE provider_async_admission SET enabled=false",
+    "UPDATE provider_runtime_instances SET heartbeat_at=now() WHERE false",
     "TRUNCATE rate_limit_buckets",
   ]) {
     if (!await barred(sql)) throw new Error(`an unmarked session wrote a provider table: ${sql}`);
+  }
+  // Async admission starts off and cannot be on without recorded evidence.
+  const admission = await client.query("SELECT enabled FROM provider_async_admission");
+  if (admission.rows.length !== 1 || admission.rows[0].enabled !== false) {
+    throw new Error("async admission was not created off");
+  }
+  if (!await rejects("UPDATE provider_async_admission SET enabled=true, changed_at=now()")) {
+    throw new Error("async admission was enabled without activation evidence");
   }
   // A newer schema epoch refuses older markers until a newer runtime lowers it.
   await client.query("UPDATE provider_schema_epoch SET epoch=2");

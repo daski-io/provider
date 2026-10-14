@@ -139,6 +139,29 @@ deadlines, token/splitter provenance, commission/payee, provider intent, and
 runtime commitments. Ask Daski for a new consistent set after any reviewed
 contract change.
 
+### Async admission switch
+
+External-job admission is governed by a database switch that starts off.
+Migrations, the importer and boot never turn it on (the runtime role can only
+read it, and a static gate keeps every other code path away from the
+activation module). Only the operator command changes it:
+
+```bash
+npm run daski:async-admission                    # report the switch and its checks (read-only)
+npm run daski:async-admission -- --activate      # enable it if every check passes
+npm run daski:async-admission -- --deactivate    # turn it off; admitted work is still serviced
+```
+
+Activation locks the switch and, in the same transaction, requires the
+legacy-process barrier at this build's schema epoch (so no pre-R1 process can
+run), no pre-R1 execution awaiting the cutover, every retained obligation
+serviceable with this build's handlers and keys, and at least one running
+instance with every running instance (fresh heartbeat in
+`provider_runtime_instances`) a compatible external-job worker. It records the
+checks as evidence. No build of this release runs that worker, so activation
+is refused (`compatible_workers`) until the external-job release is deployed.
+The command never migrates.
+
 ### Retained listing versions, keys and audiences
 
 Installing a new bundle supersedes a listing's head but never removes the

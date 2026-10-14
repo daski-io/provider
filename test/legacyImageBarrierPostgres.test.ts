@@ -81,13 +81,16 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     }
   }
 
-  /** Every row of every provider table, and every grant the runtime role holds. */
-  const snapshot = (database: DisposableDatabase) => admin(database, async (client) => {
+  /**
+   * Every row of every provider table, and every grant the runtime role
+   * holds. An R1 boot adds its own instance row, which `ignore` can leave out.
+   */
+  const snapshot = (database: DisposableDatabase, ignore: string[] = []) => admin(database, async (client) => {
     const parts: string[] = [];
     const tables = await client.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname=current_schema() ORDER BY tablename",
     );
-    for (const { tablename } of tables.rows) {
+    for (const { tablename } of tables.rows.filter((row) => !ignore.includes(row.tablename))) {
       const rows = await client.query(`SELECT t::text AS row FROM "${tablename}" t ORDER BY 1`);
       parts.push(`${tablename}: ${rows.rows.map((row) => row.row).join(" | ")}`);
     }
@@ -99,6 +102,10 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     parts.push(`grants: ${JSON.stringify(grants.rows)} defaults: ${JSON.stringify(defaults.rows)}`);
     return parts.join("\n");
   });
+
+  /** A recorded snapshot without the given tables' lines. */
+  const snapshotOf = (recorded: string, ignore: string[]) => recorded.split("\n")
+    .filter((line) => !ignore.some((table) => line.startsWith(`${table}:`))).join("\n");
 
   const env = (database: DisposableDatabase, principals: "owner" | "separate" | "superuser") => ({
     ...baseEnv,
@@ -144,6 +151,11 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     await owner.end();
     const upgrade = await r1Boot(database);
     expect(upgrade.served, upgrade.logs).toBe(true);
+    // Neither migrating nor booting turns async admission on.
+    await admin(database, async (client) => {
+      const switchRow = await client.query("SELECT enabled FROM provider_async_admission");
+      expect(switchRow.rows).toEqual([{ enabled: false }]);
+    });
     await admin(database, async (client) => {
       await client.query(`INSERT INTO provider_quotes
           (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
@@ -314,6 +326,7 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     expect(after).not.toBe(before);
     const restored = await r1Boot(database);
     expect(restored.served, restored.logs).toBe(true);
-    expect(await snapshot(database)).toBe(before);
+    const instances = ["provider_runtime_instances"];
+    expect(await snapshot(database, instances)).toBe(snapshotOf(before, instances));
   }, 180_000);
 });

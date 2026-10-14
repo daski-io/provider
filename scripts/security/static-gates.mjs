@@ -78,6 +78,7 @@ const REVIEWED_MIGRATIONS = [
   ["005_runtime_epoch_barrier.sql", ["provider_schema_epoch"]],
   ["006_sync_execution_leases.sql", []],
   ["007_quote_retention.sql", []],
+  ["008_async_admission.sql", ["provider_async_admission", "provider_runtime_instances"]],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();
@@ -217,6 +218,7 @@ const queue = [
   "src/bootstrap.ts",
   "src/installRuntimeBundle.ts",
   "src/upgradeCutover.ts",
+  "src/activateAsyncAdmission.ts",
   "src/core/security/outboundHttp.ts",
   "src/core/security/reviewedEndpoint.ts",
   "src/core/suppliers/operationJournal.ts",
@@ -233,6 +235,22 @@ while (queue.length) {
 }
 for (const file of sourceFiles) {
   if (!reachable.has(resolve(file))) failures.push(`unreachable source file: ${projectPath(file)}`);
+}
+
+// The async-admission switch stays off through migrations, the importer and
+// boot: only the operator's activation command reaches the module that
+// writes it, and no other source writes the switch.
+for (const file of sourceFiles) {
+  const path = projectPath(file);
+  const source = readFileSync(file, "utf8");
+  if (
+    path !== "src/activateAsyncAdmission.ts"
+    && /asyncAdmissionActivation\.js/.test(source)
+  ) failures.push(`${path} must not reach the async-admission activation`);
+  if (
+    path !== "src/core/standardRail/asyncAdmissionActivation.ts"
+    && /UPDATE\s+provider_async_admission/i.test(source)
+  ) failures.push(`${path} must not write the async-admission switch`);
 }
 
 if (!/^\* text=auto eol=lf\s*$/m.test(read(".gitattributes"))) {

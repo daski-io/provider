@@ -19,6 +19,9 @@ export const RUNTIME_TABLE_PRIVILEGES: Readonly<Record<string, readonly TablePri
   // Read by the compatibility barrier on every provider write; only
   // migrations change it.
   provider_schema_epoch: ["SELECT"],
+  // Only the operator's activation command changes the switch.
+  provider_async_admission: ["SELECT"],
+  provider_runtime_instances: ["SELECT", "INSERT", "UPDATE"],
 };
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;

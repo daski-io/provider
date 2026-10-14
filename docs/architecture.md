@@ -219,6 +219,12 @@ an admitted marker. A compatible additive migration keeps the epoch, so
 compatible builds may overlap; an incompatible schema raises it, which the
 database then enforces against every older process at once.
 
+Async admission is a separate database switch (migration 008), off through
+migrations, the importer and boot; only `npm run daski:async-admission --
+--activate` turns it on, after verifying the barrier, the absence of pre-R1
+executions, retained obligations and that every running instance (a
+heartbeat registry in `provider_runtime_instances`) is a compatible worker.
+
 This is a compatibility control against stale code, not protection from a
 database credential holder: any session may declare the marker. The actual
 pre-R1 compiled image is qualified against it in

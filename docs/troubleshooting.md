@@ -116,6 +116,18 @@ role ownership, `DELETE`, or DDL to work around it.
 An applied migration checksum mismatch means a tracked migration was edited
 after use. Restore it exactly and add a new numbered migration for the change.
 
+## Async admission is not activated
+
+`npm run daski:async-admission -- --activate` exits 1 and leaves the switch
+off unless every check in its JSON report passes:
+
+| Check | Meaning |
+| --- | --- |
+| `compatibility_barrier` | The database is not at this build's schema epoch or the barrier is incomplete. Boot this build (it migrates), then retry. |
+| `legacy_executions` | Pre-R1 executions still await the cutover; run `npm run daski:cutover` first. |
+| `retained_obligations` | This build cannot service an obligation (see the boot refusal below). |
+| `compatible_workers` | No running instance runs the external-job worker, or one is older. Expected for every build of this release. |
+
 ## Startup refuses the database schema
 
 | Message | Cause and fix |

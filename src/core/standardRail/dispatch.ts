@@ -29,6 +29,7 @@ import { admitStandardEvidence } from "./evidenceAdmissions.js";
 import { assertProviderQuoteBinding, verifyQuoteEnvelope } from "./quoteBinding.js";
 import { loadProviderQuote } from "./quoteStore.js";
 import { compileProviderSchema, validateProviderRequest } from "./schema.js";
+import type { ResultContract } from "./serviceResult.js";
 import { executeSynchronously } from "./syncExecution.js";
 import { dispatchHashOf, type ProviderTransaction } from "./transactionStore.js";
 import type {
@@ -74,6 +75,7 @@ export class StandardDispatchService {
   private readonly ready: () => Promise<boolean>;
   private readonly signer: ProviderResponseSigner;
   private readonly validators = new Map<string, ValidateFunction>();
+  private readonly resultValidators = new Map<string, ValidateFunction>();
 
   constructor(
     private readonly config: ProviderStandardRailConfig,
@@ -89,6 +91,8 @@ export class StandardDispatchService {
         outcome.listingManifestHash,
         compileProviderSchema(outcome.requestSchema as unknown as Record<string, unknown>),
       );
+      // Each listing version keeps the result contract it was admitted with.
+      this.resultValidators.set(outcome.listingManifestHash, compileProviderSchema(outcome.resultSchema));
     }
   }
 
@@ -113,9 +117,11 @@ export class StandardDispatchService {
     const existing = await currentClaim(dispatch.gatewayAudience, dispatch.orderId);
     if (existing) return this.replay(existing, dispatchHash);
     let outcome: ProviderOutcomeConfig;
+    let contract: ResultContract;
     let claimed: { transaction: ProviderTransaction; fresh: boolean };
     try {
       outcome = await this.verifyNewDispatch(parts);
+      contract = this.resultContract(outcome);
       claimed = await admitDispatch({
         gatewayAudience: dispatch.gatewayAudience,
         orderId: dispatch.orderId,
@@ -144,7 +150,7 @@ export class StandardDispatchService {
         payer: dispatch.payer,
         serviceSlug: outcome.serviceSlug,
         skillId: outcome.skillId,
-      }, parts.request);
+      }, parts.request, contract);
       return await this.snapshot(
         await persistSynchronousResult(claimed.transaction.id, result),
         dispatchHash,
@@ -153,6 +159,14 @@ export class StandardDispatchService {
       if (error instanceof DispatchAmbiguousError) throw error;
       throw new DispatchAmbiguousError("Admitted dispatch could not be answered", error);
     }
+  }
+
+  /** The admitted result schema and reviewed failure codes, resolved before admission. */
+  private resultContract(outcome: ProviderOutcomeConfig): ResultContract {
+    const validate = this.resultValidators.get(outcome.listingManifestHash);
+    const service = getService(outcome.serviceSlug);
+    if (!validate || !service) throw new DispatchRejectedError("outcome_policy");
+    return { validate, failureCodes: new Set(service.failureCodes ?? []) };
   }
 
   /** An exact authenticated replay returns its claim, even after expiry; nothing replaces it. */

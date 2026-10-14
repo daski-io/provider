@@ -10,6 +10,8 @@ Returns the submitted `message` in an `echo_result` JSON artifact.
   `{"status": "completed", "message": "Echo completed.", "artifacts":
   [{"name": "echo_result", "mimeType": "application/json", "data":
   {"message": "<trimmed message>"}}]}`.
+- Failure: a reviewed code only (`invalid_input`, `unknown_skill`, or one of
+  core's generic codes); failure evidence carries no message.
 
 This is a protocol example, not a real marketplace product, and cannot run on
 Base mainnet.

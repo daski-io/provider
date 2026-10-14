@@ -30,6 +30,7 @@ interface ServiceModule {
   adapter: FulfillmentAdapter;
   readiness(signal: AbortSignal): Promise<boolean>;
   requestReadiness?(context: RequestReadinessContext): Promise<RequestReadiness>;
+  failureCodes?: readonly string[];
   docs: { service: string; skills: Record<string, string> };
 }
 ```
@@ -156,9 +157,21 @@ responses, secrets, internal ids that grant access, or unbounded data. Core
 caps the encoded service result at 1 MB, but service-specific limits should be
 far smaller where practical.
 
-Map anticipated failures to stable provider error codes. Public messages must
-not reveal product internals. Unexpected exceptions are converted by core to
+Map anticipated failures to stable provider error codes and list every code
+the adapter may return in the module's `failureCodes` (lowercase, `a-z`, `0-9`
+and `_`). Core attests a failure as exactly `{status: "failed", errorCode}`:
+the adapter's `message` is dropped, and an unlisted code becomes
+`service_execution_failed`, so failure evidence never carries free text.
+Unexpected exceptions and timeouts are also converted to
 `service_execution_failed`.
+
+Before freezing a completed result, core holds the whole object to the
+artifact rules above, the response JSON budget and the listing version's
+admitted `resultSchema`. A result that fails becomes the terminal failure
+`service_result_invalid` (a synchronous task has no later retrieval) and logs
+`Synchronous result failed its admitted result contract` with a stable
+`diagnostic` and schema keywords, never the result itself. Test the adapter
+output against the published schema, as the dummy's co-located tests do.
 
 ## 7. Compose and onboard the service
 

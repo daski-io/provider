@@ -97,6 +97,39 @@ export function standardOutcome(): ProviderOutcomeConfig {
       required: ["message"],
       additionalProperties: false,
     },
+    resultSchema: echoResultSchema(),
+  };
+}
+
+/** A complete completed echo ServiceResult, with optional message and artifacts. */
+export function echoResultSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["status"],
+    properties: {
+      status: { type: "string", enum: ["completed"] },
+      message: { type: "string", maxLength: 500 },
+      artifacts: {
+        type: "array",
+        maxItems: 4,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "data"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 64 },
+            mimeType: { type: "string", enum: ["application/json"] },
+            data: {
+              type: "object",
+              additionalProperties: false,
+              required: ["message"],
+              properties: { message: { type: "string", maxLength: 500 } },
+            },
+          },
+        },
+      },
+    },
   };
 }
 

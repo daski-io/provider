@@ -15,6 +15,7 @@ vi.mock("../src/core/db/pool.js", () => ({
   },
 }));
 
+import { canonicalHash } from "../src/core/standardRail/canonical.js";
 import {
   AdmissionExpiredError,
   AdmissionUncertainError,
@@ -36,6 +37,7 @@ function transaction(dispatchHash = hash("2")) {
     skill_id: "echo",
     state: "executing" as const,
     result: null,
+    result_hash: null,
     created_at: new Date(),
     completed_at: null,
     operations_revision: 0,
@@ -157,6 +159,14 @@ describe("minimal transaction store", () => {
     mocks.poolQuery.mockResolvedValueOnce({ rows: [completed] });
     await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);
     expect(mocks.poolQuery.mock.calls[0]?.[0]).toContain("state='executing'");
+    // The state, result, its canonical hash and the completion time are one write.
+    expect(mocks.poolQuery.mock.calls[0]?.[0]).toMatch(/result_hash=\$4,completed_at=now\(\)/);
+    expect(mocks.poolQuery.mock.calls[0]?.[1]).toEqual([
+      "task-1",
+      "completed",
+      JSON.stringify(completed.result),
+      Buffer.from(canonicalHash(completed.result).slice(2), "hex"),
+    ]);
 
     mocks.poolQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [completed] });
     await expect(completeTransaction("task-1", completed.result)).resolves.toBe(completed);

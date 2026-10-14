@@ -202,6 +202,25 @@ After a provider restart, an interrupted `executing` row becomes terminal
 have one active replica. If transparent resumption is required, use
 `provider-full`.
 
+A completed task's attested identity (state, result hash and completion time)
+is frozen when it becomes terminal and never changes. PostgreSQL refuses an
+update that would alter it (`a terminal task identity is frozen`) or a claim's
+bindings (`an admitted claim keeps its bindings`); fix the caller instead of
+editing the row.
+
+## A synchronous task failed with `service_result_invalid`
+
+The adapter returned a completed result that core could not freeze: it failed
+the listing version's admitted `resultSchema`, the response JSON budget, the
+1 MB bound or the artifact rules (`https` credential-free URLs, lowercase
+names). The log line `Synchronous result failed its admitted result contract`
+names the task and a stable `diagnostic` (`result_schema_mismatch`,
+`result_out_of_bounds`, `result_unstorable` or `result_artifact_invalid`)
+with schema keywords, never the result. Fix the adapter mapping or, if the
+published schema is wrong, change it and request a newly issued bundle. A
+failure whose code is not in the module's `failureCodes` is attested as
+`service_execution_failed`.
+
 ## Agent or Windows tooling fails on line endings
 
 The repository declares LF in `.gitattributes`, and the skill validator also

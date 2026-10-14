@@ -266,6 +266,12 @@ export function materializeOutcome(args: {
   if (!requestSchema || typeof requestSchema !== "object") {
     throw new Error(`${label} skill contract lacks an input schema`);
   }
+  // The admitted result contract: what the gateway validates the artifact
+  // against for orders of this listing version, whatever the build serves.
+  const resultSchema = contract.resultSchema as ProviderOutcomeConfig["resultSchema"];
+  if (!resultSchema || typeof resultSchema !== "object" || Array.isArray(resultSchema)) {
+    throw new Error(`${label} skill contract lacks a result schema`);
+  }
   const pricing = contract.pricing as {
     USDC?: { type?: unknown; fixed_amount?: unknown };
   } | undefined;
@@ -335,6 +341,7 @@ export function materializeOutcome(args: {
     dispatchDeadlineSeconds: deadlines?.dispatchSeconds ?? DEFAULT_DISPATCH_DEADLINE_SECONDS,
     bindingProfile: "recipe-bound-v2",
     requestSchema,
+    resultSchema,
   };
   const constructorArgs = encodeAbiParameters(splitterConstructorTypes, [
     BigInt(chainId), getAddress(outcome.token), getAddress(outcome.providerPayee),

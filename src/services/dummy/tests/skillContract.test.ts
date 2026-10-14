@@ -5,6 +5,7 @@ import {
 } from "../../../core/agentCards/contractExtension.js";
 import type { FulfillmentAdapter } from "../../../core/serviceRegistry/types.js";
 import { compileProviderSchema, validateProviderRequest } from "../../../core/standardRail/schema.js";
+import { terminalServiceResult } from "../../../core/standardRail/serviceResult.js";
 import { DummyAdapter } from "../adapter.js";
 import { dummyService } from "../index.js";
 
@@ -59,11 +60,19 @@ describe("dummy echo skill contract", () => {
     }
   });
 
-  it("returns only reviewed failure codes for refused work", async () => {
+  it("returns only reviewed failure codes, attested without the adapter message", async () => {
     const adapter = new DummyAdapter();
-    expect(await adapter.execute(context(), { message: "   " }))
-      .toMatchObject({ status: "failed", errorCode: "invalid_input" });
-    expect(await adapter.execute(context("other"), { message: "hi" }))
-      .toMatchObject({ status: "failed", errorCode: "unknown_skill" });
+    const contract = {
+      validate: compileProviderSchema(echo.contract.resultSchema as Record<string, unknown>),
+      failureCodes: new Set(dummyService.failureCodes),
+    };
+    for (const [skillId, input, errorCode] of [
+      ["echo", { message: "   " }, "invalid_input"],
+      ["other", { message: "hi" }, "unknown_skill"],
+    ] as const) {
+      const failed = await adapter.execute(context(skillId), input);
+      expect(failed).toMatchObject({ status: "failed", errorCode });
+      expect(terminalServiceResult(failed, contract).result).toEqual({ status: "failed", errorCode });
+    }
   });
 });

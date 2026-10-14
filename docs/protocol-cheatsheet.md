@@ -106,8 +106,9 @@ each read. `signature` is the provider authority's EIP-191 signature of the
 raw `canonicalHash({taskId, dispatchHash, state, operations})`, recomputed
 for every answer. `terminalAttestation` is `{payload: {taskId, dispatchHash,
 state, resultHash, completedAt}, signature}`, where `resultHash` is the
-`canonicalHash` of the stored result and the signature is EIP-191 over the
-raw `canonicalHash(payload)` by the terminal attestation key.
+`canonicalHash` of the result frozen at the terminal transition (see Service
+result) and the signature is EIP-191 over the raw `canonicalHash(payload)` by
+the terminal attestation key.
 
 | Provider knowledge | Answer |
 | --- | --- |
@@ -152,18 +153,29 @@ Successful service execution returns:
 }
 ```
 
-A controlled failure returns:
-
-```json
-{
-  "status": "failed",
-  "errorCode": "stable_product_error",
-  "message": "Safe public explanation"
-}
-```
+A controlled failure returns `{"status": "failed", "errorCode":
+"stable_product_error"}` with a code listed in the module's `failureCodes`.
 
 Do not return pending states, access-bearing product credentials, raw upstream
 responses, or unbounded artifacts. Core caps the total encoded result at 1 MB.
+
+The listing's `resultSchema` describes this whole completed object. Before the
+terminal transition, core normalizes a completed result to its stored JSON
+form and validates it, as one object, against the admitted `resultSchema` of
+the dispatched listing version, the response JSON budget and the artifact
+rules; a result that fails becomes `{"status": "failed", "errorCode":
+"service_result_invalid"}`. Failure evidence is exactly `{status: "failed",
+errorCode}`: messages are dropped and unlisted codes become
+`service_execution_failed`. Core's own codes are `service_execution_failed`,
+`service_result_invalid` and `provider_restarted_during_execution`.
+
+The terminal transition writes the state, the frozen result, its
+`canonicalHash` (`result_hash`) and the completion time in one conditional
+update, and PostgreSQL refuses any later change to them or to the claim's
+bindings. Every dispatch, status and lifecycle attestation signs that frozen
+hash and completion time. Rows that became terminal before the hash was frozen
+keep `result_hash` NULL and are attested from their stored result exactly as
+before; they are never reshaped.
 
 ## Runtime-listing coordination
 

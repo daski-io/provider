@@ -79,6 +79,27 @@ try {
   if (!await rejects("UPDATE provider_transactions SET operations_revision=0 WHERE id='task-smoke'")) {
     throw new Error("operations revision decreased");
   }
+  const frozenHash = "result_hash=decode(repeat('66',32),'hex')";
+  const terminal = `state='completed',result='{"status":"completed"}'::jsonb,completed_at=now()`;
+  if (!await rejects(`UPDATE provider_transactions SET ${terminal} WHERE id='task-smoke'`)) {
+    throw new Error("a terminal transition did not freeze its result hash");
+  }
+  if (!await rejects(`UPDATE provider_transactions SET ${frozenHash} WHERE id='task-smoke'`)) {
+    throw new Error("a pending task carried a result hash");
+  }
+  await client.query(`UPDATE provider_transactions SET ${terminal},${frozenHash} WHERE id='task-smoke'`);
+  for (const change of [
+    "state='failed'",
+    `result='{"status":"completed","message":"changed"}'::jsonb`,
+    "result_hash=decode(repeat('77',32),'hex')",
+    "completed_at=now() + interval '1 second'",
+    "payer='0x2222222222222222222222222222222222222222'",
+    "dispatch_hash=decode(repeat('23',32),'hex')",
+  ]) {
+    if (!await rejects(`UPDATE provider_transactions SET ${change} WHERE id='task-smoke'`)) {
+      throw new Error(`a frozen terminal identity or claim binding changed: ${change}`);
+    }
+  }
   const quote = (payer, issuedAt = 1_000, validBefore = 1_120) => `INSERT INTO provider_quotes
       (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
        issued_at,valid_before)

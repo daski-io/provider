@@ -203,7 +203,7 @@ function validateOutcome(outcome: ProviderOutcomeConfig, chainId: number): void 
     "maximumSourceLagBlocks", "maximumLogPageEvents", "listingCommitmentHash", "outcomeIdHash",
     "policyVersionHash", "listingEpoch", "providerPayee", "providerTerminalAttestationKey",
     "daskiCommissionReceiver", "commissionBps", "maxOpenOrders", "dispatchDeadlineSeconds",
-    "bindingProfile", "requestSchema",
+    "bindingProfile", "requestSchema", "resultSchema",
   ], `outcome ${outcome.outcomeId}`);
   if (
     !outcome.outcomeId || !outcome.serviceSlug || !outcome.skillId
@@ -291,6 +291,9 @@ function validateOutcome(outcome: ProviderOutcomeConfig, chainId: number): void 
     || !outcome.requestSchema || outcome.requestSchema.type !== "object"
     || outcome.requestSchema.additionalProperties !== false
     || !outcome.requestSchema.properties
+    || !outcome.resultSchema || outcome.resultSchema.type !== "object"
+    || outcome.resultSchema.additionalProperties !== false
+    || !outcome.resultSchema.properties
   ) throw new Error(`Outcome ${outcome.outcomeId} policy is invalid`);
   if (
     outcome.bindingProfile === "stock-fixed-v1"

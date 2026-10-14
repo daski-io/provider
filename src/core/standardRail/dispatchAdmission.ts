@@ -68,7 +68,7 @@ export async function persistSynchronousResult(
     await sleep(delay);
     try {
       const stored = await completeTransaction(taskId, result);
-      if (!stored.result || canonicalHash(stored.result) !== canonicalHash(result)) {
+      if (stored.result_hash?.toString("hex") !== canonicalHash(result).slice(2)) {
         logWarn("Synchronous result lost to a concurrent finalization", { taskId });
       }
       return stored;

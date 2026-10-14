@@ -92,6 +92,11 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   fields and apply explicit size/range limits.
 - An adapter returns only `completed` or `failed` and honors its `AbortSignal`.
   It must finish within the 50-second core budget.
+- `resultSchema` describes the complete completed `ServiceResult`; core
+  validates results against the admitted schema before freezing them. Failure
+  evidence is only a code listed in the module's `failureCodes`.
+- A terminal task's state, result, result hash and completion time are frozen
+  in one write and never change; legacy rows are never reshaped.
 - PostgreSQL is mandatory for paid runtime replay/idempotency, evidence,
   rate-limit, and terminal-result state. Do not replace it with memory state.
 - Dispatch claims, financial/evidence state, and external mutation intent use

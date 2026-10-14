@@ -28,6 +28,14 @@ export function registerService(module: ServiceModule): void {
   if (!module.docs.service.trim()) {
     throw new Error(`Service ${manifest.slug} is missing service documentation`);
   }
+  const failureCodes = module.failureCodes ?? [];
+  if (
+    !Array.isArray(failureCodes) || failureCodes.length > 64
+    || new Set(failureCodes).size !== failureCodes.length
+    || failureCodes.some((code) => typeof code !== "string" || !/^[a-z][a-z0-9_]{1,63}$/.test(code))
+  ) {
+    throw new Error(`Service ${manifest.slug} has invalid reviewed failure codes`);
+  }
   const skillIds = new Set<string>();
   for (const skill of module.skills) validateSkill(module, skill, skillIds);
   if (module.skills.length === 0) {

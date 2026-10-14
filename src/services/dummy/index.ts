@@ -13,6 +13,7 @@ export const dummyService: ServiceModule = {
   skills,
   adapter: new DummyAdapter(),
   readiness: async () => true,
+  failureCodes: ["invalid_input", "unknown_skill"],
   docs: {
     service: doc("index"),
     skills: { echo: doc("echo") },

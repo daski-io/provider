@@ -89,7 +89,9 @@ claim commit (fenced at envelope validBefore) -- expired -> definite refusal
        |                                     \-- outcome unknown -> re-read or 503
        v
 executing (public "working") -- adapter result --> completed | failed
-       |
+       |                         (validated against the admitted result
+       |                          contract; state, result, result hash and
+       |                          completion time frozen in one write)
        +-- process restart --> failed(provider_restarted_during_execution)
 ```
 
@@ -109,7 +111,11 @@ capacity, paused sales and quote age never refuse a funded dispatch.
 The verified payer is supplied to the adapter as context. It is not inferred
 from input. The request body is not persisted. A terminal result is persisted
 and attested so a legitimate same-dispatch replay or status read is
-deterministic.
+deterministic: the terminal transition writes the state, the result, its
+canonical hash and the completion time together, and a database trigger
+refuses any later change to them or to the claim's admitted bindings. Every
+attestation signs the frozen hash; rows from before the hash existed are
+attested from their stored result unchanged.
 
 ## Why one replica
 

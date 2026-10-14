@@ -159,4 +159,6 @@ export interface ProviderOutcomeConfig {
     required?: string[];
     additionalProperties: false;
   };
+  /** The admitted closed schema of the complete completed ServiceResult. */
+  resultSchema: Record<string, unknown>;
 }

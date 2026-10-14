@@ -3,6 +3,7 @@ import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
 import { rollbackFailedTransaction, type TransactionClient } from "../db/queryable.js";
 import type { ServiceResult } from "../serviceRegistry/types.js";
+import { canonicalHash } from "./canonical.js";
 
 const bytes = (value: Hex): Buffer => Buffer.from(value.slice(2), "hex");
 
@@ -16,6 +17,11 @@ export interface ProviderTransaction {
   skill_id: string;
   state: "executing" | "completed" | "failed";
   result: ServiceResult | null;
+  /**
+   * canonicalHash of `result`, frozen with the terminal transition. NULL for
+   * pending rows and for rows that became terminal before it existed.
+   */
+  result_hash: Buffer | null;
   created_at: Date;
   completed_at: Date | null;
   operations_revision: number;
@@ -129,16 +135,21 @@ export async function claimTransaction(args: {
   }
 }
 
+/**
+ * Freeze a task's terminal identity in one conditional write: state, result,
+ * its canonical hash and the completion time change together and only from
+ * `executing`; PostgreSQL refuses any later change to them.
+ */
 export async function completeTransaction(
   id: string,
   result: ServiceResult,
 ): Promise<ProviderTransaction> {
   const updated = await pool.query<ProviderTransaction>(
     `UPDATE provider_transactions
-        SET state=$2,result=$3::jsonb,completed_at=now()
+        SET state=$2,result=$3::jsonb,result_hash=$4,completed_at=now()
       WHERE id=$1 AND state='executing'
       RETURNING ${ROW}`,
-    [id, result.status, JSON.stringify(result)],
+    [id, result.status, JSON.stringify(result), bytes(canonicalHash(result))],
   );
   if (updated.rows[0]) return updated.rows[0];
   // Another writer already finalized it; serve what is durable.

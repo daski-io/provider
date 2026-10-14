@@ -2,6 +2,7 @@ import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
+import { terminalIdentity } from "./terminalIdentity.js";
 import type { ProviderTransaction } from "./transactionStore.js";
 
 export type PublicDispatchState = "working" | "completed" | "failed";
@@ -99,15 +100,13 @@ export async function signDispatchSnapshot(
     operations,
   }));
   if (state === "working") return { taskId: row.id, dispatchHash, signature, state, operations };
-  if (!row.completed_at || !row.result || row.result.status !== state) {
-    throw new Error("Terminal transaction result is incomplete");
-  }
+  const identity = terminalIdentity(row);
   const payload = {
     taskId: row.id,
     dispatchHash,
-    state,
-    resultHash: canonicalHash(row.result),
-    completedAt: Math.floor(row.completed_at.getTime() / 1_000),
+    state: identity.state,
+    resultHash: identity.resultHash,
+    completedAt: identity.completedAt,
   };
   return {
     taskId: row.id,

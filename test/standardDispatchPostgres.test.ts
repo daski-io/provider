@@ -221,7 +221,7 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
     }
   });
 
-  it("stores an unstorable adapter result as the generic failure instead of stranding the claim", async () => {
+  it("stores an unstorable adapter result as reviewed failure evidence instead of stranding the claim", async () => {
     const odd = await startRailHarness({
       service: { adapter: { execute: async () => ({ status: "completed", message: "bad\u0000byte" }) } },
     });
@@ -232,16 +232,17 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
       expect(classifyDispatchAnswer(answer)).toBe("accepted");
       const accepted = await acceptDispatchSnapshotAsGateway({ value: json(answer), dispatchHash });
       expect(accepted.body.state).toBe("failed");
-      const row = (await pool.query("SELECT state,result FROM provider_transactions WHERE order_id=$1",
-        [order.orderId])).rows[0];
+      const row = (await pool.query(
+        "SELECT state,result,result_hash FROM provider_transactions WHERE order_id=$1",
+        [order.orderId],
+      )).rows[0];
+      const evidence = { status: "failed", errorCode: "service_result_invalid" };
       expect(row).toEqual({
         state: "failed",
-        result: {
-          status: "failed",
-          errorCode: "service_execution_failed",
-          message: "The provider could not complete this request.",
-        },
+        result: evidence,
+        result_hash: Buffer.from(canonicalHash(evidence).slice(2), "hex"),
       });
+      expect(accepted.attestation?.resultHash).toBe(canonicalHash(evidence));
     } finally {
       await odd.close();
       await rail.close();
@@ -294,7 +295,8 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
       .resolves.toMatchObject({ body: { state: "completed" } });
     await pool.query(
       `UPDATE provider_transactions SET state='completed',result='{"status":"completed"}',
-         completed_at=now() WHERE id LIKE 'task-capacity-%'`,
+         result_hash=$1,completed_at=now() WHERE id LIKE 'task-capacity-%'`,
+      [Buffer.from(canonicalHash({ status: "completed" }).slice(2), "hex")],
     );
     const reopened = await rail.post("/standard-rail/quote", {
       request: await gatewayQuoteRequest({ listing, request: { message: "more" }, payer: null }),

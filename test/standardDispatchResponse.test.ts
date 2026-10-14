@@ -17,8 +17,11 @@ const result = {
   artifacts: [{ name: "echo_result", mimeType: "application/json", data: { message: "hi" } }],
 };
 
+const frozen = (value: unknown) => Buffer.from(canonicalHash(value).slice(2), "hex");
+
+/** A stored row; a terminal row's hash is frozen from its result unless overridden. */
 function row(overrides: Partial<ProviderTransaction> = {}): ProviderTransaction {
-  return {
+  const base: Omit<ProviderTransaction, "result_hash"> = {
     id: "task-1",
     gateway_audience: "https://gateway.example",
     order_id: "ord_00000000-0000-4000-8000-000000000001",
@@ -35,6 +38,10 @@ function row(overrides: Partial<ProviderTransaction> = {}): ProviderTransaction 
     observed_at: String(nowSeconds()),
     ...overrides,
   };
+  const resultHash = "result_hash" in overrides
+    ? overrides.result_hash ?? null
+    : base.state !== "executing" && base.result ? frozen(base.result) : null;
+  return { ...base, result_hash: resultHash };
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -104,8 +111,38 @@ describe("signed dispatch and status snapshots", () => {
       { observed_at: "0" },
       { result: null },
       { result: { status: "failed" as const, errorCode: "mismatch" } },
+      { result_hash: Buffer.alloc(31) },
     ]) {
       await expect(signDispatchSnapshot(row(overrides), dispatchHash, signer)).rejects.toThrow();
     }
+  });
+
+  it("attests the hash frozen at the terminal transition, never a rehash", async () => {
+    const original = frozen(result);
+    const reshaped = { ...result, message: "Reshaped after completion." };
+    const snapshot = await signDispatchSnapshot(
+      row({ result: reshaped, result_hash: original }),
+      dispatchHash,
+      signer,
+    );
+    const accepted = await acceptDispatchSnapshotAsGateway({ value: snapshot, dispatchHash });
+    expect(accepted.attestation?.resultHash).toBe(canonicalHash(result));
+    expect(accepted.attestation?.resultHash).not.toBe(canonicalHash(reshaped));
+  });
+
+  it("hashes a terminal row that predates frozen hashes from its stored result unchanged", async () => {
+    // A pre-R1 failure kept the adapter message; it is attested exactly as stored.
+    const legacy = {
+      status: "failed" as const,
+      errorCode: "invalid_input",
+      message: "The message must contain 1 to 500 Unicode code points.",
+    };
+    const snapshot = await signDispatchSnapshot(
+      row({ state: "failed", result: legacy, result_hash: null }),
+      dispatchHash,
+      signer,
+    );
+    const accepted = await acceptDispatchSnapshotAsGateway({ value: snapshot, dispatchHash });
+    expect(accepted.attestation?.resultHash).toBe(canonicalHash(legacy));
   });
 });

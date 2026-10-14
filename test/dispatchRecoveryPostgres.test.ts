@@ -92,11 +92,15 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
     const first = await acceptDispatchSnapshotAsGateway({
       value: json(completed.answer), dispatchHash: completed.dispatchHash,
     });
+    // Age the order as if it completed eight hours ago. Only this test setup
+    // may move a terminal identity, so it lifts the freeze for one statement.
+    await pool.query("ALTER TABLE provider_transactions DISABLE TRIGGER provider_transactions_terminal_identity");
     await pool.query(
       `UPDATE provider_transactions SET created_at=created_at - interval '8 hours',
          completed_at=completed_at - interval '8 hours' WHERE order_id=$1`,
       [completed.order.orderId],
     );
+    await pool.query("ALTER TABLE provider_transactions ENABLE TRIGGER provider_transactions_terminal_identity");
     await pool.query(
       `INSERT INTO provider_transactions (
          id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,

@@ -27,6 +27,20 @@ only read that catalog. It does not call the gateway/product or send a chain
 transaction. Run it only with explicit authorization for the intended bundle
 and database; keep the artifact out of Git and support channels.
 
+## Upgrade and admission operator commands
+
+`npm run daski:cutover` is the operator step of the first pre-R1 to R1
+upgrade (`docs/onboarding.md`). It applies this build's migrations, which
+install the legacy-process barrier, and prints the stop-and-drain inventory as
+JSON; with `-- --resolve-legacy --old-processes-stopped` it also fails the
+interrupted pre-R1 executions. Run it only after every pre-R1 process is
+stopped.
+
+`npm run daski:async-admission` reports the async-admission switch and its
+prerequisites read-only; `-- --activate` and `-- --deactivate` change it
+(`docs/configuration.md`). It never migrates. Neither command calls the
+gateway, the product or the chain.
+
 ## Verification internals
 
 - `scripts/docs-check.mjs` verifies local Markdown links and documented npm

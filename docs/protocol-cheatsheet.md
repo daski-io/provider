@@ -15,10 +15,49 @@ validators.
 | `/llms.txt` | Agent-readable documentation index |
 | `/standard-rail/outcomes` | Non-secret summary of installed reviewed outcomes |
 
-## Paid order
+## Readiness quote and intake
 
-This starter implements fixed listing quotes only. Daski signs `QuoteV1` from
-the reviewed fixed offer; there is no provider quote callback.
+The gateway posts `{request: envelope}` to `/standard-rail/quote` before it
+issues a payment challenge. Two artifact types share that URL and the
+`gateway-dispatch` signing key; each handler checks its own type and schema
+version before trusting the signature.
+
+`ProviderQuoteRequestV1` carries exactly `{outcomeId, listingManifestHash,
+requestHash, request, payer}`, where `payer` is lowercase hex or null and
+`requestHash = canonicalHash(request)`. Core verifies the envelope domain,
+lifetime and signer, the installed listing version, the request schema,
+capacity and the optional `requestReadiness` hook, then answers exactly:
+
+```text
+outcomeId, listingManifestHash, requestHash, grossAmount, payer,
+issuedAt, validBefore, signature
+```
+
+`grossAmount` is always the listing's fixed price, `payer` is echoed
+literally, the quote lives 120 seconds, and `signature` is the provider
+authority's EIP-191 signature of the raw `canonicalHash` of the other seven
+fields. That hash is persisted before signing; the gateway carries it in
+`QuoteV1.providerQuoteHash`. A quote never starts, reserves, or purchases
+product work.
+
+| Refusal | Meaning |
+| --- | --- |
+| 400 `invalid_quote_request` | Body is not exactly `{request: object}` |
+| 401 `quote_rejected` / `envelope` or `signature` | Wrong type, version, domain, lifetime, key id, or signer |
+| 409 `quote_rejected` / `outcome_policy`, `binding`, `price` | Unknown listing version, request-hash or payer-format mismatch, unreleasable price |
+| 422 `quote_rejected` / `request_invalid` + `fieldErrors` | Schema or readiness refusal; `[{path, rule, message, allowedValues?}]` |
+| 503 `quote_unavailable` / `capacity`, `sales_paused`, `service_unavailable` | New sales are temporarily stopped; retry later |
+
+New quotes stop when a listing version's nonterminal tasks reach its
+`maxOpenOrders`. That limit never refuses an already-funded dispatch.
+
+`ProviderIntakeRequestV1` (`{outcomeId, listingManifestHash, requestHash,
+request}`) returns signed discovery: the published `requestSchema`, field
+errors of the partial request against it, empty `requiredFields`,
+`selectorsRequired` and `normalizedSelectors`, and `supported: null`. Lite
+services declare no contextual intake. Intake creates no quote.
+
+## Paid order
 
 The gateway sends `/standard-rail/dispatch` with exactly:
 

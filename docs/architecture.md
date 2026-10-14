@@ -21,6 +21,12 @@ ServiceModule -- validate and call one fixed API endpoint or MCP tool
 existing product
 ```
 
+Before payment the gateway asks for a signed fixed readiness quote: core
+checks the exact request, listing version, capacity and an optional read-only
+service readiness hook, persists the quote, and signs the listing's fixed
+price for that request and payer. A later dispatch must bind to that
+persisted quote. Intake discovery shares the quote URL and creates nothing.
+
 It excludes dynamic quoting, background jobs, later input, cancellation,
 durable assets, owner actions, email, admin UI/API, direct A2A, and multi-replica
 execution recovery. Those belong in
@@ -99,22 +105,26 @@ must survive restarts or scale across workers.
 
 ## Database boundary
 
-The baseline creates only:
+The migrations create only:
 
 - `provider_transactions`;
 - `standard_evidence_admissions`;
-- `supplier_operations`; and
-- `rate_limit_buckets`; and
-- `provider_runtime_listing_versions`.
+- `supplier_operations`;
+- `rate_limit_buckets`;
+- `provider_runtime_listing_versions`; and
+- `provider_quotes` (signed readiness quotes, retained for dispatch binding).
 
-`_migrations` is created by the migration runner. Migrations are checksummed
-and serialized with a PostgreSQL advisory lock. Production can use a privileged
-migration principal and a separate restricted runtime principal.
+`_migrations` is created by the migration runner. Migrations are append-only,
+checksummed, serialized with a PostgreSQL advisory lock, and pinned by the
+static-gate allowlist together with the tables each one creates. Production
+uses a schema-owning migration principal and a separate runtime principal that
+receives only the reviewed per-table grants in `src/core/db/runtimePrivileges.ts`.
 
 ## Network and process boundary
 
-The server accepts JSON only on the paid POST routes, rejects compressed bodies
-and duplicate JSON keys, applies header/body/time/concurrency limits, persists
+The server accepts JSON only on the paid POST routes, rejects compressed bodies,
+duplicate JSON keys and pathologically deep or large documents, applies
+header/body/time/concurrency limits, persists
 shared rail rate limits, and emits generic public errors. Health is rate-limited
 locally so it remains available when PostgreSQL is degraded.
 
@@ -135,6 +145,7 @@ user. Hosting configuration is intentionally left to the provider fork.
 - `/skills/<slug>.md` and `/skills/<slug>/<skill>.md`
 - `/llms.txt`
 - `/standard-rail/outcomes`
+- `/standard-rail/quote` (readiness quote and intake)
 - `/standard-rail/dispatch`
 - `/standard-rail/dispatch/status`
 

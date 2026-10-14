@@ -84,8 +84,10 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
 
 ## Implementation invariants
 
-- Every skill has a reviewed fixed atomic-USDC price. There is no dynamic
-  provider quote callback.
+- Every skill has a reviewed fixed atomic-USDC price. Core answers the
+  gateway's signed readiness quote with that fixed amount; there is no
+  dynamic pricing. An optional read-only `requestReadiness` hook may decline
+  a request before payment but cannot change the price or start work.
 - Validate input both at the rail schema and in the adapter. Reject unknown
   fields and apply explicit size/range limits.
 - An adapter returns only `completed` or `failed` and honors its `AbortSignal`.
@@ -104,8 +106,9 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   HTTP. Do not call `fetch` directly from a service.
 - Never log request/product payloads, credentials, private keys, or signed
   authorization material. Public errors are stable and generic.
-- Applied migrations are immutable and checksummed. This starter intentionally
-  begins with one baseline migration; future changes are append-only.
+- Applied migrations are immutable and checksummed. New migrations are
+  append-only, listed in the static-gate allowlist with the tables they
+  create, and every new table needs a reviewed runtime-role grant.
 - Treat published contract hashes and fixed-price changes as coordinated Daski
   onboarding changes. Request and install a new signed runtime bundle; never
   edit catalog rows or issued artifacts.

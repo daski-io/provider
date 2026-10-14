@@ -15,6 +15,7 @@ export const RUNTIME_TABLE_PRIVILEGES: Readonly<Record<string, readonly TablePri
   supplier_operations: ["SELECT", "INSERT", "UPDATE"],
   rate_limit_buckets: ["SELECT", "INSERT", "UPDATE"],
   provider_runtime_listing_versions: ["SELECT"],
+  provider_quotes: ["SELECT", "INSERT"],
 };
 
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;

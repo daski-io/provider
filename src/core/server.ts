@@ -19,7 +19,8 @@ import { createStandardRailRouter } from "./standardRail/routes.js";
 
 let server: ReturnType<Express["listen"]> | null = null;
 
-export async function startServer(standard: ProviderStandardRailConfig): Promise<void> {
+/** Build the complete HTTP stack; `startServer` only adds the listener. */
+export function createApp(standard: ProviderStandardRailConfig): Express {
   const app = express();
   installHttpSecurityBoundary(app);
   app.use("/health", localHealthLimiter());
@@ -64,7 +65,7 @@ export async function startServer(standard: ProviderStandardRailConfig): Promise
         if (body?.length) assertNoDuplicateJsonKeys(body.toString("utf8"));
         next();
       } catch {
-        res.status(400).json({ error: "duplicate_json_key" });
+        res.status(400).json({ error: "invalid_json" });
       }
     },
   );
@@ -94,12 +95,25 @@ export async function startServer(standard: ProviderStandardRailConfig): Promise
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status = (error as { status?: unknown; type?: unknown }).status;
+    const clientError = typeof status === "number" && status >= 400 && status < 500
+      && typeof (error as { type?: unknown }).type === "string";
     logError("HTTP request failed", {
       errorClass: error instanceof Error ? error.name : "UnknownError",
+      ...(clientError ? { status } : {}),
     });
-    if (!res.headersSent) res.status(500).json({ error: "internal_error" });
+    if (res.headersSent) return;
+    if (clientError) {
+      res.status(status as number).json({ error: status === 413 ? "payload_too_large" : "invalid_json" });
+      return;
+    }
+    res.status(500).json({ error: "internal_error" });
   });
+  return app;
+}
 
+export async function startServer(standard: ProviderStandardRailConfig): Promise<void> {
+  const app = createApp(standard);
   await new Promise<void>((resolve, reject) => {
     const listening = config.CHAIN_MODE === "mock"
       ? app.listen(config.PORT, "127.0.0.1")

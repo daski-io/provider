@@ -115,6 +115,27 @@ or invalid. Check structured application logs by event/error class, then verify:
 
 Do not route paid traffic based on liveness.
 
+## Quote is refused or unavailable
+
+The gateway reports `PROVIDER_QUOTE_REJECTED` for a provider 4xx and
+`PROVIDER_QUOTE_UNAVAILABLE` for a 5xx or an unusable answer. Check the
+provider log's `reason`:
+
+- `envelope`/`signature`: environment, chain, provider audience
+  (`STANDARD_RAIL_PROVIDER_AUDIENCE`), `STANDARD_RAIL_GATEWAY_SIGNER`, or a
+  clock more than 30 seconds off;
+- `outcome_policy`: the gateway quoted a listing version that is not the
+  installed runtime-catalog head; install the matching bundle;
+- `request_invalid`: the request fails the published schema or the service's
+  readiness hook; the field errors reach the buyer;
+- `capacity`: the listing version's nonterminal tasks reached
+  `maxOpenOrders`; new sales resume as they finish; and
+- `service_unavailable`: provider readiness, the readiness hook, or the
+  database failed; fix the dependency rather than the check.
+
+A quote clock check failing at the gateway usually means the provider clock
+drifted; keep NTP healthy.
+
 ## Dispatch is rejected
 
 Public responses are deliberately generic. Correlate only safe request ids and

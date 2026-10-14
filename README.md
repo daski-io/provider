@@ -96,8 +96,10 @@ and evidence bindings during onboarding.
 
 1. The provider publishes your service, skill, closed schemas, fixed
    atomic-USDC price, and legal/support metadata as a hashable contract.
-2. Daski creates the fixed quote from the reviewed listing. This starter has
-   no provider-side dynamic quote endpoint.
+2. Before issuing a payment challenge, the gateway asks the provider for a
+   signed readiness quote. Core validates the request, checks capacity and
+   optional service readiness, and signs the listing's fixed price for that
+   exact request and payer. There is no dynamic pricing.
 3. The gateway admits payment and sends a short-lived signed dispatch with the
    quote, exact request, payer, order, audience, and chain evidence.
 4. Core verifies every binding and atomically claims the dispatch in

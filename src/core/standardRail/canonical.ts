@@ -83,8 +83,20 @@ export const SIGNED_ENVELOPE_KEYS = [
   "issuedAt", "validBefore", "payload", "signature",
 ] as const;
 
-export function assertNoDuplicateJsonKeys(text: string): void {
+// Parse-boundary belt limits, mirroring the gateway's scanner. Semantic
+// budgets in jsonBounds.ts are stricter; these stop pathological documents
+// before any handler sees them.
+const SCANNER_MAX_DEPTH = 64;
+const SCANNER_MAX_NODES = 262_144;
+const SCANNER_MAX_KEY_LENGTH = 256;
+const UNSAFE_SCANNED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function assertNoDuplicateJsonKeys(
+  text: string,
+  maxKeyLength = SCANNER_MAX_KEY_LENGTH,
+): void {
   let offset = 0;
+  let nodes = 0;
   const whitespace = () => { while (/\s/.test(text[offset] ?? "")) offset += 1; };
   const stringToken = (): string => {
     const start = offset;
@@ -100,7 +112,10 @@ export function assertNoDuplicateJsonKeys(text: string): void {
     }
     throw new Error("Unterminated JSON string");
   };
-  const parseValue = (): void => {
+  const parseValue = (depth: number): void => {
+    nodes += 1;
+    if (depth > SCANNER_MAX_DEPTH) throw new Error("JSON is too deeply nested");
+    if (nodes > SCANNER_MAX_NODES) throw new Error("JSON contains too many values");
     whitespace();
     if (text[offset] === '"') { stringToken(); return; }
     if (text[offset] === "{") {
@@ -111,12 +126,14 @@ export function assertNoDuplicateJsonKeys(text: string): void {
       while (true) {
         whitespace();
         const key = stringToken();
+        if (key.length > maxKeyLength) throw new Error("JSON key is too long");
+        if (UNSAFE_SCANNED_KEYS.has(key)) throw new Error("JSON contains an unsafe key");
         if (keys.has(key)) throw new Error(`Duplicate JSON key ${key}`);
         keys.add(key);
         whitespace();
         if (text[offset] !== ":") throw new Error("JSON colon expected");
         offset += 1;
-        parseValue();
+        parseValue(depth + 1);
         whitespace();
         if (text[offset] === "}") { offset += 1; return; }
         if (text[offset] !== ",") throw new Error("JSON comma expected");
@@ -128,7 +145,7 @@ export function assertNoDuplicateJsonKeys(text: string): void {
       whitespace();
       if (text[offset] === "]") { offset += 1; return; }
       while (true) {
-        parseValue();
+        parseValue(depth + 1);
         whitespace();
         if (text[offset] === "]") { offset += 1; return; }
         if (text[offset] !== ",") throw new Error("JSON comma expected");
@@ -139,7 +156,7 @@ export function assertNoDuplicateJsonKeys(text: string): void {
     if (!token) throw new Error("Invalid JSON token");
     offset += token.length;
   };
-  parseValue();
+  parseValue(1);
   whitespace();
   if (offset !== text.length) throw new Error("Trailing JSON content");
 }

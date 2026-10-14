@@ -27,6 +27,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     catalog: typeof import("../src/core/gatewayRegistration/runtimeCatalog.js");
     transactions: typeof import("../src/core/standardRail/transactionStore.js");
     journal: typeof import("../src/core/suppliers/operationJournal.js");
+    quotes: typeof import("../src/core/standardRail/quoteStore.js");
   };
 
   beforeAll(async () => {
@@ -41,6 +42,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       catalog: await import("../src/core/gatewayRegistration/runtimeCatalog.js"),
       transactions: await import("../src/core/standardRail/transactionStore.js"),
       journal: await import("../src/core/suppliers/operationJournal.js"),
+      quotes: await import("../src/core/standardRail/quoteStore.js"),
     };
     await modules.pool.runMigrations();
     await modules.pool.configureRuntimePrivileges();
@@ -91,7 +93,19 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     }
   });
 
-  it("runs the ledger, journal, and rate-limit statements as the runtime role", async () => {
+  it("runs the ledger, quote, journal, and rate-limit statements as the runtime role", async () => {
+    const quote = {
+      outcomeId: "echo",
+      listingManifestHash: hash("3"),
+      requestHash: hash("6"),
+      grossAmount: "10000",
+      payer: null,
+      issuedAt: 1_000,
+      validBefore: 1_120,
+    };
+    const quoteHash = await modules.quotes.persistProviderQuote(quote);
+    await expect(modules.quotes.loadProviderQuote(quoteHash)).resolves.toEqual(quote);
+    await expect(modules.quotes.countOpenObligations(hash("3"))).resolves.toBe(0);
     const claimed = await modules.transactions.claimTransaction({
       gatewayAudience: ORIGIN,
       orderId: "ord_00000000-0000-4000-8000-000000000001",
@@ -142,6 +156,8 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     await denied("UPDATE provider_runtime_listing_versions SET superseded_at=now()");
     await denied("DELETE FROM provider_runtime_listing_versions");
     await denied("SELECT * FROM _migrations");
+    await denied("UPDATE provider_quotes SET gross_amount='1'");
+    await denied("DELETE FROM provider_quotes");
     await expect(modules.catalog.promoteRuntimeListingVersions(ORIGIN, hash("1"), [{
       listingId: "00000000-0000-4000-8000-000000000002",
       listingKey: hash("2"),

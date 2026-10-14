@@ -59,12 +59,19 @@ export interface DisposableDatabase {
   drop(): Promise<void>;
 }
 
-/** Create a fresh database, optionally owned by an existing test role. */
+/**
+ * Create a fresh database, optionally owned by an existing test role. A suite
+ * that imports the runtime pool statically picks its database name and points
+ * DATABASE_URL at it inside `vi.hoisted` (the pool connects lazily), then
+ * passes that name here before its first query.
+ */
 export async function createDisposableDatabase(
   prefix: string,
   owner?: string,
+  fixedName?: string,
 ): Promise<DisposableDatabase> {
-  const name = uniqueName(prefix);
+  const name = fixedName ?? uniqueName(prefix);
+  if (!/^[a-z][a-z0-9_]{1,62}$/.test(name)) throw new Error("unsafe test identifier");
   await withAdmin((client) => client.query(
     `CREATE DATABASE "${name}"${owner ? ` OWNER "${owner}"` : ""}`,
   ));

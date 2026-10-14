@@ -64,22 +64,45 @@ for (const path of gatewayRegistrationFiles) {
   }
 }
 
+// Append-only migration boundary: exactly these reviewed files, in order, each
+// creating exactly its listed tables. A new migration must be added here, and
+// every table it creates must be reviewed into the runtime privilege list.
+const REVIEWED_MIGRATIONS = [
+  ["001_initial.sql", [
+    "provider_transactions", "standard_evidence_admissions", "supplier_operations",
+    "rate_limit_buckets", "provider_runtime_listing_versions",
+  ]],
+  ["002_provider_quotes.sql", ["provider_quotes"]],
+];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
-  .filter((name) => name.endsWith(".sql"));
-if (migrationFiles.length !== 1 || migrationFiles[0] !== "001_initial.sql") {
-  failures.push("minimal provider must ship one fresh baseline migration");
+  .filter((name) => name.endsWith(".sql")).sort();
+if (JSON.stringify(migrationFiles) !== JSON.stringify(REVIEWED_MIGRATIONS.map(([name]) => name))) {
+  failures.push("migrations must match the reviewed append-only allowlist");
 }
-const migration = read("src/core/db/migrations/001_initial.sql");
-for (const required of [
-  "provider_transactions", "standard_evidence_admissions",
-  "supplier_operations", "rate_limit_buckets",
-]) {
-  if (!migration.includes(required)) failures.push(`baseline missing ${required}`);
-}
-for (const forbidden of ["customers", "emails", "assets", "admin_sessions", "durable_jobs"]) {
-  if (new RegExp(`CREATE TABLE\\s+${forbidden}\\b`, "i").test(migration)) {
-    failures.push(`full-only table is present: ${forbidden}`);
+const migratedTables = [];
+for (const [name, tables] of REVIEWED_MIGRATIONS) {
+  if (!existsSync(join(root, "src/core/db/migrations", name))) continue;
+  const migration = read(`src/core/db/migrations/${name}`);
+  const created = [...migration.matchAll(
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([a-z_][a-z0-9_]*)"?/gi,
+  )].map((match) => match[1].toLowerCase());
+  if (JSON.stringify([...created].sort()) !== JSON.stringify([...tables].sort())) {
+    failures.push(`${name} must create exactly: ${tables.join(", ") || "no tables"}`);
   }
+  migratedTables.push(...created);
+  for (const forbidden of ["customers", "emails", "assets", "admin_sessions", "durable_jobs"]) {
+    if (created.includes(forbidden)) failures.push(`full-only table is present: ${forbidden}`);
+  }
+  if (/\b(?:DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i.test(migration)) {
+    failures.push(`${name} must not drop or erase durable state`);
+  }
+}
+const privilegeSource = read("src/core/db/runtimePrivileges.ts");
+const privilegeBlock = /RUNTIME_TABLE_PRIVILEGES[^=]*=\s*\{([\s\S]*?)\n\};/.exec(privilegeSource)?.[1] ?? "";
+const reviewedTables = [...privilegeBlock.matchAll(/^\s+([a-z_][a-z0-9_]*):\s*\[/gm)]
+  .map((match) => match[1]);
+if (JSON.stringify([...reviewedTables].sort()) !== JSON.stringify([...migratedTables].sort())) {
+  failures.push("runtime privileges must review exactly the migrated tables");
 }
 
 const server = read("src/core/server.ts");

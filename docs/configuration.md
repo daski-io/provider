@@ -76,7 +76,7 @@ offers/terminal attestations and must be separated from product credentials.
 | Variable | Purpose and rule |
 | --- | --- |
 | `STANDARD_RAIL_ENVIRONMENT` | Normally `testnet` or `mainnet`; must match every signed envelope. |
-| `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Used for dispatch and fixed quote verification. |
+| `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Verifies readiness-quote and intake requests, dispatches, status queries, and forwarded `QuoteV1` envelopes. |
 | `STANDARD_RAIL_GATEWAY_ORIGIN` | Credential-free HTTPS origin that scopes the installed runtime catalog. Normally identical to `GATEWAY_BASE_URL`. |
 | `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
 | `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |

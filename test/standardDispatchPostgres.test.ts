@@ -61,7 +61,11 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
 
   afterAll(async () => {
     await rail?.close();
-    await pool.end().catch(() => undefined);
+    // Bounded: a request left hanging by a failed test must not skip the drop.
+    await Promise.race([
+      pool.end().catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
+    ]);
     await database?.drop();
   });
 

@@ -86,7 +86,10 @@ export async function startRailHarness(options: {
     post,
     status: async (orderId: string, dispatchHash: Hex) =>
       post("/standard-rail/dispatch/status", { query: await gatewayStatusQuery(orderId, dispatchHash) }),
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    }),
   });
 }
 

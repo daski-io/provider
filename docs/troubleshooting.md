@@ -158,7 +158,10 @@ is a reviewed code:
 Listing capacity, paused sales, and quote age never refuse a funded dispatch.
 An empty-body `503` is deliberate ambiguity: admission exists, may exist, or
 could not be checked, so the gateway reconciles through status instead of
-sending a new envelope.
+sending a new envelope. A JSON `429 rate_limit_exceeded` on dispatch or
+status means the source exhausted its unauthenticated-failure bucket; find
+the misconfigured or hostile caller, or exempt the reviewed gateway egress
+with `RATE_LIMIT_BYPASS_IPS`.
 
 Do not log the signed envelope, request, evidence bundle, private key, or raw
 product response to diagnose it. Reproduce with synthetic data in unit tests or

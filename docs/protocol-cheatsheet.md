@@ -117,17 +117,22 @@ raw `canonicalHash(payload)` by the terminal attestation key.
 
 Refusal reasons: `validator`, `signature`, `envelope_lifetime`,
 `outcome_policy`, `self_purchase`, `quote_window`, `price`, `evidence`, and
-`service_unavailable`. Transport faults on dispatch or status (wrong media
-type, compression, duplicate keys, oversize bodies, concurrency or abuse
-limits) are answered with the empty `503`, never a JSON refusal.
+`service_unavailable`. Every refusal is sent only after an authoritative read
+still shows no claim for the order; a concurrently admitted delivery is
+answered with its snapshot instead. Transport faults (wrong media type or
+charset, compression, duplicate keys, oversize bodies) and concurrency or
+abuse limits are JSON refusals from middleware: the request never reached a
+handler. Gateway signatures must use the canonical encoding (lowercase
+65-byte hex, low s, v 27 or 28), so one signed dispatch has one hash.
 
 The gateway reconciles with `/standard-rail/dispatch/status` and a signed
 `DispatchStatusQueryV1` `{orderId, dispatchHash, issuedAt, validBefore}`. Its
 signature and freshness are verified before any lookup. A different claim for
 the order answers `409 dispatch_status_rejected/binding_conflict`; a bad
 signature, stale or malformed query, unreadable database or signing failure is
-never the no-claim answer. Status reads are one indexed read: no product
-call, no write, no purchase rate limit, and no product-readiness gate.
+never the no-claim answer. Status reads are one indexed claim read plus the
+abuse guard's read-only bucket lookup: no product call, no write, no
+request-charged rate limit, and no product-readiness gate.
 
 ## Service result
 

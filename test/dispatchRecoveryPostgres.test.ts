@@ -12,6 +12,7 @@ const target = vi.hoisted(() => {
   return { name };
 });
 
+import { config } from "../src/core/config.js";
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { json, startRailHarness, type RailHarness } from "./dispatchHarness.js";
 import { dispatchOrder, quoteOrder } from "./gatewayOrderFixture.js";
@@ -160,6 +161,27 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
       .resolves.toMatchObject({ body: { state: "completed" } });
   });
 
+  it("resolves a lost commit acknowledgement on a later bounded re-read", async () => {
+    const order = await quoteOrder({ quotes: rail.quotes, outcome: rail.outcome });
+    const { body, dispatchHash } = await dispatchOrder({ order, outcome: rail.outcome, config: rail.config });
+    const query = pool.query.bind(pool) as (...args: unknown[]) => Promise<unknown>;
+    let failures = 0;
+    let lost = false;
+    loseNextCommitAck(() => { lost = true; });
+    vi.spyOn(pool, "query").mockImplementation((async (...args: unknown[]) => {
+      if (lost && failures === 0 && String(args[0]).includes("WHERE gateway_audience=$1 AND order_id=$2")) {
+        failures += 1;
+        throw new Error("Connection terminated unexpectedly");
+      }
+      return query(...args);
+    }) as never);
+    const answer = await rail.post("/standard-rail/dispatch", body);
+    expect(failures).toBe(1);
+    expect(classifyDispatchAnswer(answer)).toBe("accepted");
+    await expect(acceptDispatchSnapshotAsGateway({ value: json(answer), dispatchHash }))
+      .resolves.toMatchObject({ body: { state: "completed" } });
+  });
+
   it("answers ambiguously when a lost commit acknowledgement cannot be resolved", async () => {
     const order = await quoteOrder({ quotes: rail.quotes, outcome: rail.outcome });
     const { body, dispatchHash } = await dispatchOrder({ order, outcome: rail.outcome, config: rail.config });
@@ -168,13 +190,13 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
     loseNextCommitAck(() => { lookupDown = true; });
     vi.spyOn(pool, "query").mockImplementation((async (...args: unknown[]) => {
       if (lookupDown && String(args[0]).includes("WHERE gateway_audience=$1 AND order_id=$2")) {
-        lookupDown = false;
         throw new Error("Connection terminated unexpectedly");
       }
       return query(...args);
     }) as never);
     const executions = rail.executions;
     const answer = await rail.post("/standard-rail/dispatch", body);
+    lookupDown = false;
     expect([answer.status, answer.text, answer.contentType]).toEqual([503, "", null]);
     expect(classifyDispatchAnswer(answer)).toBe("ambiguous");
     vi.restoreAllMocks();
@@ -224,7 +246,11 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
       expect(classifyStatusAnswer(answer)).toBe("unavailable");
       expect(answer.text).not.toContain("outcome_policy");
     }
-    vi.spyOn(pool, "query").mockRejectedValueOnce(new Error("database unavailable"));
+    const query = pool.query.bind(pool) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(pool, "query").mockImplementation((async (...args: unknown[]) => {
+      if (String(args[0]).includes("FROM provider_transactions")) throw new Error("database unavailable");
+      return query(...args);
+    }) as never);
     const unreadable = await rail.status(`ord_${globalThis.crypto.randomUUID()}`, dispatchHash);
     expect([unreadable.status, unreadable.text]).toEqual([503, ""]);
   });
@@ -236,7 +262,7 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
     const statements: string[] = [];
     const query = pool.query.bind(pool) as (...args: unknown[]) => Promise<unknown>;
     vi.spyOn(pool, "query").mockImplementation((async (...args: unknown[]) => {
-      statements.push(String(args[0]).trim().split(/\s+/, 1)[0]!.toUpperCase());
+      statements.push(String(args[0]).trim());
       return query(...args);
     }) as never);
     const connect = vi.spyOn(pool, "connect");
@@ -264,8 +290,11 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
     expect(readiness).not.toHaveBeenCalled();
     // Only Pool.query's internal checkout (with a callback); no transaction.
     expect(connect.mock.calls.filter((args) => (args as unknown[]).length === 0)).toHaveLength(0);
-    expect(new Set(statements)).toEqual(new Set(["SELECT"]));
-    expect(statements).toHaveLength(2_880);
+    // One indexed claim read per status answer, plus the abuse guard's
+    // read-only bucket lookup; nothing is written for a verified read.
+    expect(statements.every((sql) => /^SELECT\b/i.test(sql))).toBe(true);
+    expect(statements.filter((sql) => sql.includes("FROM provider_transactions"))).toHaveLength(2_880);
+    expect(statements.filter((sql) => sql.includes("FROM rate_limit_buckets"))).toHaveLength(2_880);
     expect(after.rows[0]!.buckets).toBe(before.rows[0]!.buckets);
     const forged = await rail.post("/standard-rail/dispatch/status", {
       query: { ...(await gatewayStatusQuery(order.orderId, dispatchHash)), signature: `0x${"11".repeat(65)}` },
@@ -275,6 +304,39 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
       query: await gatewayStatusQuery(order.orderId, dispatchHash),
       padding: "x".repeat(70_000),
     }));
-    expect([oversized.status, oversized.text]).toEqual([503, ""]);
+    expect(oversized.status).toBe(413);
+  }, 60_000);
+
+  // Runs last: it exhausts the loopback source's shared failure bucket.
+  it("limits sources of unauthenticated servicing failures without charging verified reads", async () => {
+    const { order, dispatchHash } = await admitted();
+    const valid = { query: await gatewayStatusQuery(order.orderId, dispatchHash) };
+    for (let read = 0; read < 150; read += 1) {
+      expect((await rail.post("/standard-rail/dispatch/status", valid)).status).toBe(200);
+    }
+    const forged = { query: { ...valid.query, signature: `0x${"11".repeat(65)}` } };
+    let refused = 0;
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const answer = await rail.post("/standard-rail/dispatch/status", forged);
+      if (answer.status === 429) break;
+      expect(answer.status).toBe(401);
+      refused += 1;
+    }
+    expect(refused).toBeGreaterThanOrEqual(120);
+    const blocked = await rail.post("/standard-rail/dispatch/status", valid);
+    expect([blocked.status, json(blocked).error]).toEqual([429, "rate_limit_exceeded"]);
+    expect(classifyStatusAnswer(blocked)).toBe("unavailable");
+    const dispatch = await rail.post("/standard-rail/dispatch", {});
+    expect(classifyDispatchAnswer(dispatch)).toBe("refused");
+    const saved = config.RATE_LIMIT_BYPASS_IPS;
+    Object.assign(config, { RATE_LIMIT_BYPASS_IPS: "127.0.0.1" });
+    const bypassed = await startRailHarness();
+    try {
+      const answer = await bypassed.status(order.orderId, dispatchHash);
+      expect(classifyStatusAnswer(answer)).toBe("snapshot");
+    } finally {
+      Object.assign(config, { RATE_LIMIT_BYPASS_IPS: saved });
+      await bypassed.close();
+    }
   }, 60_000);
 });

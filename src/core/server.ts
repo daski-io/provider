@@ -18,7 +18,7 @@ import {
   exceptServicing,
   forServicing,
   isServicingRequest,
-  rejectRequest,
+  markServicingRoutes,
   respondAmbiguously,
   servicingAbuseLimiter,
 } from "./security/servicingIngress.js";
@@ -31,7 +31,7 @@ import { createStandardRailRouter } from "./standardRail/routes.js";
  * gateway never fails authentication, so this bounds garbage floods only;
  * behind a proxy, sources are distinguished by the trusted-proxy settings.
  */
-const SERVICING_FAILURES_PER_MINUTE = 120;
+const SERVICING_FAILURES = { capacity: 120, perMinute: 120 };
 
 let server: ReturnType<Express["listen"]> | null = null;
 
@@ -40,8 +40,8 @@ let server: ReturnType<Express["listen"]> | null = null;
  *
  * Dispatch and its status are servicing calls for already-funded orders.
  * They keep bounded ingress, authentication and a failure-only abuse limit,
- * but skip product readiness and the purchase/global rate limits, and no
- * middleware may answer them with a JSON refusal (C03).
+ * but skip the product-readiness gate and the purchase/global rate limits
+ * that verified gateway work would otherwise spend (C01, C03).
  */
 export function createApp(
   standard: ProviderStandardRailConfig,
@@ -51,6 +51,7 @@ export function createApp(
   installHttpSecurityBoundary(app);
   app.use("/health", localHealthLimiter());
   app.use("/health", healthRouter);
+  markServicingRoutes(app);
 
   const bypassIps = config.RATE_LIMIT_BYPASS_IPS
     .split(",").map((value) => value.trim()).filter(Boolean);
@@ -58,12 +59,8 @@ export function createApp(
     maxConcurrent: config.HTTP_MAX_CONCURRENCY,
     maxConcurrentPerIp: config.HTTP_MAX_CONCURRENCY_PER_IP,
     bypassIps,
-    reject: (req, res) => rejectRequest(req, res, 503, "server_busy"),
   }));
-  const servicingAbuse = servicingAbuseLimiter({
-    maxFailuresPerMinute: SERVICING_FAILURES_PER_MINUTE,
-    bypassIps,
-  });
+  const servicingAbuse = servicingAbuseLimiter({ ...SERVICING_FAILURES, bypassIps });
   app.use(forServicing(servicingAbuse.guard));
   app.use(exceptServicing(makeRateLimiter({
     namespace: "global",
@@ -71,7 +68,9 @@ export function createApp(
     perMinute: config.RATE_LIMIT_GLOBAL_PER_MIN,
     bypassIps,
   })));
-  app.use("/standard-rail", strictJsonTransport());
+  app.use("/standard-rail", strictJsonTransport({
+    recordServicingFailure: servicingAbuse.recordFailure,
+  }));
 
   app.use("/.well-known", wellKnownRouter);
   app.use("/agent-cards", agentCardRouter);
@@ -107,6 +106,8 @@ export function createApp(
       errorClass: error instanceof Error ? error.name : "UnknownError",
       ...(clientError ? { status } : {}),
     });
+    // Middleware refusals are answered where they happen; an error that
+    // escapes a servicing handler may follow an admission, so it is ambiguous.
     if (isServicingRequest(req)) {
       respondAmbiguously(res);
       return;

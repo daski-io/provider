@@ -41,18 +41,15 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 describe("signed dispatch and status snapshots", () => {
   it("answers working with exactly the five pending keys and fresh operations", async () => {
-    const snapshot = await signDispatchSnapshot(
-      row({ state: "executing", result: null, completed_at: null }),
-      dispatchHash,
-      signer,
-    );
+    const pending = row({ state: "executing", result: null, completed_at: null });
+    const snapshot = await signDispatchSnapshot(pending, dispatchHash, signer);
     expect(Object.keys(snapshot).sort()).toEqual(
       ["dispatchHash", "operations", "signature", "state", "taskId"],
     );
     const accepted = await acceptDispatchSnapshotAsGateway({ value: snapshot, dispatchHash });
     expect(accepted.body.state).toBe("working");
     expect(accepted.operations).toEqual({
-      schemaVersion: 1, revision: 0, observedAt: nowSeconds(),
+      schemaVersion: 1, revision: 0, observedAt: Number(pending.observed_at),
       fulfillment: null, support: null, recovery: null,
     });
   });

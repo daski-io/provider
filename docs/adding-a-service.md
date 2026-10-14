@@ -29,6 +29,7 @@ interface ServiceModule {
   skills: SkillDefinition[];
   adapter: FulfillmentAdapter;
   readiness(signal: AbortSignal): Promise<boolean>;
+  requestReadiness?(context: RequestReadinessContext): Promise<RequestReadiness>;
   docs: { service: string; skills: Record<string, string> };
 }
 ```
@@ -51,7 +52,18 @@ contract; selecting those states means selecting `provider-full`.
 `readiness` is a read-only product check and must honor its signal. Return
 `false` when the configured API/MCP dependency cannot accept paid work. Core
 bounds the check to three seconds, caches the combined database/identity/rail/
-product result briefly, and rejects paid traffic while it is false.
+product result briefly, and stops new quotes and new dispatches while it is
+false; already-admitted orders stay readable.
+
+The optional `requestReadiness` hook checks one schema-valid request before
+each new quote. It receives `{skillId, input, payer, signal}` (`payer` is the
+lowercase quote payer or `null`) and returns `{ready: true}` or `{ready:
+false, fieldErrors: [{path, rule, message, allowedValues?}]}` with reviewed
+messages. Decline an unbound `null` payer if the product needs to know who
+pays. It must stay read-only: it cannot change the fixed price and must never
+start work, reserve capacity, or purchase anything. A throw, a timeout after
+three seconds, or any other result shape stops the quote without a refusal
+reason reaching the buyer. Funded dispatches never re-run it.
 
 ## 3. Define the public contract
 

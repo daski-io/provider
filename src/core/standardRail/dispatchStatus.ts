@@ -1,4 +1,5 @@
 import type { ProviderStandardRailConfig } from "./config.js";
+import { HASH32_PATTERN as HASH32, ORDER_ID_PATTERN as ORDER_ID } from "./dispatchContract.js";
 import {
   DispatchAmbiguousError,
   DispatchStatusNoClaimError,
@@ -12,9 +13,6 @@ import {
 import { GatewayEnvelopeError, verifyGatewayRequestEnvelope } from "./gatewayEnvelope.js";
 import { dispatchHashOf, findTransaction } from "./transactionStore.js";
 import type { DispatchStatusQueryV1 } from "./types.js";
-
-const ORDER_ID = /^ord_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const HASH32 = /^0x[0-9a-fA-F]{64}$/;
 
 /**
  * Answer a gateway reconciliation query with one indexed read: no product

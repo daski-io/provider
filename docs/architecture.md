@@ -145,11 +145,15 @@ header/body/time/concurrency limits, persists
 shared rail rate limits, and emits generic public errors. Health is rate-limited
 locally so it remains available when PostgreSQL is degraded.
 
-Dispatch and its status are servicing calls for already-funded orders. They
-keep bounded ingress, authentication, and a per-source limit on
-unauthenticated failures, but skip product readiness and the purchase/global
-rate limits, and no middleware answers them with a JSON refusal. New quotes,
-by contrast, require complete provider readiness and pass the purchase limit.
+Dispatch and its status are servicing calls for already-funded orders,
+classified by Express's own route matching. They keep bounded ingress,
+authentication, and a per-source PostgreSQL limit charged only by
+unauthenticated failures, but skip the product-readiness gate and the
+request-charged purchase/global limits. A middleware refusal is a definite
+JSON refusal (no handler ran); only handlers answer ambiguously, and new
+synchronous dispatches still refuse before admission while readiness is
+down. New quotes require complete provider readiness and pass the purchase
+limit.
 
 Product HTTP must use the bounded outbound helpers, which enforce reviewed
 HTTPS destinations, DNS/IP safety, redirect policy, timeouts, response-size

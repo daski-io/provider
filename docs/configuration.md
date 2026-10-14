@@ -133,13 +133,17 @@ Mainnet bypass/proxy CIDRs must be IPv4 `/24` or IPv6 `/64`, or narrower.
 
 The global and rail limits apply to discovery, quotes and other ordinary
 routes. Dispatch and dispatch status are servicing calls for funded orders:
-they skip product readiness and both DB-backed limits, keep the concurrency
-and body bounds (status bodies are capped at 64 KiB), and count only
-unauthenticated failures per source (120 per minute) toward a process-local
-abuse limit. Over-limit, over-capacity or malformed servicing calls get an
-empty `503`, never a JSON refusal. Behind a proxy, set `TRUST_PROXY_HOPS` and
-`TRUST_PROXY_CIDRS` so sources are told apart, and list the reviewed gateway
-egress in `RATE_LIMIT_BYPASS_IPS` when its addresses are known.
+they skip the product-readiness gate and both request-charged limits, and keep
+the concurrency and body bounds (status bodies are capped at 64 KiB). Instead,
+a shared PostgreSQL bucket per source admits 120 unauthenticated failures
+(malformed, wrong-domain or badly signed calls and transport faults) per
+minute; verified calls only read it. Middleware refusals of servicing calls
+are definite JSON refusals because no handler ran. A new synchronous dispatch
+is still refused before admission while provider readiness is down. Behind a
+proxy, set `TRUST_PROXY_HOPS` and `TRUST_PROXY_CIDRS` so sources are told
+apart, and list the reviewed gateway egress in `RATE_LIMIT_BYPASS_IPS` when its
+addresses are known; a source that exhausts its failure bucket is refused
+until it refills, gateway calls included.
 
 ## Outbound product/RPC policy
 

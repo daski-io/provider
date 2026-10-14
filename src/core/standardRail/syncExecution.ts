@@ -3,6 +3,7 @@ import type {
   ServiceResult,
   TaskContext,
 } from "../serviceRegistry/types.js";
+import { canonicalHash } from "./canonical.js";
 
 const MAX_RESULT_BYTES = 1_000_000;
 /** The synchronous mode's execution budget, not Daski's maximum service duration. */
@@ -38,7 +39,7 @@ export async function executeSynchronously(
       clearTimeout(timeout);
     }
     validateServiceResult(result);
-    return result;
+    return persistableResult(result);
   } catch {
     return {
       status: "failed",
@@ -73,4 +74,31 @@ function validateServiceResult(result: ServiceResult): void {
   if (Buffer.byteLength(JSON.stringify(result), "utf8") > MAX_RESULT_BYTES) {
     throw new Error("Adapter result is too large");
   }
+}
+
+/// The stored and attested form of a result: its JSON normalization (which
+/// drops undefined members), refused when PostgreSQL jsonb or canonical
+/// hashing could not represent it, so an admitted claim never strands on an
+/// unstorable terminal write.
+function persistableResult(result: ServiceResult): ServiceResult {
+  const normalized = JSON.parse(JSON.stringify(result)) as ServiceResult;
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      if (value.includes("\u0000")) throw new Error("Adapter result contains U+0000");
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) {
+        visit(key);
+        visit(child);
+      }
+    }
+  };
+  visit(normalized);
+  canonicalHash(normalized);
+  return normalized;
 }

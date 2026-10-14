@@ -97,7 +97,12 @@ export function assertNoDuplicateJsonKeys(
 ): void {
   let offset = 0;
   let nodes = 0;
-  const whitespace = () => { while (/\s/.test(text[offset] ?? "")) offset += 1; };
+  // JSON insignificant whitespace only: space, tab, line feed, carriage return.
+  const whitespace = () => {
+    for (let code = text.charCodeAt(offset);
+      code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+      code = text.charCodeAt(offset)) offset += 1;
+  };
   const stringToken = (): string => {
     const start = offset;
     if (text[offset] !== '"') throw new Error("JSON string expected");

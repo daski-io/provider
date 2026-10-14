@@ -82,7 +82,7 @@ describe("signed fixed readiness quote", () => {
       { audience: "https://other-provider.example" },
       { signerKeyId: "gateway-quote" },
       { issuedAt: now - 120, validBefore: now },
-      { issuedAt: now + 31, validBefore: now + 60 },
+      { issuedAt: now + 40, validBefore: now + 70 },
       { issuedAt: now, validBefore: now + 121 },
       { privateKey: `0x${"12".repeat(32)}` as Hex },
     ];

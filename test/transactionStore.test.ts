@@ -125,22 +125,26 @@ describe("minimal transaction store", () => {
     expect(mocks.release).toHaveBeenCalledWith(true);
   });
 
-  it("resolves a unique race to the winning claim and rethrows other pre-commit failures", async () => {
-    const winner = transaction();
+  it("rethrows a pre-commit failure after rolling back, leaving the re-check to the caller", async () => {
     mocks.clientQuery
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: "23505" }))
       .mockResolvedValueOnce({ rows: [] });
-    mocks.poolQuery.mockResolvedValueOnce({ rows: [winner] });
-    await expect(claim()).resolves.toEqual({ transaction: winner, fresh: false });
-
-    mocks.clientQuery.mockReset()
-      .mockResolvedValueOnce({ rows: [] })
-      .mockRejectedValueOnce(new Error("statement timeout"))
-      .mockResolvedValueOnce({ rows: [] });
-    await expect(claim()).rejects.toThrow("statement timeout");
+    await expect(claim()).rejects.toMatchObject({ code: "23505" });
     expect(mocks.clientQuery.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+    expect(mocks.poolQuery).not.toHaveBeenCalled();
+    expect(mocks.release).toHaveBeenLastCalledWith(false);
+  });
+
+  it("returns an existing claim even when its read-only COMMIT fails", async () => {
+    const row = transaction();
+    mocks.clientQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [row] })
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"));
+    await expect(claim()).resolves.toEqual({ transaction: row, fresh: false });
+    expect(mocks.release).toHaveBeenCalledWith(true);
   });
 
   it("persists a terminal result only from executing state and serves a finalized row", async () => {

@@ -66,7 +66,9 @@ const isAdmissionDeadline = (error: unknown) =>
  * Claim one funded order. Capacity is never consulted here: the gateway has
  * already reserved it for this listing version and the order is paid. An
  * existing claim is returned unchanged for the caller to compare; the claim
- * cannot commit at or after `dispatchValidBefore` (database-enforced).
+ * cannot commit at or after `dispatchValidBefore` (database-enforced). Any
+ * other error means this call admitted nothing, though a concurrent call
+ * may have; callers re-check before refusing.
  */
 export async function claimTransaction(args: {
   gatewayAudience: string;
@@ -92,7 +94,9 @@ export async function claimTransaction(args: {
       [args.gatewayAudience, args.orderId],
     );
     if (existing.rows[0]) {
-      await client.query("COMMIT");
+      // The committed row is authoritative whatever happens to this
+      // read-only transaction's COMMIT.
+      await client.query("COMMIT").catch(() => { destroy = true; });
       return { transaction: existing.rows[0], fresh: false };
     }
     const inserted = await client.query<ProviderTransaction>(
@@ -119,11 +123,6 @@ export async function claimTransaction(args: {
       throw new AdmissionUncertainError(id, error);
     }
     destroy = await rollbackFailedTransaction(client);
-    const code = (error as { code?: string }).code;
-    if (code === "23505" || code === "40001" || code === "40P01") {
-      const raced = await findTransaction(args.gatewayAudience, args.orderId);
-      if (raced) return { transaction: raced, fresh: false };
-    }
     throw error;
   } finally {
     client.release(destroy);

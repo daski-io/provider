@@ -87,6 +87,55 @@ export function requestClientIp(req: Request): string {
   return normalizeIp(req.ip || req.socket.remoteAddress || "unknown");
 }
 
+const bucketKey = (namespace: string, ip: string) => `${namespace}:${createHmac(
+  "sha256",
+  config.RATE_LIMIT_HASH_KEY,
+).update(`${namespace}\0${ip}`).digest("hex")}`;
+
+/** Atomically spend one token from a shared PostgreSQL bucket; false when empty. */
+export async function consumeRateLimitToken(
+  namespace: string,
+  ip: string,
+  capacity: number,
+  perMinute: number,
+): Promise<boolean> {
+  const result = await pool.query(
+    `INSERT INTO rate_limit_buckets (bucket_key,tokens,last_refill,expires_at)
+     VALUES ($1,$2::double precision-1,now(),now()+interval '10 minutes')
+     ON CONFLICT (bucket_key) DO UPDATE
+       SET tokens=LEAST($2::double precision,
+             rate_limit_buckets.tokens
+             + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
+               * ($3::double precision/60.0))-1,
+           last_refill=now(),expires_at=now()+interval '10 minutes'
+     WHERE LEAST($2::double precision,
+             rate_limit_buckets.tokens
+             + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
+               * ($3::double precision/60.0))>=1
+     RETURNING tokens`,
+    [bucketKey(namespace, ip), capacity, perMinute],
+  );
+  return result.rowCount === 1;
+}
+
+/** Read-only: whether a shared bucket still holds a token, without spending it. */
+export async function hasRateLimitToken(
+  namespace: string,
+  ip: string,
+  capacity: number,
+  perMinute: number,
+): Promise<boolean> {
+  const result = await pool.query<{ tokens: number }>(
+    `SELECT LEAST($2::double precision,
+              tokens + EXTRACT(EPOCH FROM (now()-last_refill)) * ($3::double precision/60.0))
+            AS tokens
+       FROM rate_limit_buckets WHERE bucket_key=$1`,
+    [bucketKey(namespace, ip), capacity, perMinute],
+  );
+  const row = result.rows[0];
+  return !row || Number(row.tokens) >= 1;
+}
+
 export function makeRateLimiter(options: {
   namespace: string;
   capacity: number;
@@ -101,27 +150,8 @@ export function makeRateLimiter(options: {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const ip = requestClientIp(req);
     if (isIpInRanges(ip, bypass)) return next();
-    const identity = createHmac("sha256", config.RATE_LIMIT_HASH_KEY)
-      .update(`${options.namespace}\0${ip}`)
-      .digest("hex");
     try {
-      const result = await pool.query(
-        `INSERT INTO rate_limit_buckets (bucket_key,tokens,last_refill,expires_at)
-         VALUES ($1,$2::double precision-1,now(),now()+interval '10 minutes')
-         ON CONFLICT (bucket_key) DO UPDATE
-           SET tokens=LEAST($2::double precision,
-                 rate_limit_buckets.tokens
-                 + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
-                   * ($3::double precision/60.0))-1,
-               last_refill=now(),expires_at=now()+interval '10 minutes'
-         WHERE LEAST($2::double precision,
-                 rate_limit_buckets.tokens
-                 + EXTRACT(EPOCH FROM (now()-rate_limit_buckets.last_refill))
-                   * ($3::double precision/60.0))>=1
-         RETURNING tokens`,
-        [`${options.namespace}:${identity}`, options.capacity, options.perMinute],
-      );
-      if (result.rowCount !== 1) {
+      if (!await consumeRateLimitToken(options.namespace, ip, options.capacity, options.perMinute)) {
         const retryAfter = Math.max(1, Math.ceil(60 / options.perMinute));
         res.setHeader("Retry-After", String(retryAfter));
         res.status(429).json({ error: "rate_limit_exceeded", retryAfter });

@@ -1,31 +1,45 @@
-import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { isIpInRanges, requestClientIp } from "./rateLimit.js";
+import type { Express, NextFunction, Request, RequestHandler, Response } from "express";
+import { logWarn } from "../logger.js";
+import {
+  consumeRateLimitToken,
+  hasRateLimitToken,
+  isIpInRanges,
+  requestClientIp,
+} from "./rateLimit.js";
 
-const SERVICING_PATHS = new Set(["/standard-rail/dispatch", "/standard-rail/dispatch/status"]);
-const ABUSE_WINDOW_MS = 60_000;
+type ServicingKind = "dispatch" | "status";
+const servicing = new WeakMap<Request, ServicingKind>();
 
 /**
- * Gateway servicing calls for already-funded orders: the dispatch and its
- * reconciliation status. Matching mirrors Express routing (case-insensitive,
- * optional trailing slash) so no variant can reach those handlers unclassified.
+ * Mark gateway servicing calls for already-funded orders (the dispatch and
+ * its reconciliation status) using Express's own route matching, so every
+ * request those handlers serve is classified the same way, and nothing else.
+ * Must be installed before any middleware that consults the classification.
  */
-export function isServicingRequest(req: Request): boolean {
-  return servicingPath(req) !== null;
+export function markServicingRoutes(app: Express): void {
+  const mark = (kind: ServicingKind): RequestHandler => (req, _res, next) => {
+    servicing.set(req, kind);
+    next();
+  };
+  app.post("/standard-rail/dispatch/status", mark("status"));
+  app.post("/standard-rail/dispatch", mark("dispatch"));
 }
 
-export function servicingPath(req: Request): "dispatch" | "status" | null {
-  if (req.method !== "POST") return null;
-  const url = req.originalUrl ?? req.url ?? "";
-  const path = (url.split("?", 1)[0] ?? "").toLowerCase().replace(/\/+$/, "");
-  if (!SERVICING_PATHS.has(path)) return null;
-  return path.endsWith("/status") ? "status" : "dispatch";
-}
+export const servicingPath = (req: Request): ServicingKind | null => servicing.get(req) ?? null;
+export const isServicingRequest = (req: Request): boolean => servicing.has(req);
+
+export const forServicing = (handler: RequestHandler): RequestHandler =>
+  (req, res, next) => isServicingRequest(req) ? handler(req, res, next) : next();
+
+export const exceptServicing = (handler: RequestHandler): RequestHandler =>
+  (req, res, next) => isServicingRequest(req) ? next() : handler(req, res, next);
 
 /**
  * The deliberately ambiguous transport answer (C03): an empty-body 503 makes
  * the gateway status-poll the original dispatch hash instead of recording a
- * refusal and sending a new envelope. Used whenever admission exists, may
- * exist, or cannot be checked.
+ * refusal and sending a new envelope. Handlers use it whenever admission
+ * exists, may exist, or cannot be checked; a middleware refusal of a request
+ * that never reached a handler is a definite refusal and stays JSON.
  */
 export function respondAmbiguously(res: Response): void {
   if (res.headersSent) {
@@ -38,57 +52,42 @@ export function respondAmbiguously(res: Response): void {
   res.status(503).end();
 }
 
-/** Middleware refusal: JSON for ordinary routes, never a JSON `error` for servicing calls. */
-export function rejectRequest(req: Request, res: Response, status: number, error: string): void {
-  if (isServicingRequest(req)) {
-    respondAmbiguously(res);
-    return;
-  }
-  res.status(status).json({ error });
-}
-
-export const forServicing = (handler: RequestHandler): RequestHandler =>
-  (req, res, next) => isServicingRequest(req) ? handler(req, res, next) : next();
-
-export const exceptServicing = (handler: RequestHandler): RequestHandler =>
-  (req, res, next) => isServicingRequest(req) ? next() : handler(req, res, next);
+const NAMESPACE = "servicing-failures";
 
 /**
- * Abuse limit for servicing calls that never charges verified gateway work.
- * Only requests that fail before authentication (malformed, wrong domain,
- * bad signature) count; a source over the limit receives the ambiguous
- * answer until its window resets. Process-local by design: it guards no
- * money or task state, and verified reads write nothing.
+ * Abuse limit for servicing calls that never charges verified gateway work:
+ * only requests that fail before authentication (malformed, wrong domain,
+ * bad signature, transport faults) spend a token from the shared PostgreSQL
+ * bucket, and the guard only reads it. A source with no tokens left gets a
+ * JSON 429 before parsing; it never reached a handler, so nothing was
+ * admitted. A store failure fails open: authentication still applies.
  */
-export function servicingAbuseLimiter(args: { maxFailuresPerMinute: number; bypassIps: string[] }) {
-  const buckets = new Map<string, { failures: number; resetAt: number }>();
-  const live = (ip: string, now: number) => {
-    const bucket = buckets.get(ip);
-    return bucket && bucket.resetAt > now ? bucket : null;
-  };
+export function servicingAbuseLimiter(args: {
+  capacity: number;
+  perMinute: number;
+  bypassIps: string[];
+}) {
   return {
-    guard(req: Request, res: Response, next: NextFunction): void {
+    async guard(req: Request, res: Response, next: NextFunction): Promise<void> {
       const ip = requestClientIp(req);
-      const bucket = live(ip, Date.now());
-      if (
-        bucket && bucket.failures >= args.maxFailuresPerMinute
-        && !isIpInRanges(ip, args.bypassIps)
-      ) {
-        respondAmbiguously(res);
-        return;
+      if (isIpInRanges(ip, args.bypassIps)) return next();
+      let allowed = true;
+      try {
+        allowed = await hasRateLimitToken(NAMESPACE, ip, args.capacity, args.perMinute);
+      } catch {
+        allowed = true;
       }
-      next();
+      if (allowed) return next();
+      const retryAfter = Math.max(1, Math.ceil(60 / args.perMinute));
+      res.setHeader("Retry-After", String(retryAfter));
+      res.status(429).json({ error: "rate_limit_exceeded", retryAfter });
     },
     recordFailure(req: Request): void {
       const ip = requestClientIp(req);
       if (isIpInRanges(ip, args.bypassIps)) return;
-      const now = Date.now();
-      const bucket = live(ip, now) ?? { failures: 0, resetAt: now + ABUSE_WINDOW_MS };
-      bucket.failures += 1;
-      buckets.set(ip, bucket);
-      if (buckets.size > 10_000) {
-        for (const [key, value] of buckets) if (value.resetAt <= now) buckets.delete(key);
-      }
+      void consumeRateLimitToken(NAMESPACE, ip, args.capacity, args.perMinute).catch(() => {
+        logWarn("Servicing failure could not be recorded");
+      });
     },
   };
 }

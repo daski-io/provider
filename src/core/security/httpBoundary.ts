@@ -1,7 +1,6 @@
 import type { Express, NextFunction, Request, Response } from "express";
 import { config } from "../config.js";
 import { isIpInRanges } from "./rateLimit.js";
-import { rejectRequest } from "./servicingIngress.js";
 
 /** Install the security controls that must run before every public route. */
 export function installHttpSecurityBoundary(app: Express): void {
@@ -79,27 +78,27 @@ function rejectUntrustedForwardingHeaders(trustedCidrs: string[]) {
     const peer = req.socket.remoteAddress ?? "";
     const trustedPeer = isIpInRanges(peer, trustedCidrs);
     if (hasForwarding && !trustedPeer) {
-      rejectRequest(req, res, 400, "untrusted_forwarding_headers");
+      res.status(400).json({ error: "untrusted_forwarding_headers" });
       return;
     }
     if (forwardedFor && forwardedFor.split(",").length > config.TRUST_PROXY_HOPS) {
-      rejectRequest(req, res, 400, "forwarding_hop_mismatch");
+      res.status(400).json({ error: "forwarding_hop_mismatch" });
       return;
     }
     if (forwardedProto) {
       const protocols = forwardedProto.split(",").map((value) => value.trim().toLowerCase());
       if (protocols.length > config.TRUST_PROXY_HOPS
         || protocols.some((value) => value !== "http" && value !== "https")) {
-        rejectRequest(req, res, 400, "invalid_forwarded_proto");
+        res.status(400).json({ error: "invalid_forwarded_proto" });
         return;
       }
       if (new URL(config.BASE_URL).protocol === "https:" && protocols[0] !== "https") {
-        rejectRequest(req, res, 400, "insecure_forwarded_proto");
+        res.status(400).json({ error: "insecure_forwarded_proto" });
         return;
       }
     }
     if (forwardedHost && forwardedHost.split(",", 1)[0].trim().toLowerCase() !== expectedHost) {
-      rejectRequest(req, res, 400, "forwarded_host_mismatch");
+      res.status(400).json({ error: "forwarded_host_mismatch" });
       return;
     }
     next();

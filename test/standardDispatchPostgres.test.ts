@@ -180,6 +180,71 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
     }
   });
 
+  it("re-checks for a concurrently admitted delivery before sending a refusal", async () => {
+    const order = await quoteOrder({ quotes: rail.quotes, outcome: rail.outcome });
+    const { body, dispatchHash } = await dispatchOrder({ order, outcome: rail.outcome, config: rail.config });
+    const verify = rail.evidence.verify.bind(rail.evidence);
+    let calls = 0;
+    let bothVerifying!: () => void;
+    let answered!: () => void;
+    const both = new Promise<void>((resolve) => { bothVerifying = resolve; });
+    const anyAnswered = new Promise<void>((resolve) => { answered = resolve; });
+    // Both deliveries pass the claim lookup; one is admitted while the other
+    // then fails verification and must find that claim before refusing.
+    rail.evidence.verify = async (args) => {
+      calls += 1;
+      if (calls === 2) {
+        bothVerifying();
+        await anyAnswered;
+        throw new Error("RPC unavailable");
+      }
+      await both;
+      return verify(args);
+    };
+    try {
+      const deliver = () => rail.post("/standard-rail/dispatch", body).then((answer) => {
+        answered();
+        return answer;
+      });
+      for (const answer of await Promise.all([deliver(), deliver()])) {
+        expect(classifyDispatchAnswer(answer)).toBe("accepted");
+        await acceptDispatchSnapshotAsGateway({ value: json(answer), dispatchHash });
+      }
+      expect(calls).toBe(2);
+      expect(await claims(order.orderId)).toBe(1);
+    } finally {
+      rail.evidence.verify = verify;
+    }
+  });
+
+  it("stores an unstorable adapter result as the generic failure instead of stranding the claim", async () => {
+    const odd = await startRailHarness({
+      service: { adapter: { execute: async () => ({ status: "completed", message: "bad\u0000byte" }) } },
+    });
+    try {
+      const order = await quoteOrder({ quotes: odd.quotes, outcome: odd.outcome });
+      const { body, dispatchHash } = await dispatchOrder({ order, outcome: odd.outcome, config: odd.config });
+      const answer = await odd.post("/standard-rail/dispatch", body);
+      expect(classifyDispatchAnswer(answer)).toBe("accepted");
+      const accepted = await acceptDispatchSnapshotAsGateway({ value: json(answer), dispatchHash });
+      expect(accepted.body.state).toBe("failed");
+      const row = (await pool.query("SELECT state,result FROM provider_transactions WHERE order_id=$1",
+        [order.orderId])).rows[0];
+      expect(row).toEqual({
+        state: "failed",
+        result: {
+          status: "failed",
+          errorCode: "service_execution_failed",
+          message: "The provider could not complete this request.",
+        },
+      });
+    } finally {
+      await odd.close();
+      await rail.close();
+      rail = await startRailHarness();
+    }
+  });
+
   it("never lets a different envelope replace an admitted claim", async () => {
     const order = await quoteOrder({ quotes: rail.quotes, outcome: rail.outcome });
     const first = await admit(order);
@@ -252,14 +317,15 @@ describePostgres("funded dispatch admission against PostgreSQL", () => {
     const fast = await startRailHarness({ outcome: { dispatchDeadlineSeconds: 30 } });
     try {
       const order = await quoteOrder({ quotes: fast.quotes, outcome: fast.outcome });
+      const { body, envelope } = await dispatchOrder({
+        order, outcome: fast.outcome, config: fast.config, issuedAt: nowSeconds() - 27,
+      });
+      // Admission passes its pre-checks with ~3 s left, then stalls past validBefore.
       const verify = fast.evidence.verify.bind(fast.evidence);
       fast.evidence.verify = async (args) => {
-        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        await new Promise((resolve) => setTimeout(resolve, envelope.validBefore * 1_000 + 300 - Date.now()));
         return verify(args);
       };
-      const { body } = await dispatchOrder({
-        order, outcome: fast.outcome, config: fast.config, issuedAt: nowSeconds() - 28,
-      });
       const answer = await fast.post("/standard-rail/dispatch", body);
       expect(fast.evidence.verified).toBe(1);
       expect([classifyDispatchAnswer(answer), json(answer)])

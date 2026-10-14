@@ -5,6 +5,7 @@ import { logWarn } from "../logger.js";
 import { getAdapter, getService, getSkill } from "../serviceRegistry/registry.js";
 import { assertExactKeys, canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
+import { admitDispatch, currentClaim, persistSynchronousResult } from "./dispatchAdmission.js";
 import {
   DispatchAmbiguousError,
   DispatchRejectedError,
@@ -21,24 +22,15 @@ import {
   assertDispatchIsCurrent,
   assertDispatchPayloadBound,
   assertOutcomeBinding,
-  assertProviderQuoteBinding,
   authenticateDispatchEnvelope,
-  verifyQuoteEnvelope,
 } from "./dispatchVerification.js";
 import { ProviderEvidenceVerifier } from "./evidence.js";
 import { admitStandardEvidence } from "./evidenceAdmissions.js";
+import { assertProviderQuoteBinding, verifyQuoteEnvelope } from "./quoteBinding.js";
 import { loadProviderQuote } from "./quoteStore.js";
 import { compileProviderSchema, validateProviderRequest } from "./schema.js";
 import { executeSynchronously } from "./syncExecution.js";
-import {
-  AdmissionExpiredError,
-  AdmissionUncertainError,
-  claimTransaction,
-  completeTransaction,
-  dispatchHashOf,
-  findTransaction,
-  type ProviderTransaction,
-} from "./transactionStore.js";
+import { dispatchHashOf, type ProviderTransaction } from "./transactionStore.js";
 import type {
   ProviderOutcomeConfig,
   QuoteV1,
@@ -118,15 +110,32 @@ export class StandardDispatchService {
     await authenticateDispatchEnvelope(parts.dispatch, this.config, this.chainId);
     const dispatch = parts.dispatch.payload;
     const dispatchHash = canonicalHash(parts.dispatch);
-    let existing: ProviderTransaction | null;
-    try {
-      existing = await findTransaction(dispatch.gatewayAudience, dispatch.orderId);
-    } catch (error) {
-      throw new DispatchAmbiguousError("Dispatch claim lookup failed", error);
-    }
+    const existing = await currentClaim(dispatch.gatewayAudience, dispatch.orderId);
     if (existing) return this.replay(existing, dispatchHash);
-    const outcome = await this.verifyNewDispatch(parts);
-    const claimed = await this.admit(parts, dispatchHash, outcome);
+    let outcome: ProviderOutcomeConfig;
+    let claimed: { transaction: ProviderTransaction; fresh: boolean };
+    try {
+      outcome = await this.verifyNewDispatch(parts);
+      claimed = await admitDispatch({
+        gatewayAudience: dispatch.gatewayAudience,
+        orderId: dispatch.orderId,
+        dispatchNonce: dispatch.dispatchNonce,
+        dispatchHash,
+        requestHash: dispatch.canonicalProviderRequestHash,
+        payer: dispatch.payer,
+        serviceSlug: outcome.serviceSlug,
+        skillId: outcome.skillId,
+        listingManifestHash: dispatch.listingManifestHash,
+        dispatchValidBefore: parts.dispatch.validBefore,
+      });
+    } catch (error) {
+      if (!(error instanceof DispatchRejectedError)) throw error;
+      // Refuse only while an authoritative read still shows no claim: a
+      // concurrent delivery of the same order may have been admitted.
+      const raced = await currentClaim(dispatch.gatewayAudience, dispatch.orderId);
+      if (raced) return this.replay(raced, dispatchHash);
+      throw error;
+    }
     if (!claimed.fresh) return this.replay(claimed.transaction, dispatchHash);
     try {
       const result = await executeSynchronously(getAdapter(outcome.serviceSlug), {
@@ -137,7 +146,7 @@ export class StandardDispatchService {
         skillId: outcome.skillId,
       }, parts.request);
       return await this.snapshot(
-        await completeTransaction(claimed.transaction.id, result),
+        await persistSynchronousResult(claimed.transaction.id, result),
         dispatchHash,
       );
     } catch (error) {
@@ -215,41 +224,6 @@ export class StandardDispatchService {
     } catch (error) {
       if (error instanceof DispatchRejectedError) throw error;
       throw new DispatchRejectedError("validator");
-    }
-  }
-
-  private async admit(
-    parts: DispatchRequest,
-    dispatchHash: Hex,
-    outcome: ProviderOutcomeConfig,
-  ): Promise<{ transaction: ProviderTransaction; fresh: boolean }> {
-    const dispatch = parts.dispatch.payload;
-    try {
-      return await claimTransaction({
-        gatewayAudience: dispatch.gatewayAudience,
-        orderId: dispatch.orderId,
-        dispatchNonce: dispatch.dispatchNonce,
-        dispatchHash,
-        requestHash: dispatch.canonicalProviderRequestHash,
-        payer: dispatch.payer,
-        serviceSlug: outcome.serviceSlug,
-        skillId: outcome.skillId,
-        listingManifestHash: dispatch.listingManifestHash,
-        dispatchValidBefore: parts.dispatch.validBefore,
-      });
-    } catch (error) {
-      if (error instanceof AdmissionExpiredError) throw new DispatchRejectedError("envelope_lifetime");
-      if (error instanceof AdmissionUncertainError) {
-        // Only a durable row proves the commit; absence after an unknown
-        // COMMIT proves nothing, so that case stays ambiguous.
-        const current = await findTransaction(dispatch.gatewayAudience, dispatch.orderId)
-          .catch(() => null);
-        if (current) return { transaction: current, fresh: current.id === error.taskId };
-        throw new DispatchAmbiguousError("Dispatch admission commit outcome is unknown", error);
-      }
-      // Rolled back before COMMIT was sent: this request admitted nothing.
-      const code = (error as { code?: string }).code;
-      throw new DispatchRejectedError(code === "23505" ? "validator" : "service_unavailable");
     }
   }
 }

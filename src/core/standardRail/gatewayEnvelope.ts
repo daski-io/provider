@@ -14,8 +14,26 @@ export class GatewayEnvelopeError extends Error {
   }
 }
 
+const SECP256K1_HALF_ORDER = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
+
+/**
+ * The single encoding the gateway's signer emits: lowercase 65-byte hex, low
+ * s, v of 27 or 28. Any other encoding of the same signature would give the
+ * same signer a different envelope hash, so it is refused.
+ */
+export function isCanonicalSignature(signature: unknown): signature is Hex {
+  if (typeof signature !== "string" || !/^0x[0-9a-f]{130}$/.test(signature)) return false;
+  const r = BigInt(`0x${signature.slice(2, 66)}`);
+  const s = BigInt(`0x${signature.slice(66, 130)}`);
+  const v = signature.slice(130);
+  return r > 0n && s > 0n && s <= SECP256K1_HALF_ORDER && (v === "1b" || v === "1c");
+}
+
 /** Recover the EIP-191 signer of a gateway envelope's canonical unsigned body. */
 export async function gatewayEnvelopeSigner(envelope: SignedEnvelope<unknown, 1 | 2>): Promise<Address> {
+  if (!isCanonicalSignature(envelope.signature)) {
+    throw new GatewayEnvelopeError("signature", "Gateway envelope signature is not canonical");
+  }
   let digest: Hex;
   try {
     digest = unsignedEnvelopeHash(envelope as unknown as Record<string, unknown>);

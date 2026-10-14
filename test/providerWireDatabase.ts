@@ -64,6 +64,12 @@ export function wireQuery(db: WireDatabase) {
       });
       return { rows: observed(db, row) };
     }
+    if (sql.includes("SET execution_lease_expires_at=now()")) {
+      // Lease renewal: the emulated lease never expires.
+      const row = [...db.claims.values()].find((claim) => claim.id === params[0]);
+      const held = row?.state === "executing" && row.execution_lease_token === params[1];
+      return { rows: [], rowCount: held ? 1 : 0 };
+    }
     if (sql.includes("FROM provider_transactions WHERE id=$1")) {
       return { rows: observed(db, [...db.claims.values()].find((claim) => claim.id === params[0])) };
     }

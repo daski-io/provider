@@ -164,4 +164,27 @@ describePostgres("synchronous execution leases against PostgreSQL", () => {
       state: "failed", result: { status: "failed", errorCode: "provider_execution_abandoned" },
     });
   });
+  it("never starts the call under a lease that expired before its claim committed", async () => {
+    // Stand-in for a claim whose transaction waited behind a concurrent one:
+    // its expiry, fixed when the transaction began, has passed at COMMIT.
+    await pool.query(`CREATE FUNCTION test_stale_claim_lease() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN NEW.execution_lease_expires_at := now() - interval '1 second'; RETURN NEW; END $$`);
+    await pool.query(`CREATE TRIGGER test_stale_claim_lease BEFORE INSERT ON provider_transactions
+      FOR EACH ROW EXECUTE FUNCTION test_stale_claim_lease()`);
+    let order: Awaited<ReturnType<typeof start>>["order"];
+    const gated = gatedAdapter();
+    try {
+      const started = await start(gated.adapter, { leaseSeconds: 30, renewMs: 10_000, sweepMs: 1_000 });
+      order = started.order;
+      const stale = await started.answer;
+      expect([stale.status, stale.text]).toEqual([503, ""]);
+    } finally {
+      await pool.query("DROP TRIGGER test_stale_claim_lease ON provider_transactions");
+      await pool.query("DROP FUNCTION test_stale_claim_lease()");
+    }
+    expect(gated.seen.context).toBeUndefined();
+    const claim = (await pool.query("SELECT id FROM provider_transactions WHERE order_id=$1", [order!.orderId]))
+      .rows[0] as { id: string };
+    await expect(sweepAbandonedSyncExecutions()).resolves.toEqual([claim.id]);
+  });
 });

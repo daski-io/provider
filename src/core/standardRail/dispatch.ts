@@ -33,7 +33,7 @@ import { loadProviderQuote } from "./quoteStore.js";
 import { compileProviderSchema, validateProviderRequest } from "./schema.js";
 import type { ResultContract } from "./serviceResult.js";
 import { executeSynchronously } from "./syncExecution.js";
-import { holdSyncLease, SYNC_LEASE, type SyncLeaseTiming } from "./syncLease.js";
+import { holdSyncLease, renewSyncLease, SYNC_LEASE, type SyncLeaseTiming } from "./syncLease.js";
 import { dispatchHashOf, type ProviderTransaction } from "./transactionStore.js";
 import type {
   ProviderOutcomeConfig,
@@ -157,6 +157,13 @@ export class StandardDispatchService {
     if (!claimed.fresh) return this.replay(claimed.transaction, dispatchHash);
     const leaseToken = claimed.transaction.execution_lease_token;
     if (!leaseToken) throw new DispatchAmbiguousError("Admitted claim carries no execution lease");
+    // The claim's expiry was computed when its transaction began, which can be
+    // long before its COMMIT (a wait behind a concurrent claim, a slow commit).
+    // Extend it, fenced, before the product call: a lease that already expired
+    // may be failed by any process, so the call is never started under it.
+    const held = await renewSyncLease(claimed.transaction.id, leaseToken, this.lease.leaseSeconds)
+      .catch(() => false);
+    if (!held) throw new DispatchAmbiguousError("Admitted claim's lease expired before execution started");
     // The lease is renewed until the result is persisted; a lost lease ends
     // the attempt without a write and the answer stays ambiguous.
     const lease = holdSyncLease(claimed.transaction.id, leaseToken, this.lease);

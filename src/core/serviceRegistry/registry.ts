@@ -1,6 +1,13 @@
-import { assertSynchronousDeadlines, skillDeadlines } from "./deadlines.js";
+import { adapterMode, assertServiceAdapters } from "./adapterValidation.js";
+import {
+  assertExternalJobDeadlines,
+  assertSynchronousDeadlines,
+  skillDeadlines,
+} from "./deadlines.js";
 import type {
+  ExternalJobAdapter,
   FulfillmentAdapter,
+  ServiceAdapter,
   ServiceModule,
   SkillDefinition,
 } from "./types.js";
@@ -36,6 +43,7 @@ export function registerService(module: ServiceModule): void {
   ) {
     throw new Error(`Service ${manifest.slug} has invalid reviewed failure codes`);
   }
+  assertServiceAdapters(module);
   const skillIds = new Set<string>();
   for (const skill of module.skills) validateSkill(module, skill, skillIds);
   if (module.skills.length === 0) {
@@ -56,8 +64,11 @@ function validateSkill(
   if (!/^[1-9]\d*$/.test(skill.fixedPriceAtomic)) {
     throw new Error(`Skill ${skill.id} must use a positive fixed USDC price`);
   }
-  // Every lite adapter is synchronous; its window must survive one lost dispatch.
-  assertSynchronousDeadlines(`Skill ${module.manifest.slug}/${skill.id}`, skillDeadlines(skill));
+  // Either mode's window must survive one lost dispatch; a job's window is
+  // also its declared overdue threshold.
+  const label = `Skill ${module.manifest.slug}/${skill.id}`;
+  if (adapterMode(module.adapter) === "external-job") assertExternalJobDeadlines(label, skill);
+  else assertSynchronousDeadlines(label, skillDeadlines(skill));
   if (!module.docs.skills[skill.id]?.trim()) {
     throw new Error(`Skill ${module.manifest.slug}/${skill.id} is missing documentation`);
   }
@@ -75,10 +86,31 @@ export function getSkill(serviceSlug: string, skillId: string): SkillDefinition 
   return getService(serviceSlug)?.skills.find((skill) => skill.id === skillId) ?? null;
 }
 
-export function getAdapter(serviceSlug: string): FulfillmentAdapter {
+/** The adapter new sales of the service use, in whichever mode. */
+export function getAdapter(serviceSlug: string): ServiceAdapter {
   const module = getService(serviceSlug);
   if (!module) throw new Error(`Unknown service: ${serviceSlug}`);
   return module.adapter;
+}
+
+/** The service's synchronous adapter; an external-job service has none. */
+export function getSyncAdapter(serviceSlug: string): FulfillmentAdapter {
+  const adapter = getAdapter(serviceSlug);
+  if (adapter.mode === "external-job") throw new Error(`Service ${serviceSlug} is not synchronous`);
+  return adapter;
+}
+
+/**
+ * The external-job adapter of exactly the version a job was admitted under:
+ * the current adapter or a retained previous one; null when this build
+ * cannot resume that version.
+ */
+export function getExternalJobAdapter(serviceSlug: string, version: string): ExternalJobAdapter | null {
+  const module = getService(serviceSlug);
+  if (!module) return null;
+  if (module.adapter.mode === "external-job" && module.adapter.version === version) return module.adapter;
+  const previous = module.previousExternalJobAdapters ?? {};
+  return Object.hasOwn(previous, version) ? previous[version]! : null;
 }
 
 export function clearServicesForTests(): void {

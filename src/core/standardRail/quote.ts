@@ -102,6 +102,8 @@ export class StandardQuoteService {
     const service = getService(outcome.serviceSlug);
     const skill = getSkill(outcome.serviceSlug, outcome.skillId);
     if (!service || !skill) throw new QuoteRefusal("quote", 409, "outcome_policy");
+    // External-job admission is not available in this build yet.
+    if (service.adapter.mode === "external-job") throw new QuoteUnavailable("service_unavailable");
     if (skill.acceptingNewOrders === false) throw new QuoteUnavailable("sales_paused");
     // The served contract (price included) no longer matches the admitted
     // one: stop selling this version until a replacement bundle is installed.

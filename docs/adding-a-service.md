@@ -27,13 +27,27 @@ The module contract is `src/core/serviceRegistry/serviceModule.ts`:
 interface ServiceModule {
   manifest: ServiceManifest;
   skills: SkillDefinition[];
-  adapter: FulfillmentAdapter;
+  adapter: ServiceAdapter; // FulfillmentAdapter | ExternalJobAdapter
+  previousExternalJobAdapters?: Readonly<Record<string, ExternalJobAdapter>>;
   readiness(signal: AbortSignal): Promise<boolean>;
   requestReadiness?(context: RequestReadinessContext): Promise<RequestReadiness>;
   failureCodes?: readonly string[];
   docs: { service: string; skills: Record<string, string> };
 }
 ```
+
+An adapter without a `mode` (or with `mode: "sync"`) is synchronous, as the
+dummy's is; this guide describes that mode. An `ExternalJobAdapter`
+(`mode: "external-job"`, with `version`, `start`, `recoverStart` and `poll`)
+is for a product that already runs the paid work as its own asynchronous
+job; its types are in `src/core/serviceRegistry/adapterTypes.ts`. The mode
+belongs to the whole service. Registration validates both: a job adapter's
+version (1 to 64 letters, digits, `.`, `_`, `-`), its optional
+`idempotencyRetentionSeconds`, retained previous versions keyed by exactly
+their own version, and an explicit `deadlines.fulfillmentSeconds` of at least
+`dispatchSeconds + 180` on every skill. This build does not yet quote or
+admit external-job listings: their quotes answer `503 quote_unavailable` and
+their dispatches are refused before admission.
 
 The adapter contract is intentionally terminal:
 

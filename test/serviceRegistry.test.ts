@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { externalJobAdapterVersions } from "../src/core/serviceRegistry/adapterValidation.js";
 import {
+  minimumExternalJobFulfillmentSeconds,
   minimumSynchronousFulfillmentSeconds,
   skillDeadlines,
 } from "../src/core/serviceRegistry/deadlines.js";
@@ -7,10 +9,30 @@ import {
   clearServicesForTests,
   getAdapter,
   getAllServices,
+  getExternalJobAdapter,
   getSkill,
+  getSyncAdapter,
   registerService,
 } from "../src/core/serviceRegistry/registry.js";
+import type { ExternalJobAdapter, ServiceModule } from "../src/core/serviceRegistry/types.js";
 import { dummyService } from "../src/services/dummy/index.js";
+
+const jobAdapter = (version: string, extra: Partial<ExternalJobAdapter> = {}): ExternalJobAdapter => ({
+  mode: "external-job",
+  version,
+  start: async () => ({ kind: "ambiguous", issue: { code: "timeout" } }),
+  recoverStart: async () => ({ kind: "unknown" }),
+  poll: async () => ({ kind: "pending" }),
+  ...extra,
+});
+
+/** The dummy's shape with an external-job adapter and a declared job window. */
+const jobService = (overrides: Partial<ServiceModule> = {}): ServiceModule => ({
+  ...dummyService,
+  adapter: jobAdapter("v2"),
+  skills: [{ ...dummyService.skills[0]!, deadlines: { fulfillmentSeconds: 43_200 } }],
+  ...overrides,
+});
 
 describe("minimal service registry", () => {
   beforeEach(clearServicesForTests);
@@ -65,5 +87,58 @@ describe("minimal service registry", () => {
       expect(() => registerService(withDeadlines(deadlines))).not.toThrow();
     }
     expect(skillDeadlines({})).toEqual({ dispatchSeconds: 300, fulfillmentSeconds: 900 });
+  });
+
+  // L01/L02/L07: one reviewed mode per service; external jobs declare their
+  // window; retained versions are keyed by exactly their own version.
+  it("registers an external-job service and resolves the adapter of a persisted version", () => {
+    const v1 = jobAdapter("v1", { idempotencyRetentionSeconds: 86_400 });
+    registerService(jobService({ previousExternalJobAdapters: { v1 } }));
+    const module = getAllServices()[0]!;
+    expect(getAdapter("dummy").mode).toBe("external-job");
+    expect(getExternalJobAdapter("dummy", "v2")).toBe(module.adapter);
+    expect(getExternalJobAdapter("dummy", "v1")).toBe(v1);
+    expect(getExternalJobAdapter("dummy", "v3")).toBeNull();
+    expect(getExternalJobAdapter("dummy", "constructor")).toBeNull();
+    expect(getExternalJobAdapter("other", "v2")).toBeNull();
+    expect(externalJobAdapterVersions(module)).toEqual(["v2", "v1"]);
+    expect(() => getSyncAdapter("dummy")).toThrow(/not synchronous/);
+    clearServicesForTests();
+    // A service whose new sales moved back to the synchronous mode still
+    // resumes the jobs its earlier version admitted.
+    registerService({ ...dummyService, previousExternalJobAdapters: { v1 } });
+    expect(getSyncAdapter("dummy")).toBe(dummyService.adapter);
+    expect(getExternalJobAdapter("dummy", "v1")).toBe(v1);
+  });
+
+  it("refuses an adapter outside the reviewed modes or an ambiguous version set", () => {
+    const refused = (module: ServiceModule, pattern: RegExp) => {
+      clearServicesForTests();
+      expect(() => registerService(module)).toThrow(pattern);
+    };
+    refused({ ...dummyService, adapter: { mode: "async" } as never }, /external-job adapter/);
+    refused({ ...dummyService, adapter: { mode: "sync" } as never }, /must implement execute/);
+    refused(jobService({ adapter: jobAdapter("") }), /needs a version/);
+    refused(jobService({ adapter: jobAdapter("v 2") }), /needs a version/);
+    refused(jobService({ adapter: { ...jobAdapter("v2"), poll: undefined } as never }), /implement poll/);
+    for (const retention of [0, 1.5, 31_536_001, -1]) {
+      refused(jobService({ adapter: jobAdapter("v2", { idempotencyRetentionSeconds: retention }) }),
+        /idempotencyRetentionSeconds/);
+    }
+    refused(jobService({ previousExternalJobAdapters: { v1: jobAdapter("v0") } }), /keyed by another version/);
+    refused(jobService({ previousExternalJobAdapters: { v2: jobAdapter("v2") } }), /repeats the current/);
+    refused(jobService({ previousExternalJobAdapters: [] as never }), /must be a record/);
+  });
+
+  it("requires an external-job skill to declare a window that survives a lost dispatch", () => {
+    expect(minimumExternalJobFulfillmentSeconds(300)).toBe(480);
+    const withDeadlines = (deadlines: { dispatchSeconds?: number; fulfillmentSeconds?: number }) =>
+      jobService({ skills: [{ ...dummyService.skills[0]!, deadlines }] });
+    for (const deadlines of [{}, { dispatchSeconds: 300 }, { fulfillmentSeconds: 479 }, { fulfillmentSeconds: 31_536_001 }]) {
+      clearServicesForTests();
+      expect(() => registerService(withDeadlines(deadlines)), JSON.stringify(deadlines)).toThrow();
+    }
+    clearServicesForTests();
+    expect(() => registerService(withDeadlines({ fulfillmentSeconds: 480 }))).not.toThrow();
   });
 });

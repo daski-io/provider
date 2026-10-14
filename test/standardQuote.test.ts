@@ -168,6 +168,25 @@ describe("signed fixed readiness quote", () => {
       .toEqual(new QuoteUnavailable("sales_paused"));
   });
 
+  it("does not sell an external-job listing before external-job admission exists", async () => {
+    clearServicesForTests();
+    const service = echoService();
+    registerService({
+      ...service,
+      adapter: {
+        mode: "external-job",
+        version: "v1",
+        start: async () => ({ kind: "ambiguous", issue: { code: "timeout" } }),
+        recoverStart: async () => ({ kind: "unknown" }),
+        poll: async () => ({ kind: "pending" }),
+      },
+      skills: [{ ...service.skills[0]!, deadlines: { fulfillmentSeconds: 43_200 } }],
+    });
+    expect(await refusal(quotes().quote(await gatewayQuoteRequest({ listing, request, payer }))))
+      .toEqual(new QuoteUnavailable("service_unavailable"));
+    expect(insertedQuotes()).toHaveLength(0);
+  });
+
   it("stops new quotes, persisting nothing, for a listing whose served contract drifted", async () => {
     stopNewSales(listing.listingManifestHash, "contract_drift");
     expect(await refusal(quotes().quote(await gatewayQuoteRequest({ listing, request, payer }))))

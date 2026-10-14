@@ -2,7 +2,7 @@ import type { ValidateFunction } from "ajv";
 import type { Chain, Hex } from "viem";
 import { providerReady } from "../health.js";
 import { logWarn } from "../logger.js";
-import { getAdapter, getService, getSkill } from "../serviceRegistry/registry.js";
+import { getService, getSkill, getSyncAdapter } from "../serviceRegistry/registry.js";
 import { assertExactKeys, canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { admitDispatch, currentClaim, persistSynchronousResult } from "./dispatchAdmission.js";
@@ -168,7 +168,7 @@ export class StandardDispatchService {
     // the attempt without a write and the answer stays ambiguous.
     const lease = holdSyncLease(claimed.transaction.id, leaseToken, this.lease);
     try {
-      const result = await executeSynchronously(getAdapter(outcome.serviceSlug), {
+      const result = await executeSynchronously(getSyncAdapter(outcome.serviceSlug), {
         taskId: claimed.transaction.id,
         orderId: dispatch.orderId,
         payer: dispatch.payer,
@@ -241,9 +241,13 @@ export class StandardDispatchService {
       // The handler must be installed. The price is the version's admitted
       // one, which the provider quote binding has already enforced, even when
       // the build now sells at another price (contract drift).
-      if (!getService(outcome.serviceSlug) || !getSkill(outcome.serviceSlug, outcome.skillId)) {
+      const service = getService(outcome.serviceSlug);
+      if (!service || !getSkill(outcome.serviceSlug, outcome.skillId)) {
         throw new DispatchRejectedError("outcome_policy");
       }
+      // External-job admission is not available in this build yet; refuse
+      // before admission so the gateway retries with a fresh envelope.
+      if (service.adapter.mode === "external-job") throw new DispatchRejectedError("service_unavailable");
       // Synchronous execution during an outage would sign a terminal failure;
       // refusing before admission lets the gateway retry a fresh envelope.
       if (!(await this.ready().catch(() => false))) {

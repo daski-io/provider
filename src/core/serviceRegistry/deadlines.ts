@@ -50,8 +50,17 @@ export function minimumSynchronousFulfillmentSeconds(dispatchSeconds: number): n
     + SYNC_RECOVERY_MARGIN_SECONDS;
 }
 
-/** Refuse deadlines the gateway would reject or a lost dispatch could not survive. */
-export function assertSynchronousDeadlines(label: string, deadlines: SkillDeadlines): void {
+/**
+ * The shortest window that lets the gateway recover a lost initial dispatch
+ * of an external-job skill, whose dispatch answers right after durable
+ * admission. A real service declares far more: its job's runtime, queue
+ * delay, retries and report retrieval.
+ */
+export function minimumExternalJobFulfillmentSeconds(dispatchSeconds: number): number {
+  return dispatchSeconds + DISPATCH_EXPIRY_GRACE_SECONDS + SYNC_RECOVERY_MARGIN_SECONDS;
+}
+
+function assertDeadlineBounds(label: string, deadlines: SkillDeadlines): void {
   const { dispatchSeconds, fulfillmentSeconds } = deadlines;
   if (
     !Number.isSafeInteger(dispatchSeconds) || dispatchSeconds < MIN_DEADLINE_SECONDS
@@ -61,6 +70,36 @@ export function assertSynchronousDeadlines(label: string, deadlines: SkillDeadli
     !Number.isSafeInteger(fulfillmentSeconds) || fulfillmentSeconds < MIN_DEADLINE_SECONDS
     || fulfillmentSeconds > MAX_FULFILLMENT_SECONDS
   ) throw new Error(`${label} fulfillmentSeconds must be an integer from 30 to 31536000`);
+}
+
+/**
+ * An external-job skill must declare its fulfillment window: it is the
+ * admitted overdue threshold of every job and must cover the product's
+ * runtime, queue delay, retries and report retrieval (the 900-second
+ * synchronous default never fits a job).
+ */
+export function assertExternalJobDeadlines(
+  label: string,
+  skill: Pick<SkillContractDefinition, "deadlines">,
+): void {
+  if (skill.deadlines?.fulfillmentSeconds === undefined) {
+    throw new Error(`${label} is an external job and must declare deadlines.fulfillmentSeconds`);
+  }
+  const deadlines = skillDeadlines(skill);
+  assertDeadlineBounds(label, deadlines);
+  const minimum = minimumExternalJobFulfillmentSeconds(deadlines.dispatchSeconds);
+  if (deadlines.fulfillmentSeconds < minimum) {
+    throw new Error(
+      `${label} fulfillmentSeconds must be at least ${minimum} (dispatchSeconds + 60 + 120) `
+      + "so the gateway can recover a lost dispatch",
+    );
+  }
+}
+
+/** Refuse deadlines the gateway would reject or a lost dispatch could not survive. */
+export function assertSynchronousDeadlines(label: string, deadlines: SkillDeadlines): void {
+  assertDeadlineBounds(label, deadlines);
+  const { dispatchSeconds, fulfillmentSeconds } = deadlines;
   const minimum = minimumSynchronousFulfillmentSeconds(dispatchSeconds);
   if (fulfillmentSeconds < minimum) {
     throw new Error(

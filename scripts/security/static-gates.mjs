@@ -168,10 +168,22 @@ for (const path of [
     failures.push(`${path} must not reach a product adapter`);
   }
 }
+// The service adapter API: exactly the two reviewed modes and the reviewed
+// external-job outcome kinds. Adapters never name a wire state or a
+// full-only lifecycle action (later input, cancellation).
 const adapter = read("src/core/serviceRegistry/adapterTypes.ts");
-for (const forbidden of ['"working"', '"input-required"', "handleInput(", "cancel("]) {
+for (const forbidden of [
+  '"submitted"', '"working"', '"input-required"', '"canceled"', "handleInput(", "cancel(",
+]) {
   if (adapter.includes(forbidden)) failures.push(`adapter exposes full-only state: ${forbidden}`);
 }
+const literals = (pattern) => [...new Set([...adapter.matchAll(pattern)].map((match) => match[1]))].sort();
+if (JSON.stringify(literals(/\bmode\??:\s*"([^"]+)"/g)) !== JSON.stringify(["external-job", "sync"])) {
+  failures.push("adapter modes must be exactly sync and external-job");
+}
+if (JSON.stringify(literals(/\bkind:\s*"([^"]+)"/g)) !== JSON.stringify([
+  "accepted", "ambiguous", "pending", "retry", "safe-to-start", "terminal", "unknown",
+])) failures.push("external-job outcome kinds must be exactly the reviewed set");
 if (!adapter.includes("signal: AbortSignal")) {
   failures.push("synchronous adapter must receive an abort signal");
 }

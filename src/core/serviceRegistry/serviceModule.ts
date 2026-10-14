@@ -1,11 +1,25 @@
-import type { FulfillmentAdapter } from "./adapterTypes.js";
+import type { ExternalJobAdapter, ServiceAdapter } from "./adapterTypes.js";
 import type { ServiceManifest, SkillDefinition } from "./manifestTypes.js";
 import type { RequestReadiness, RequestReadinessContext } from "./requestReadiness.js";
 
 export interface ServiceModule {
   manifest: ServiceManifest;
   skills: SkillDefinition[];
-  adapter: FulfillmentAdapter;
+  /**
+   * The adapter new sales use: a synchronous `FulfillmentAdapter` (no mode,
+   * or `mode: "sync"`) or an `ExternalJobAdapter` (`mode: "external-job"`).
+   * The mode belongs to the whole service; `context.skillId` selects the
+   * operation.
+   */
+  adapter: ServiceAdapter;
+  /**
+   * External-job adapters retained for jobs admitted under an earlier
+   * version, keyed by exactly their `version` (never the current adapter's).
+   * A job is always resumed by the version that admitted it, even after new
+   * sales move to another version or mode; nothing is loaded from the
+   * database or a dynamic module path.
+   */
+  previousExternalJobAdapters?: Readonly<Record<string, ExternalJobAdapter>>;
   /** Bounded, read-only proof that the product can accept paid work now. */
   readiness(signal: AbortSignal): Promise<boolean>;
   /**

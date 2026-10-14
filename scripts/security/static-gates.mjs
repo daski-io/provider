@@ -106,7 +106,15 @@ if (JSON.stringify([...reviewedTables].sort()) !== JSON.stringify([...migratedTa
   failures.push("runtime privileges must review exactly the migrated tables");
 }
 
+// C01: the gateway rejects compressed provider answers, so no compression
+// middleware may be installed anywhere in the HTTP stack.
+if (packageJson.dependencies?.compression || packageJson.devDependencies?.compression) {
+  failures.push("response compression is forbidden");
+}
 const server = read("src/core/server.ts");
+if (/\bcompression\s*\(|content-encoding/i.test(server)) {
+  failures.push("server must not compress or encode responses");
+}
 for (const forbidden of ["/admin", "/webhooks", "/a2a", "/lifecycle", "/assets/"]) {
   if (server.includes(forbidden)) failures.push(`server exposes full-only route: ${forbidden}`);
 }

@@ -249,6 +249,14 @@ describe("servicing calls over HTTP", () => {
     }));
     expect([forged.status, forged.json()])
       .toEqual([401, { error: "dispatch_rejected", reason: "signature" }]);
+    for (const envelope of [
+      await gatewayStatusQuery(orderId, dispatchHash),
+      await gatewayQuoteRequest({ listing, request, payer }),
+    ]) {
+      const crossType = await post("/standard-rail/dispatch", JSON.stringify({ ...body, dispatch: envelope }));
+      expect(crossType.status).toBe(400);
+      expect(crossType.json()).toEqual({ error: "dispatch_rejected", reason: "validator" });
+    }
     db.query.mockImplementation(async (sql: string, params?: unknown[]) => {
       if (String(sql).includes("WHERE gateway_audience=$1 AND order_id=$2")) {
         throw new Error("database unavailable");

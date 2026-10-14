@@ -10,6 +10,19 @@ interface DependencyStatus {
 }
 
 const SERVICE_READINESS_TIMEOUT_MS = 3_000;
+
+/** Servicing health (the external-job worker and its jobs), reported apart from routing readiness. */
+export interface ServicingHealth {
+  status: "ok" | "degraded";
+  codes: string[];
+}
+
+let servicingHealth: () => ServicingHealth = () => ({ status: "ok", codes: [] });
+
+/** The process registers its worker's health; `/health/ready` reports it. */
+export function setServicingHealthSource(source: () => ServicingHealth): void {
+  servicingHealth = source;
+}
 let identity: DependencyStatus = { ready: false, checkedAt: 0 };
 let rail: DependencyStatus = { ready: false, checkedAt: 0 };
 let cached: { expiresAt: number; ready: boolean } | null = null;
@@ -92,10 +105,16 @@ healthRouter.get("/live", (_req, res) => {
   res.json({ status: "alive", timestamp: new Date().toISOString() });
 });
 
+// The status code is routing and sales readiness. Servicing health is
+// reported beside it and never changes it: a stopped external-job worker
+// stops new external-job sales (externalJobs/sales.ts) but must not take
+// persisted status and artifact reads off the network, and a slow upstream
+// job is never a reason to restart the process.
 healthRouter.get("/ready", async (_req, res) => {
   const ready = await providerReady();
   res.status(ready ? 200 : 503).json({
     status: ready ? "ready" : "not_ready",
     checkedAt: new Date().toISOString(),
+    servicing: servicingHealth(),
   });
 });

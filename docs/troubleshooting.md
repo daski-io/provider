@@ -166,6 +166,30 @@ or invalid. Check structured application logs by event/error class, then verify:
 
 Do not route paid traffic based on liveness.
 
+## External-job servicing health
+
+`/health/ready` also reports `servicing: {status: "ok" | "degraded", codes}`
+for the external-job worker of this process and the unfinished jobs it
+inspects every 15 seconds (SELECT only; counts appear in the log line
+`External-job servicing health changed`, never inputs, references or keys).
+Servicing health never changes the readiness status code: a stopped worker
+stops new external-job quotes (`external_jobs_unavailable`) but persisted
+status and artifact reads stay routable, and a slow upstream job is never a
+reason to restart the process. A worker waiting hours on a pending job,
+heartbeating (`provider_runtime_instances.worker_heartbeat_at`) with the
+job's next poll scheduled, reports no code.
+
+| Code | Meaning | Remedy |
+| --- | --- | --- |
+| `external_job_worker_stopped` | This process's worker has not completed a claim round for a minute (typically the database is unreachable) or was stopped. | Restore the database or restart the process; due work resumes from PostgreSQL. |
+| `external_job_lease_stale` | A job lease expired more than one lease length ago and nobody reclaimed it. | Check that a compatible worker runs and can resume the job's adapter version (see the next codes). |
+| `external_job_overdue` | Unfinished work is past its fulfillment deadline. It stays `working` and keeps polling or reconciling at the overdue cadence; nothing new is started. | Check the product for the original jobs. Lite cannot close or refund them. |
+| `external_job_start_ambiguous` | Starts whose outcome is unknown are reconciling through `recoverStart`. | If it persists, check that the product's lookup by order key works. |
+| `external_job_result_invalid` | A terminal result failed its admitted contract (see above). | Repair the mapping. |
+| `external_job_failing` | A job's last ten or more calls failed. Backoff applies; the job is never failed for it. | Check the product's availability and the adapter's error mapping. |
+| `external_job_handler_missing` | An unfinished job names an adapter version this build cannot resume. | Restore that version (boot normally refuses this build). |
+| `external_job_key_missing` | An unfinished job's stored state names an encryption key this build lacks. | Restore the key (boot normally refuses this build). |
+
 ## Quote is refused or unavailable
 
 The gateway reports `PROVIDER_QUOTE_REJECTED` for a provider 4xx and

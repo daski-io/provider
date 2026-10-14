@@ -1,16 +1,26 @@
-import { serviceIsReady } from "../health.js";
-import { errorExtra, logError } from "../logger.js";
+import { pool } from "../db/pool.js";
+import { serviceIsReady, type ServicingHealth } from "../health.js";
+import { errorExtra, logError, logInfo, logWarn } from "../logger.js";
 import type { FieldEncryptionKeyRing } from "../security/fieldEncryption.js";
 import { externalJobAdapterVersions } from "../serviceRegistry/adapterValidation.js";
 import { getAllServices } from "../serviceRegistry/registry.js";
 import type { ResultContracts } from "../standardRail/resultContracts.js";
+import {
+  externalJobHealthCodes,
+  inspectExternalJobs,
+  type ExternalJobHealthCode,
+  type ExternalJobInspection,
+} from "./health.js";
 import { claimDueJobs, type ClaimedJob, type ServiceableVersion } from "./jobClaims.js";
 import { runJobStep } from "./jobStep.js";
+import { externalJobServicing } from "./servicing.js";
 import type { ExternalJobRuntime } from "./runtime.js";
 import type { ExternalJobWorkerSettings } from "./settings.js";
 
 /** A worker whose last successful claim round is older than this is not running. */
 const STALE_TICK_MS = 60_000;
+/** How often the worker records its heartbeat and inspects unfinished jobs. */
+const HEALTH_INTERVAL_MS = 15_000;
 
 /** Every (service, adapter version) the registered services can resume. */
 export function serviceableVersions(): ServiceableVersion[] {
@@ -35,6 +45,9 @@ export class ExternalJobWorker {
   private stopped = false;
   private ticking = false;
   private lastTickAt = 0;
+  private lastHealthAt = 0;
+  private inspection: ExternalJobInspection | null = null;
+  private reported = "";
 
   constructor(private readonly deps: {
     owner: string;
@@ -68,6 +81,36 @@ export class ExternalJobWorker {
   /** Running and claiming: its last successful claim round is recent. */
   running(now = (this.deps.now ?? Date.now)()): boolean {
     return this.started && !this.stopped && now - this.lastTickAt <= STALE_TICK_MS;
+  }
+
+  /**
+   * Servicing health, apart from read serviceability: the codes of the last
+   * inspection and whether this worker still claims. A healthy worker
+   * waiting on a long upstream job reports `ok`.
+   */
+  health(): ServicingHealth {
+    const codes = externalJobHealthCodes(this.inspection, this.running());
+    return { status: codes.length === 0 ? "ok" : "degraded", codes };
+  }
+
+  /** Record the worker heartbeat and inspect unfinished jobs (read-only); logs changes once. */
+  async inspect(): Promise<ExternalJobHealthCode[]> {
+    await pool.query(
+      "UPDATE provider_runtime_instances SET worker_heartbeat_at=now() WHERE instance_id=$1 AND stopped_at IS NULL",
+      [this.deps.owner],
+    );
+    this.inspection = await inspectExternalJobs(
+      pool, externalJobServicing(getAllServices(), this.deps.keys), this.deps.settings.leaseSeconds,
+    );
+    this.lastHealthAt = (this.deps.now ?? Date.now)();
+    const codes = externalJobHealthCodes(this.inspection, this.running());
+    if (codes.join() !== this.reported) {
+      this.reported = codes.join();
+      (codes.length === 0 ? logInfo : logWarn)("External-job servicing health changed", {
+        codes, ...this.inspection,
+      });
+    }
+    return codes;
   }
 
   /** The HTTP-facing runtime of this process. */
@@ -105,6 +148,11 @@ export class ExternalJobWorker {
       await this.claimAndStep();
     } catch (error) {
       logError("External-job worker could not claim due work", errorExtra(error));
+    }
+    try {
+      if ((this.deps.now ?? Date.now)() - this.lastHealthAt >= HEALTH_INTERVAL_MS) await this.inspect();
+    } catch (error) {
+      logWarn("External-job servicing health could not be inspected", errorExtra(error));
     } finally {
       this.ticking = false;
       this.schedule(this.deps.settings.idleTickMs);

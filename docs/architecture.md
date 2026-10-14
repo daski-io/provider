@@ -230,6 +230,12 @@ job. Core admits the funded order (above), then the worker in
   encrypted candidate and a stable `result_diagnostic`, and only retrieval
   continues (an immediate terminal start reconciles through its original
   key).
+- **Health.** The worker records its own heartbeat
+  (`provider_runtime_instances.worker_heartbeat_at`) and inspects unfinished
+  jobs read-only every 15 seconds; `/health/ready` reports the resulting
+  servicing codes beside, never in place of, its routing status
+  (`docs/troubleshooting.md`). A stopped worker stops new external-job sales;
+  reads stay routable.
 - **Restart and upgrade.** Nothing is resubmitted because a process
   restarted: the worker resumes due and abandoned work from PostgreSQL in its
   persisted phase, with the adapter version that admitted it (the current

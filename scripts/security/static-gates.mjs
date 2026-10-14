@@ -175,7 +175,7 @@ for (const path of [
 // dispatch commits before any upstream call and status and lifecycle reads
 // stay one database read.
 const REVIEWED_EXTERNAL_JOB_MODULES = [
-  "admission.ts", "calls.ts", "idempotency.ts", "jobClaims.ts", "jobCodec.ts", "jobStep.ts",
+  "admission.ts", "calls.ts", "health.ts", "idempotency.ts", "jobClaims.ts", "jobCodec.ts", "jobStep.ts",
   "jobTransitions.ts", "journalHandoff.ts", "keyRing.ts", "outcomes.ts", "phases.ts", "runtime.ts", "sales.ts",
   "scheduling.ts", "servicing.ts", "settings.ts", "stepSupport.ts", "worker.ts",
 ].map((name) => `src/core/externalJobs/${name}`);

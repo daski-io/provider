@@ -9,6 +9,7 @@ import {
   type DisposableDatabase,
   type DisposableRole,
 } from "./postgresHarness.js";
+import { jobKeys } from "./externalJobFixture.js";
 
 const ORIGIN = "https://gateway.example";
 const hash = (byte: string) => `0x${byte.repeat(64)}` as Hex;
@@ -29,6 +30,12 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     journal: typeof import("../src/core/suppliers/operationJournal.js");
     quotes: typeof import("../src/core/standardRail/quoteStore.js");
     leases: typeof import("../src/core/standardRail/syncLease.js");
+    admission: typeof import("../src/core/externalJobs/admission.js");
+    claims: typeof import("../src/core/externalJobs/jobClaims.js");
+    transitions: typeof import("../src/core/externalJobs/jobTransitions.js");
+    codec: typeof import("../src/core/externalJobs/jobCodec.js");
+    handoff: typeof import("../src/core/externalJobs/journalHandoff.js");
+    health: typeof import("../src/core/externalJobs/health.js");
   };
 
   beforeAll(async () => {
@@ -45,6 +52,12 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       journal: await import("../src/core/suppliers/operationJournal.js"),
       quotes: await import("../src/core/standardRail/quoteStore.js"),
       leases: await import("../src/core/standardRail/syncLease.js"),
+      admission: await import("../src/core/externalJobs/admission.js"),
+      claims: await import("../src/core/externalJobs/jobClaims.js"),
+      transitions: await import("../src/core/externalJobs/jobTransitions.js"),
+      codec: await import("../src/core/externalJobs/jobCodec.js"),
+      handoff: await import("../src/core/externalJobs/journalHandoff.js"),
+      health: await import("../src/core/externalJobs/health.js"),
     };
     await modules.pool.runMigrations();
     await modules.pool.configureRuntimePrivileges();
@@ -148,6 +161,55 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
        ON CONFLICT (evidence_hash) DO UPDATE SET evidence_hash=EXCLUDED.evidence_hash`,
       [hash("a")],
     );
+  });
+
+  it("runs the external-job admission, worker, journal and health statements as the runtime role", async () => {
+    const keys = jobKeys();
+    const admitted = await modules.transactions.claimTransaction({
+      gatewayAudience: ORIGIN,
+      orderId: "ord_00000000-0000-4000-8000-0000000000e1",
+      dispatchNonce: hash("e"),
+      dispatchHash: hash("5"),
+      requestHash: hash("6"),
+      payer: `0x${"77".repeat(20)}` as Hex,
+      serviceSlug: "dummy",
+      skillId: "echo",
+      listingManifestHash: hash("3"),
+      dispatchValidBefore: Math.floor(Date.now() / 1_000) + 300,
+      providerQuoteHash: hash("7"),
+      execution: {
+        kind: "external-job",
+        insertJob: (client, taskId) => modules.admission.insertExternalJob(client, keys, taskId, {
+          serviceSlug: "dummy", adapterVersion: "v1", idempotencyKey: "00000000-0000-8000-8000-0000000000e1",
+          fulfillmentSeconds: 43_200, input: { message: "hello" },
+        }),
+      },
+    });
+    expect(admitted.transaction.state).toBe("external_job");
+    const claim = () => modules.claims.claimDueJobs({
+      owner: "00000000-0000-4000-8000-0000000000e2", limit: 1, leaseSeconds: 30, maxConcurrentCalls: 4,
+      serviceable: [{ serviceSlug: "dummy", adapterVersion: "v1" }],
+    });
+    const [queued] = await claim();
+    await expect(modules.claims.renewJobLease(queued!, 30)).resolves.toBe(true);
+    const intent = await modules.transitions.recordStartIntent({ job: queued!, from: "queued", retentionSeconds: 3_600 });
+    const started = { ...queued!, ...intent! };
+    await expect(modules.transitions.fenced(started, "starting", (client) => modules.transitions.updateJob(client, started, {
+      phase: "polling", reference: modules.codec.sealJobField(keys, "reference", started, { jobId: "j" }),
+      delaySeconds: 0, failures: "reset", errorCode: null, journal: "confirmed",
+    }))).resolves.toBe("committed");
+    await expect(modules.handoff.replayStartJournal(modules.pool.pool, keys, started))
+      .resolves.toMatchObject({ state: "confirmed", reference: { jobId: "j" } });
+    const [polling] = await claim();
+    await expect(modules.transitions.finishJob(polling!, "polling", { status: "completed" })).resolves.toBe("committed");
+    await expect(modules.health.inspectExternalJobs(modules.pool.pool, {
+      adapterVersions: () => new Set(["v1"]), keyIds: new Set(["k1"]),
+    }, 30)).resolves.toMatchObject({ active: 0 });
+    await modules.pool.pool.query(
+      "UPDATE provider_runtime_instances SET worker_heartbeat_at=now() WHERE instance_id=gen_random_uuid()",
+    );
+    await expect(modules.pool.pool.query("DELETE FROM provider_external_jobs")).rejects.toThrow(/permission denied/);
+    await expect(modules.pool.pool.query("TRUNCATE provider_external_jobs")).rejects.toThrow(/permission denied/);
   });
 
   it("denies runtime DDL, destructive writes, catalog writes, and migration-ledger access", async () => {

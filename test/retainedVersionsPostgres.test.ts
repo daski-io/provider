@@ -15,6 +15,7 @@ const target = vi.hoisted(() => {
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
+import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/salesStops.js";
 import { verifyRetainedObligations } from "../src/core/standardRail/retainedObligations.js";
 import { json, startRailHarness, type RailHarness } from "./dispatchHarness.js";
 import { acceptLifecycleAnswerAsGateway, gatewayLifecycleCall, LIFECYCLE_HEADERS } from "./gatewayLifecycleWire.js";
@@ -211,5 +212,28 @@ describePostgres("retained listing versions against PostgreSQL", () => {
       value: json(await rail.status(order.orderId, dispatched.dispatchHash)),
       dispatchHash: dispatched.dispatchHash, ...previousKeys,
     })).resolves.toMatchObject({ body: { state: "completed" } });
+  });
+  it("serves a repriced head's funded orders at the admitted price while its new sales stop", async () => {
+    // The head was admitted at 10000; this build now prices the skill at 12000.
+    const head = railOutcome();
+    clearServicesForTests();
+    registerService(echoService());
+    const sold = await quoteOrder({ quotes: new StandardQuoteService(railConfig([head]), 84532), outcome: head });
+    rail = await startRailHarness({
+      service: { skills: [{ ...echoService().skills[0]!, fixedPriceAtomic: "12000" }] },
+    });
+    stopNewSales(head.listingManifestHash, "contract_drift");
+    try {
+      const funded = await dispatchOrder({ order: sold, outcome: head, config: rail.config });
+      const answer = await rail.post("/standard-rail/dispatch", funded.body);
+      await expect(acceptDispatchSnapshotAsGateway({ value: json(answer), dispatchHash: funded.dispatchHash }))
+        .resolves.toMatchObject({ body: { state: "completed" } });
+      const quote = await rail.post("/standard-rail/quote", {
+        request: await gatewayQuoteRequest({ listing: gatewayListing(head), request: { message: "hi" }, payer: null }),
+      });
+      expect([quote.status, json(quote).reason]).toEqual([503, "contract_drift"]);
+    } finally {
+      clearSalesStopsForTests();
+    }
   });
 });

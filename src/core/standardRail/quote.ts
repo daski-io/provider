@@ -101,14 +101,15 @@ export class StandardQuoteService {
     }
     const service = getService(outcome.serviceSlug);
     const skill = getSkill(outcome.serviceSlug, outcome.skillId);
-    if (!service || !skill || skill.fixedPriceAtomic !== outcome.fixedGrossAmount) {
-      throw new QuoteRefusal("quote", 409, "outcome_policy");
-    }
+    if (!service || !skill) throw new QuoteRefusal("quote", 409, "outcome_policy");
     if (skill.acceptingNewOrders === false) throw new QuoteUnavailable("sales_paused");
-    // The served contract no longer matches the admitted one: stop selling
-    // this version until a replacement bundle is installed.
+    // The served contract (price included) no longer matches the admitted
+    // one: stop selling this version until a replacement bundle is installed.
     const stop = salesStopFor(outcome.listingManifestHash);
     if (stop) throw new QuoteUnavailable(stop);
+    if (skill.fixedPriceAtomic !== outcome.fixedGrossAmount) {
+      throw new QuoteRefusal("quote", 409, "outcome_policy");
+    }
     const bps = BigInt(outcome.commissionBps);
     if (BigInt(outcome.fixedGrossAmount) < (10_000n + bps - 1n) / bps) {
       throw new QuoteRefusal("quote", 409, "price");

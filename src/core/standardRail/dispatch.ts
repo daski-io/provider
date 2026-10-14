@@ -238,14 +238,12 @@ export class StandardDispatchService {
       const validate = this.validators.get(outcome.listingManifestHash);
       if (!validate) throw new DispatchRejectedError("validator");
       await withDispatchRejection("validator", () => validateProviderRequest(validate, parts.request));
-      // The handler must be installed; only a head must also match the
-      // build's current price (a superseded version keeps its admitted one).
-      const skill = getSkill(outcome.serviceSlug, outcome.skillId);
-      const head = this.config.outcomes.get(outcome.outcomeId) === outcome;
-      if (
-        !getService(outcome.serviceSlug) || !skill
-        || (head && skill.fixedPriceAtomic !== outcome.fixedGrossAmount)
-      ) throw new DispatchRejectedError("outcome_policy");
+      // The handler must be installed. The price is the version's admitted
+      // one, which the provider quote binding has already enforced, even when
+      // the build now sells at another price (contract drift).
+      if (!getService(outcome.serviceSlug) || !getSkill(outcome.serviceSlug, outcome.skillId)) {
+        throw new DispatchRejectedError("outcome_policy");
+      }
       // Synchronous execution during an outage would sign a terminal failure;
       // refusing before admission lets the gateway retry a fresh envelope.
       if (!(await this.ready().catch(() => false))) {

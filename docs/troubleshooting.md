@@ -86,8 +86,10 @@ this build's published skill contract changed after the installed bundle was
 issued. New quotes for that listing version stop with
 `503 {"error":"quote_unavailable","reason":"contract_drift"}`; funded orders,
 status and lifecycle reads keep being serviced with the admitted definition.
-The process stays online so Daski can read the new AgentCard. Request,
-review, and install a replacement bundle; sales resume at the next boot.
+A changed fixed price is such a drift: the head's funded orders are served at
+the admitted price, never refused. The process stays online so Daski can read
+the new AgentCard. Request, review, and install a replacement bundle; sales
+resume at the next boot.
 
 ## PostgreSQL is unreachable
 

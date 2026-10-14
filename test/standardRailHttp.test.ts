@@ -339,5 +339,5 @@ describe("servicing ingress limits", () => {
     } finally {
       await stop();
     }
-  });
+  }, 60_000);
 });

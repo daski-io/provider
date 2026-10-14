@@ -1,9 +1,21 @@
 import type { Hex } from "viem";
 import { config } from "../config.js";
-import { canonicalHash } from "../standardRail/canonical.js";
+import { assertExactKeys, canonicalHash } from "../standardRail/canonical.js";
+import { skillDeadlines } from "../serviceRegistry/deadlines.js";
 import type { ServiceModule, SkillDefinition } from "../serviceRegistry/types.js";
 
 export const DASKI_CONTRACT_EXTENSION_URI = "https://daski.io/a2a/v2";
+
+/**
+ * The gateway parses a published skill contract with exactly these keys
+ * (serviceRegistration/card.ts) and refuses a registration missing any of
+ * them. Every key is part of the skill contract hash.
+ */
+export const PUBLISHED_SKILL_CONTRACT_KEYS = [
+  "inputSchema", "resultSchema", "pricing", "paymentRequired",
+  "requiresAssetOwnership", "assetType", "fulfillmentMode", "purchaseReadiness",
+  "capacity", "deadlines", "assetAction",
+] as const;
 
 export interface PublishedSkillContract {
   skillId: string;
@@ -52,6 +64,8 @@ export function publishedSkillContract(
   skill: SkillDefinition,
   baseUrl: string,
 ): PublishedSkillContract {
+  // `resultSchema` describes the complete completed ServiceResult the
+  // artifact read returns. Lite never gates purchases on payer DNS.
   const contract = {
     inputSchema: skill.inputSchema,
     resultSchema: skill.resultSchema,
@@ -60,10 +74,12 @@ export function publishedSkillContract(
     paymentRequired: BigInt(skill.fixedPriceAtomic) > 0n,
     assetType: null,
     fulfillmentMode: "automated",
+    purchaseReadiness: null,
     capacity: skill.capacity ?? { maxOpenOrders: 10 },
-    deadlines: skill.deadlines ?? { dispatchSeconds: 300, fulfillmentSeconds: 50 },
+    deadlines: skillDeadlines(skill),
     assetAction: null,
   };
+  assertExactKeys(contract, PUBLISHED_SKILL_CONTRACT_KEYS, `skill ${skill.id} contract`);
   const skillContractHash = canonicalHash({
     schemaVersion: 1,
     serviceSlug: service.manifest.slug,

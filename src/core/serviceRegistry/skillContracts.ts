@@ -39,9 +39,10 @@ export const schema = {
   }),
   number: (minimum = 0): ClosedJsonSchema => ({ type: "number", minimum }),
   null: (): ClosedJsonSchema => ({ type: "null" }),
-  array: (items: ClosedJsonSchema, maximum = 128): ClosedJsonSchema => ({
+  array: (items: ClosedJsonSchema, maximum = 128, minimum?: number): ClosedJsonSchema => ({
     type: "array",
     items,
+    ...(minimum === undefined ? {} : { minItems: minimum }),
     maxItems: maximum,
   }),
   object: (

@@ -203,3 +203,13 @@ provider identity/wallet/payee, service/skill/runtime-listing id,
 request/artifact schema, fixed price, capacity, deadline, commission,
 contract/evidence binding, API/MCP operation, or fulfillment guarantee. Request
 one new complete policy/bundle set and retest it on Testnet before promotion.
+
+This release changes every published skill contract: it adds the gateway's
+required `purchaseReadiness: null`, always publishes both deadlines with the
+recoverable defaults `{dispatchSeconds: 300, fulfillmentSeconds: 900}`, and
+corrects the dummy `echo` result schema to the complete result its adapter
+returns (`skillContractHash` `0xdf0ac577…7a1f` becomes `0x4efd0a11…7f17`).
+Every installed listing therefore needs a newly issued runtime bundle through
+the normal review; the importer refuses an old bundle for the new build, and
+a running provider logs listing commitment drift until the new bundle is
+installed. Never edit or re-sign an issued bundle to match.

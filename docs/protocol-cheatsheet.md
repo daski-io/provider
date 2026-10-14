@@ -171,7 +171,10 @@ The following must agree exactly:
 
 - service and skill ids in the installed `ServiceModule`;
 - closed request/result schemas, fixed atomic-USDC price, capacity, and
-  deadlines in the published v2 AgentCard contract;
+  deadlines in the published v2 AgentCard contract, which carries exactly the
+  gateway's keys `inputSchema, resultSchema, pricing, paymentRequired,
+  requiresAssetOwnership, assetType, fulfillmentMode, purchaseReadiness
+  (null), capacity, deadlines, assetAction`;
 - the provider-authorized intent and Daski-signed runtime bundle installed in
   `provider_runtime_listing_versions`;
 - token, payee, splitter/contract provenance, and hashes reproduced from the

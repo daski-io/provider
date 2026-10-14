@@ -92,6 +92,27 @@ The adapter validation must match them. Contract drift changes the
 `skillContractHash` and requires a newly reviewed runtime bundle; it is never
 silently tolerated.
 
+`resultSchema` describes the complete completed `ServiceResult` the adapter
+returns, `{status: "completed", message?, artifacts?}`, not only the data of
+one artifact: the buyer's artifact read returns that whole object, and the
+gateway validates it against the schema frozen in the order. Pin `status` with
+`schema.stringEnum(["completed"])` and describe every artifact field the
+adapter emits; never add a field the adapter does not produce. Failures are
+not described by the schema.
+
+Core publishes every contract with the gateway's full key set, including
+`purchaseReadiness: null` (lite never gates purchases on payer DNS), and
+always publishes both deadlines. The defaults are `{dispatchSeconds: 300,
+fulfillmentSeconds: 900}`. Registration refuses a synchronous skill whose
+`fulfillmentSeconds` is below `dispatchSeconds + 230`: when an initial
+dispatch is lost, the gateway may replace it only after the envelope's
+`validBefore` (`dispatchSeconds`) plus 60 seconds, the replacement then runs
+for up to the 50-second synchronous budget, and core keeps a reviewed
+120-second margin for gateway retry backoff, status polling, transport
+timeouts and clock tolerance. The gateway stops re-dispatching a paid order
+once `fulfillmentSeconds` have passed since it observed the release, so a
+shorter window makes a lost dispatch unrecoverable.
+
 ## 4. Parse service configuration
 
 Add `src/services/<slug>/config.ts` for product variables. Parse them strictly;

@@ -1,3 +1,4 @@
+import { assertSynchronousDeadlines, skillDeadlines } from "./deadlines.js";
 import type {
   FulfillmentAdapter,
   ServiceModule,
@@ -47,6 +48,8 @@ function validateSkill(
   if (!/^[1-9]\d*$/.test(skill.fixedPriceAtomic)) {
     throw new Error(`Skill ${skill.id} must use a positive fixed USDC price`);
   }
+  // Every lite adapter is synchronous; its window must survive one lost dispatch.
+  assertSynchronousDeadlines(`Skill ${module.manifest.slug}/${skill.id}`, skillDeadlines(skill));
   if (!module.docs.skills[skill.id]?.trim()) {
     throw new Error(`Skill ${module.manifest.slug}/${skill.id} is missing documentation`);
   }

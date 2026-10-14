@@ -6,6 +6,10 @@ Returns the submitted `message` in an `echo_result` JSON artifact.
 - Price: 10,000 atomic USDC units (0.01 USDC).
 - Fulfillment: automated, synchronous, one-shot.
 - Result: terminal `completed` or `failed`; no polling or follow-up input.
+- Artifact: the complete completed result, exactly
+  `{"status": "completed", "message": "Echo completed.", "artifacts":
+  [{"name": "echo_result", "mimeType": "application/json", "data":
+  {"message": "<trimmed message>"}}]}`.
 
 This is a protocol example, not a real marketplace product, and cannot run on
 Base mainnet.

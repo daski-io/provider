@@ -86,4 +86,38 @@ describePostgres("runtime bundle importer takeover check", () => {
     process.env.PROVIDER_RETAINED_WALLET_PRIVATE_KEYS = previousKey;
     await expect(assertCandidateServicesObligations(GATEWAY, candidate)).resolves.toBeUndefined();
   });
+
+  it("refuses a candidate that cannot resume an unfinished external job or open its state", async () => {
+    process.env.PROVIDER_RETAINED_WALLET_PRIVATE_KEYS = previousKey;
+    const listing = (await pool.query<{ hash: Buffer }>(
+      `SELECT runtime_commitment_hash AS hash FROM provider_runtime_listing_versions
+        WHERE superseded_at IS NULL`,
+    )).rows[0]!.hash;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO provider_transactions (
+           id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+           service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before
+         ) VALUES ('task-job',$1,'ord_job',decode(repeat('0a',32),'hex'),decode(repeat('0b',32),'hex'),
+           decode(repeat('0c',32),'hex'),'0x1111111111111111111111111111111111111111','dummy','echo',
+           $2,'external_job',now() + interval '5 minutes')`,
+        [GATEWAY, listing],
+      );
+      await client.query(
+        `INSERT INTO provider_external_jobs
+           (task_id,adapter_version,idempotency_key,input_ciphertext,input_key_id,fulfillment_deadline)
+         VALUES ('task-job','v9','00000000-0000-8000-8000-0000000000aa','daski:v1:x','k9',
+           now() + interval '12 hours')`,
+      );
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    // This candidate installs only the synchronous dummy and holds no job key.
+    await expect(assertCandidateServicesObligations(GATEWAY, candidate)).rejects.toThrow(
+      /\(external-job adapter dummy@v9 not installed\), .*\(encryption key k9 not configured\)/,
+    );
+  });
 });

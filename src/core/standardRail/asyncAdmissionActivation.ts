@@ -1,15 +1,17 @@
 import type { Queryable } from "../db/queryable.js";
 import { RUNTIME_SCHEMA_EPOCH, verifyCompatibilityBarrier } from "../db/runtimeEpoch.js";
 import { RUNTIME_TABLE_PRIVILEGES } from "../db/runtimePrivileges.js";
-import { liveRuntimeInstances } from "../runtimeInstance.js";
+import { externalJobServicing } from "../externalJobs/servicing.js";
+import { liveRuntimeInstances, type LiveRuntimeInstance } from "../runtimeInstance.js";
 import type { FieldEncryptionKeyRing } from "../security/fieldEncryption.js";
+import { getAllServices } from "../serviceRegistry/registry.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { countLegacyExecutions } from "./legacyCutover.js";
 import { verifyRetainedObligations } from "./retainedObligations.js";
 
 export interface ActivationCheck {
   name: "compatibility_barrier" | "legacy_executions" | "retained_obligations" | "compatible_workers"
-    | "encryption_keys";
+    | "encryption_keys" | "external_job_services";
   ok: boolean;
   detail: string;
 }
@@ -26,9 +28,10 @@ const outcome = async (name: ActivationCheck["name"], work: () => Promise<string
  * Everything async admission requires, checked read-only: the legacy-process
  * barrier is installed at this build's epoch (so no pre-R1 process can run),
  * no pre-R1 execution awaits the cutover, this build can service every
- * retained obligation with its handlers and keys, every running instance
- * is a compatible external-job worker (at least one), and an active key can
- * seal new jobs' input.
+ * retained obligation with its handlers and keys (unfinished external jobs
+ * included), every running instance is a compatible external-job worker (at
+ * least one) that declares every adapter version new sales or unfinished
+ * jobs need, and an active key can seal new jobs' input.
  */
 export async function asyncActivationChecks(
   db: Queryable,
@@ -46,7 +49,7 @@ export async function asyncActivationChecks(
       return "none";
     }),
     await outcome("retained_obligations", async () => {
-      await verifyRetainedObligations(db, config);
+      await verifyRetainedObligations(db, config, externalJobServicing(getAllServices(), keys));
       return "serviceable";
     }),
     await outcome("compatible_workers", async () => {
@@ -63,7 +66,40 @@ export async function asyncActivationChecks(
       if (!keys.activeKeyId) throw new Error("PROVIDER_DATA_ENCRYPTION_KEY is not configured");
       return `active key ${keys.activeKeyId}`;
     }),
+    await outcome("external_job_services", async () => {
+      const required = await requiredAdapterVersions(db);
+      const live = await liveRuntimeInstances(db);
+      const lacking = live.filter((instance) => [...required].some(([slug, versions]) =>
+        [...versions].some((version) => !declaredVersions(instance, slug).includes(version))));
+      if (lacking.length > 0) {
+        throw new Error(`${lacking.length} running instances cannot resume every required external-job adapter version`);
+      }
+      const count = [...required.values()].reduce((sum, versions) => sum + versions.size, 0);
+      return count === 0 ? "no external-job adapter versions required" : `${count} adapter versions on every instance`;
+    }),
   ];
+}
+
+/** New sales' current external-job adapter versions and those unfinished jobs were admitted under. */
+async function requiredAdapterVersions(db: Queryable): Promise<Map<string, Set<string>>> {
+  const required = new Map<string, Set<string>>();
+  const add = (slug: string, version: string) => required.set(slug, (required.get(slug) ?? new Set()).add(version));
+  for (const service of getAllServices()) {
+    if (service.adapter.mode === "external-job") add(service.manifest.slug, service.adapter.version);
+  }
+  const open = await db.query<{ slug: string; version: string }>(
+    `SELECT DISTINCT t.service_slug AS slug, j.adapter_version AS version
+       FROM provider_external_jobs j JOIN provider_transactions t ON t.id=j.task_id
+      WHERE j.phase IN ('queued','starting','reconciling','polling')`,
+  );
+  for (const row of open.rows) add(row.slug, row.version);
+  return required;
+}
+
+function declaredVersions(instance: LiveRuntimeInstance, slug: string): unknown[] {
+  const declared = instance.capabilities.externalJobAdapters as Record<string, unknown> | undefined;
+  const versions = declared && typeof declared === "object" ? declared[slug] : undefined;
+  return Array.isArray(versions) ? versions : [];
 }
 
 /**

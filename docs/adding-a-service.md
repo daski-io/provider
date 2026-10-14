@@ -54,6 +54,13 @@ running worker in the process; otherwise they answer `503 quote_unavailable`
 (`external_jobs_unavailable`). The worker then calls the adapter as
 `docs/architecture.md` describes.
 
+A job is always resumed by the adapter version that admitted it. When a new
+version changes how job references are interpreted, give it a new `version`
+and keep the old adapter in `previousExternalJobAdapters` (keyed by its own
+version) until its jobs finish; boot refuses a build that dropped a version
+an unfinished job needs. A mapper fix that keeps the reference format keeps
+its version.
+
 The adapter contract is intentionally terminal:
 
 ```ts

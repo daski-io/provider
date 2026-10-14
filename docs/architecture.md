@@ -230,9 +230,19 @@ job. Core admits the funded order (above), then the worker in
   encrypted candidate and a stable `result_diagnostic`, and only retrieval
   continues (an immediate terminal start reconciles through its original
   key).
-- **Restart.** Nothing is resubmitted because a process restarted: the
-  worker resumes due and abandoned work from PostgreSQL in its persisted
-  phase, with the adapter version that admitted it.
+- **Restart and upgrade.** Nothing is resubmitted because a process
+  restarted: the worker resumes due and abandoned work from PostgreSQL in its
+  persisted phase, with the adapter version that admitted it (the current
+  adapter or one retained in `previousExternalJobAdapters`, never code named
+  by the database), the result contract its listing version was admitted
+  with, and the key its stored state names. Boot, the importer and
+  activation refuse a build that cannot resume every unfinished job (its
+  version's definition, its adapter version, its encryption keys), so an
+  incompatible build cannot take one over. Each process declares the adapter
+  versions it resumes in its heartbeat, and activation requires every running
+  instance to declare every version new sales or unfinished jobs need, so
+  compatible R1 processes may overlap while the fences keep each call
+  single.
 
 ## Execution ownership and why one replica
 

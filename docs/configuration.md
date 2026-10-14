@@ -180,10 +180,12 @@ npm run daski:async-admission -- --deactivate    # turn it off; admitted work is
 Activation locks the switch and, in the same transaction, requires the
 legacy-process barrier at this build's schema epoch (so no pre-R1 process can
 run), no pre-R1 execution awaiting the cutover, every retained obligation
-serviceable with this build's handlers and keys, at least one running
-instance with every running instance (fresh heartbeat in
-`provider_runtime_instances`) a compatible external-job worker, and an active
-`PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`). It records the checks as
+serviceable with this build's handlers and keys (unfinished external jobs
+included), at least one running instance with every running instance (fresh
+heartbeat in `provider_runtime_instances`) a compatible external-job worker,
+an active `PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`), and every
+running instance declaring every external-job adapter version new sales or
+unfinished jobs need (`external_job_services`). It records the checks as
 evidence. Every process of this build runs the worker, so stop older
 processes before activating. The command never migrates.
 
@@ -221,10 +223,15 @@ audience its checkout snapshot named, so:
   (the standard-rail paths themselves never change); and
 - keep every retained version's service and skill installed while its quotes
   may still be dispatched: up to the quote's window plus the version's
-  fulfillment window plus 30 days.
+  fulfillment window plus 30 days; and
+- keep, while any unfinished external job needs them, the adapter version
+  that admitted it (as the current adapter or in
+  `previousExternalJobAdapters`) and every encryption key id its stored
+  state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation).
 
 Boot and the importer verify this for every obligation (claims of any state,
-and quotes that may still be dispatched) and refuse with
+quotes that may still be dispatched, and unfinished external jobs) and refuse
+with
 `retained listing obligations are not serviceable by this build` otherwise,
 so an incompatible build cannot take over. Paused sales never block servicing.
 

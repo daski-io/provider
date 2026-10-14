@@ -36,6 +36,8 @@ import {
   loadListingObligations,
 } from "./core/standardRail/retainedObligations.js";
 import { buildServicingCatalog } from "./core/standardRail/servicingCatalog.js";
+import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
+import { externalJobServicing } from "./core/externalJobs/servicing.js";
 import type { SignedEnvelope } from "./core/standardRail/types.js";
 import { redactSensitiveText } from "./core/security/redaction.js";
 import { configuredServices } from "./providerServices.js";
@@ -400,6 +402,10 @@ export async function assertCandidateServicesObligations(
     catalog,
     obligations: await loadListingObligations(migrationPool, candidate.gatewayAudience, catalog),
     signingWallets: new Set([current, ...retained.keys()]),
+    externalJobs: externalJobServicing(
+      configuredServices(config.CHAIN_ID),
+      externalJobKeyRing(config, retained.values()),
+    ),
   });
 }
 

@@ -16,6 +16,8 @@ export interface RuntimeCapabilities {
   syncExecutionLeases: boolean;
   /** Runs the durable external-job worker (src/core/externalJobs/worker.ts). */
   externalJobWorker: boolean;
+  /** The external-job adapter versions it resumes, per service. */
+  externalJobAdapters?: Record<string, string[]>;
 }
 
 export const BUILD_CAPABILITIES: Readonly<RuntimeCapabilities> = {

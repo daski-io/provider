@@ -1,0 +1,146 @@
+import { randomUUID } from "node:crypto";
+import type { Hex } from "viem";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
+
+const target = vi.hoisted(() => {
+  const name = `lite_job_upgrade_${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+  if (process.env.DATABASE_URL_TEST) {
+    const url = new URL(process.env.DATABASE_URL_TEST);
+    url.pathname = `/${name}`;
+    process.env.DATABASE_URL = url.toString();
+  }
+  return { name };
+});
+
+import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
+import { externalJobServicing } from "../src/core/externalJobs/servicing.js";
+import { ExternalJobWorker } from "../src/core/externalJobs/worker.js";
+import { parseFieldEncryptionKeys } from "../src/core/security/fieldEncryption.js";
+import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
+import { ResultContracts } from "../src/core/standardRail/resultContracts.js";
+import {
+  assertObligationsServiceable,
+  loadListingObligations,
+  type ExternalJobServicing,
+} from "../src/core/standardRail/retainedObligations.js";
+import { echoCompleted, startJobHarness, TEST_WORKER_SETTINGS, type JobHarness } from "./externalJobHarness.js";
+import { jobKeys, jobService, scriptedAdapter } from "./externalJobFixture.js";
+import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
+import { echoResultSchema } from "./standardRailOutcomeFixture.js";
+
+const rotated = () => parseFieldEncryptionKeys({
+  activeKey: `0x${"b2".repeat(32)}`, activeKeyId: "k2", previousKeys: `k1=0x${"a1".repeat(32)}`,
+});
+
+// L07/L-T10 against PostgreSQL: an upgrade keeps resuming each job with the
+// adapter version, admitted result contract and keys it was admitted under,
+// and a build missing any of them cannot take the jobs over.
+describePostgres("external jobs across upgrades against PostgreSQL", () => {
+  let database: DisposableDatabase;
+  let h: JobHarness | null = null;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase("lite_job_upgrade", undefined, target.name);
+    await runMigrations();
+    await closeMigrationPool();
+  });
+
+  afterEach(async () => {
+    await h?.close();
+    h = null;
+  });
+
+  afterAll(async () => {
+    await Promise.race([
+      pool.end().catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+    await database?.drop();
+  });
+
+  const worker = (harness: JobHarness, keys = jobKeys(), contracts = new ResultContracts(harness.rail.config)) =>
+    new ExternalJobWorker({ owner: randomUUID(), settings: TEST_WORKER_SETTINGS, keys, resultContracts: contracts, random: () => 0.5 });
+
+  it("resumes a job with the adapter version that admitted it while new sales use the next", async () => {
+    h = await startJobHarness({ version: "v1" });
+    const harness = h;
+    const v1 = harness.adapter;
+    v1.onStart = async () => ({ kind: "accepted", job: { v1Ticket: "t-1" } });
+    const old = await harness.admit();
+    await harness.round();
+    // The upgraded build sells with v2 and retains v1 for the jobs it admitted.
+    const v2 = scriptedAdapter("v2");
+    v2.onStart = async () => ({ kind: "accepted", job: { v2Handle: { id: "h-2" } } });
+    clearServicesForTests();
+    registerService(jobService(v2, { previousExternalJobAdapters: { v1 } }));
+    v1.onPoll = async (_context, job) => job.v1Ticket === "t-1"
+      ? { kind: "terminal", result: echoCompleted }
+      : { kind: "retry", issue: { code: "invalid_response" } };
+    await harness.due(old.taskId);
+    await harness.round(worker(harness));
+    expect(await harness.claim(old.taskId)).toMatchObject({ state: "completed", result: echoCompleted });
+    expect(v1.calls.map((entry) => entry.method)).toEqual(["start", "poll"]);
+    const fresh = await harness.admit();
+    expect((await harness.job(fresh.taskId)).adapter_version).toBe("v2");
+    await harness.round(worker(harness));
+    expect(v2.calls.map((entry) => [entry.method, entry.context.taskId])).toEqual([["start", fresh.taskId]]);
+    // A build that dropped v1 could not have taken the old job over.
+    expect(await harness.round(worker(harness))).toBe(0);
+  });
+
+  it("validates a late result against the contract its listing version was sold under", async () => {
+    h = await startJobHarness();
+    const harness = h;
+    const job = await harness.admit();
+    await harness.round();
+    // A newer head admits only short messages; the old version's orders keep theirs.
+    const strict = echoResultSchema();
+    (strict.properties as Record<string, Record<string, unknown>>).message!.maxLength = 3;
+    const newHead = { ...harness.rail.outcome, listingManifestHash: `0x${"5e".repeat(32)}` as Hex, resultSchema: strict };
+    const contracts = new ResultContracts({ servicing: new Map([
+      [harness.rail.outcome.listingManifestHash, harness.rail.outcome], [newHead.listingManifestHash, newHead],
+    ]) });
+    harness.adapter.onPoll = async () => ({ kind: "terminal", result: echoCompleted });
+    await harness.due(job.taskId);
+    await harness.round(worker(harness, jobKeys(), contracts));
+    expect(await harness.claim(job.taskId)).toMatchObject({ state: "completed", result: echoCompleted });
+  });
+
+  it("opens a job sealed before a key rotation, and refuses to take it over without that key", async () => {
+    h = await startJobHarness({ version: "v1" });
+    const harness = h;
+    const job = await harness.admit();
+    await harness.round();
+    const module = jobService(harness.adapter);
+    const keys = rotated();
+    const servicing = (services = [module], ring = keys) => externalJobServicing(services, ring);
+    // The takeover check boot, the importer and activation run, scoped to
+    // this suite's listing version.
+    const config = harness.rail.config;
+    const takeover = async (externalJobs: ExternalJobServicing, catalog = config) => {
+      const all = await loadListingObligations(pool, config.gatewayAudience, catalog);
+      assertObligationsServiceable({
+        catalog,
+        obligations: new Map([...all].filter(([hash]) => hash === harness.rail.outcome.listingManifestHash)),
+        signingWallets: new Set([config.terminalAttestationKey]),
+        externalJobs,
+      });
+    };
+    await expect(takeover(servicing())).resolves.toBeUndefined();
+    await expect(takeover(servicing([module],
+      parseFieldEncryptionKeys({ activeKey: `0x${"b2".repeat(32)}`, activeKeyId: "k2", previousKeys: "" }))))
+      .rejects.toThrow(/\(encryption key k1 not configured\)/);
+    await expect(takeover(servicing([jobService(scriptedAdapter("v2"))])))
+      .rejects.toThrow(/\(external-job adapter dummy@v1 not installed\)/);
+    await expect(takeover(servicing(), { ...config, servicing: new Map() }))
+      .rejects.toThrow(/\(definition_unavailable\)/);
+    // The rotated build opens the old reference and seals new state with k2.
+    harness.adapter.onPoll = async (_context, reference) => (reference.jobId === "job-1"
+      ? { kind: "terminal", result: echoCompleted } : { kind: "retry", issue: { code: "invalid_response" } });
+    await harness.due(job.taskId);
+    await harness.round(worker(harness, keys));
+    expect(await harness.claim(job.taskId)).toMatchObject({ state: "completed" });
+    // Finished jobs keep no encrypted state, so no key is needed for them.
+    await expect(takeover(servicing([module], jobKeys("c3", "k3")))).resolves.toBeUndefined();
+  });
+});

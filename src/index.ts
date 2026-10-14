@@ -5,9 +5,10 @@ import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
+import { declaredExternalJobAdapters, externalJobServicing } from "./core/externalJobs/servicing.js";
 import { workerSettingsFromConfig } from "./core/externalJobs/settings.js";
 import { ExternalJobWorker } from "./core/externalJobs/worker.js";
-import { registerRuntimeInstance, RUNTIME_INSTANCE_ID } from "./core/runtimeInstance.js";
+import { BUILD_CAPABILITIES, registerRuntimeInstance, RUNTIME_INSTANCE_ID } from "./core/runtimeInstance.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
 import { startServer, stopServer } from "./core/server.js";
@@ -49,10 +50,13 @@ async function main(): Promise<void> {
     { warn: (message) => logWarn(message) },
   );
   assertCatalogComposition(standard);
+  const jobKeys = externalJobKeyRing(config, standard.retainedSigningKeys.values());
   // An incompatible build cannot take over: every claim's listing version
-  // needs its signing key, and every version whose quotes may still be
-  // dispatched needs its admitted definition and handler.
-  await verifyRetainedObligations(pool, standard);
+  // needs its signing key, every version whose quotes may still be
+  // dispatched needs its admitted definition and handler, and every
+  // unfinished external job needs its definition, its adapter version and
+  // the keys its stored state names.
+  await verifyRetainedObligations(pool, standard, externalJobServicing(services, jobKeys));
   await pruneQuotes(standard);
   await closeMigrationPool();
   await stopSalesOnCommitmentDrift({
@@ -61,7 +65,10 @@ async function main(): Promise<void> {
     services,
   });
 
-  stopInstance = await registerRuntimeInstance(pool, config.DEPLOYMENT_REVISION ?? "unknown");
+  stopInstance = await registerRuntimeInstance(pool, config.DEPLOYMENT_REVISION ?? "unknown", {
+    ...BUILD_CAPABILITIES,
+    externalJobAdapters: declaredExternalJobAdapters(services),
+  });
   // Only executions whose lease expired are failed; another process's live
   // call is never swept. Pre-R1 rows wait for the operator's cutover.
   stopLeases = await startSyncLeaseSweeper();
@@ -84,7 +91,7 @@ async function main(): Promise<void> {
   worker = new ExternalJobWorker({
     owner: RUNTIME_INSTANCE_ID,
     settings: workerSettingsFromConfig(config),
-    keys: externalJobKeyRing(config, standard.retainedSigningKeys.values()),
+    keys: jobKeys,
     resultContracts: new ResultContracts(standard),
   });
   worker.start();

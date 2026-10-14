@@ -95,6 +95,32 @@ describePostgres("database-backed async-admission switch", () => {
     expect(modules.instances.BUILD_CAPABILITIES.externalJobWorker).toBe(true);
   });
 
+  it("refuses while a running instance cannot resume an adapter version new sales need", async () => {
+    const registry = await import("../src/core/serviceRegistry/registry.js");
+    const fixture = await import("./externalJobFixture.js");
+    registry.clearServicesForTests();
+    registry.registerService(fixture.jobService(fixture.scriptedAdapter("v7")));
+    try {
+      await worker("00000000-0000-4000-8000-0000000000e1", {
+        syncExecutionLeases: true, externalJobWorker: true, externalJobAdapters: { dummy: ["v6"] },
+      });
+      const refused = await activate();
+      expect(failed(refused.checks)).toEqual(["external_job_services"]);
+      expect(refused.checks.find((check) => check.name === "external_job_services")?.detail)
+        .toBe("1 running instances cannot resume every required external-job adapter version");
+      await owner.query("UPDATE provider_runtime_instances SET stopped_at=now() WHERE stopped_at IS NULL");
+      await worker("00000000-0000-4000-8000-0000000000e2", {
+        syncExecutionLeases: true, externalJobWorker: true, externalJobAdapters: { dummy: ["v6", "v7"] },
+      });
+      const accepted = await activate();
+      expect(accepted.checks.find((check) => check.name === "external_job_services"))
+        .toMatchObject({ ok: true, detail: "1 adapter versions on every instance" });
+      await modules.activation.deactivateAsyncAdmission(modules.pool.migrationPool);
+    } finally {
+      registry.clearServicesForTests();
+    }
+  });
+
   it("refuses without an active encryption key to seal new jobs", async () => {
     await worker("00000000-0000-4000-8000-0000000000d1", { syncExecutionLeases: true, externalJobWorker: true });
     const result = await activate({ activeKeyId: null, keys: new Map() });
@@ -143,6 +169,7 @@ describePostgres("database-backed async-admission switch", () => {
     expect(row.evidence.checks.map((check: { name: string; ok: boolean }) => [check.name, check.ok])).toEqual([
       ["compatibility_barrier", true], ["legacy_executions", true],
       ["retained_obligations", true], ["compatible_workers", true], ["encryption_keys", true],
+      ["external_job_services", true],
     ]);
     await modules.activation.deactivateAsyncAdmission(modules.pool.migrationPool);
     await expect(modules.admission.readAsyncAdmission(modules.pool.pool)).resolves.toMatchObject({ enabled: false });

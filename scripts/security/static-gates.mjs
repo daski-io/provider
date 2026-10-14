@@ -177,7 +177,7 @@ for (const path of [
 const REVIEWED_EXTERNAL_JOB_MODULES = [
   "admission.ts", "calls.ts", "idempotency.ts", "jobClaims.ts", "jobCodec.ts", "jobStep.ts",
   "jobTransitions.ts", "journalHandoff.ts", "keyRing.ts", "outcomes.ts", "phases.ts", "runtime.ts", "sales.ts",
-  "scheduling.ts", "settings.ts", "stepSupport.ts", "worker.ts",
+  "scheduling.ts", "servicing.ts", "settings.ts", "stepSupport.ts", "worker.ts",
 ].map((name) => `src/core/externalJobs/${name}`);
 const externalJobModules = files(join(root, "src/core/externalJobs")).map(projectPath).sort();
 if (JSON.stringify(externalJobModules) !== JSON.stringify([...REVIEWED_EXTERNAL_JOB_MODULES].sort())) {

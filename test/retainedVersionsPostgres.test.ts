@@ -17,6 +17,9 @@ import { clearServicesForTests, registerService } from "../src/core/serviceRegis
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
 import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/salesStops.js";
 import { verifyRetainedObligations } from "../src/core/standardRail/retainedObligations.js";
+
+/** This suite's builds serve no external-job service and hold no job key. */
+const NO_EXTERNAL_JOBS = { adapterVersions: () => new Set<string>(), keyIds: new Set<string>() };
 import { json, startRailHarness, type RailHarness } from "./dispatchHarness.js";
 import { acceptLifecycleAnswerAsGateway, gatewayLifecycleCall, LIFECYCLE_HEADERS } from "./gatewayLifecycleWire.js";
 import { dispatchOrder, quoteOrder, type GatewayOrder } from "./gatewayOrderFixture.js";
@@ -165,9 +168,9 @@ describePostgres("retained listing versions against PostgreSQL", () => {
     rail = await startRailHarness({ retained: { versions: [v1] } });
     const status = await rail.status(order.orderId, dispatched.dispatchHash);
     expect([status.status, status.text]).toEqual([503, ""]);
-    await expect(verifyRetainedObligations(pool, rail.config))
+    await expect(verifyRetainedObligations(pool, rail.config, NO_EXTERNAL_JOBS))
       .rejects.toThrow(/obligations are not serviceable by this build: 0xa1a1a1a1…a1a1 \(signing key not retained\)/);
-    await expect(verifyRetainedObligations(pool, railConfig([railOutcome()], retained))).resolves.toBeUndefined();
+    await expect(verifyRetainedObligations(pool, railConfig([railOutcome()], retained), NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
   it("refuses to boot while quotes of an unserviceable version may still be dispatched", async () => {
@@ -179,15 +182,15 @@ describePostgres("retained listing versions against PostgreSQL", () => {
       [nowSeconds()],
     );
     const config = railConfig([railOutcome()], retained);
-    await expect(verifyRetainedObligations(pool, config))
+    await expect(verifyRetainedObligations(pool, config, NO_EXTERNAL_JOBS))
       .rejects.toThrow(/0xb2b2b2b2…b2b2 \(listing version not installed\)/);
     const known = { ...config, listingWallets: new Map([...config.listingWallets, [`0x${"b2".repeat(32)}` as Hex, previousWallet]]) };
     await expect(verifyRetainedObligations(pool, {
       ...known, unserviceable: new Map([[`0x${"b2".repeat(32)}` as Hex, "skill_not_installed" as const]]),
-    })).rejects.toThrow(/0xb2b2b2b2…b2b2 \(skill_not_installed\)/);
+    }, NO_EXTERNAL_JOBS)).rejects.toThrow(/0xb2b2b2b2…b2b2 \(skill_not_installed\)/);
     // A quote past every possible dispatch window owes nothing.
     await pool.query("UPDATE provider_quotes SET issued_at=1000, valid_before=1120 WHERE listing_manifest_hash=decode(repeat('b2',32),'hex')");
-    await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
+    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
     // A quote's recorded retention decides, even for an unknown version.
     const recorded = (byte: string, retainUntil: string) => pool.query(
       `INSERT INTO provider_quotes
@@ -197,12 +200,12 @@ describePostgres("retained listing versions against PostgreSQL", () => {
       [byte, nowSeconds()],
     );
     await recorded("c1", "now() - interval '1 second'");
-    await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
+    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
     await recorded("c3", "now() + interval '1 day'");
-    await expect(verifyRetainedObligations(pool, known))
+    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS))
       .rejects.toThrow(/0xc2c2c2c2…c2c2 \(listing version not installed\)/);
     await pool.query("UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=decode(repeat('c3',32),'hex')");
-    await expect(verifyRetainedObligations(pool, known)).resolves.toBeUndefined();
+    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
   it("keeps serving reads while new sales are paused", async () => {

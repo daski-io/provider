@@ -107,13 +107,16 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
   const snapshotOf = (recorded: string, ignore: string[]) => recorded.split("\n")
     .filter((line) => !ignore.some((table) => line.startsWith(`${table}:`))).join("\n");
 
-  const env = (database: DisposableDatabase, principals: "owner" | "separate" | "superuser") => ({
+  type Layout = "owner" | "separate" | "superuser" | "superuser-migrator";
+  const env = (database: DisposableDatabase, principals: Layout) => ({
     ...baseEnv,
     DATABASE_URL: principals === "superuser" ? databaseUrl(database.name)
       : databaseUrl(database.name, principals === "owner" ? migrator : runtime),
     ...(principals === "separate" ? { MIGRATION_DATABASE_URL: databaseUrl(database.name, migrator) } : {}),
+    // A layout neither image accepts: both refuse a superuser migrator.
+    ...(principals === "superuser-migrator" ? { MIGRATION_DATABASE_URL: databaseUrl(database.name) } : {}),
   });
-  const legacyBoot = (database: DisposableDatabase, principals: "owner" | "separate" | "superuser") =>
+  const legacyBoot = (database: DisposableDatabase, principals: Layout) =>
     run(["dist/bootstrap.js"], legacyRoot!, env(database, principals));
   const r1Boot = (database: DisposableDatabase) =>
     run(["--import=tsx", "src/bootstrap.ts"], process.cwd(), env(database, "separate"));
@@ -237,7 +240,7 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     await migrator?.drop();
   });
 
-  it("cannot boot under any principal layout, and changes no row or grant", async () => {
+  it("cannot boot as single owner, separate principals or superuser, and changes no row or grant", async () => {
     const database = await upgradedDatabase(true);
     const before = await snapshot(database);
     for (const principals of ["owner", "separate", "superuser"] as const) {
@@ -309,7 +312,7 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     expect(await snapshot(database)).toBe(before);
   }, 180_000);
 
-  it("its privilege-reset routine, run outside its boot path, rewrites only grants that R1 restores", async () => {
+  it("its privilege reset, outside its boot path or under a refused layout, changes only grants R1 restores", async () => {
     const database = await upgradedDatabase(false);
     const before = await snapshot(database);
     const script = `
@@ -328,5 +331,30 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
     expect(restored.served, restored.logs).toBe(true);
     const instances = ["provider_runtime_instances"];
     expect(await snapshot(database, instances)).toBe(snapshotOf(before, instances));
+
+    // A superuser migration principal (a layout both images refuse) bypasses
+    // the ledger's row security, so the old boot reaches its privilege reset
+    // before its own role check refuses. It changes no row, but it also hands
+    // the schema to that superuser, so R1 fails closed until the operator
+    // restores ownership; R1's next boot then restores the reviewed grants.
+    const recorded = await snapshot(database, instances);
+    const refused = await legacyBoot(database, "superuser-migrator");
+    expect(refused.served).toBe(false);
+    expect(refused.logs).toContain("migration database principal has cluster-wide privileges");
+    const reset = await snapshot(database, instances);
+    expect(rows(reset)).toBe(rows(recorded));
+    expect(reset).not.toBe(recorded);
+    const blocked = await r1Boot(database);
+    expect(blocked.served).toBe(false);
+    expect(blocked.logs).toContain("Startup failed: permission denied for schema");
+    await admin(database, async (client) => {
+      const superuser = (await client.query<{ user: string }>("SELECT current_user AS user")).rows[0]!.user;
+      await client.query(`ALTER SCHEMA public OWNER TO "${migrator.name}"`);
+      await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE "${superuser}" IN SCHEMA public
+        REVOKE ALL ON TABLES FROM "${runtime.name}"`);
+    });
+    expect((await r1Boot(database)).served).toBe(true);
+    expect(rows(await snapshot(database, instances))).toBe(rows(recorded));
+    expect(await snapshot(database, instances)).toBe(recorded);
   }, 180_000);
 });

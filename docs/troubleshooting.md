@@ -109,6 +109,13 @@ password error, untrusted certificate name, blocked egress, or wrong role.
 Keep `verify-full`; repair the certificate/hostname. The migration principal
 must own/create schema objects; the runtime principal must not.
 
+`permission denied for schema ...` at boot after a pre-R1 image was started
+with a superuser migration URL means its privilege reset took over the
+schema. As a superuser, run `ALTER SCHEMA <schema> OWNER TO <migration
+principal>` and `ALTER DEFAULT PRIVILEGES FOR ROLE <that superuser> IN SCHEMA
+<schema> REVOKE ALL ON TABLES FROM <runtime principal>`, then restart this
+build, which reapplies the reviewed grants. No provider row was changed.
+
 `permission denied for table ...` under separate principals means the runtime
 role is missing a reviewed grant. Boot reapplies the allowlist in
 `src/core/db/runtimePrivileges.ts` through `MIGRATION_DATABASE_URL`; confirm

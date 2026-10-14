@@ -68,6 +68,8 @@ git worktree remove --force /tmp/provider-pre-r1
 It proves the old image boots on its own database (the control), then that
 after an R1 boot it cannot boot under a single owner, separate principals or a
 superuser, fails its startup sweep even with no executing row, cannot change
-rows from code that was already running, and that its privilege-reset routine,
-outside its boot path, changes only grants that the next R1 boot restores.
-Record the run with the release evidence.
+rows from code that was already running, and that its privilege reset, run
+outside its boot path or by an old boot under a superuser migration URL (a
+layout both images refuse), changes only grants (and, for the superuser, the
+schema owner), never a row, which R1 restores after the documented
+remediation. Record the run with the release evidence.

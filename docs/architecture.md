@@ -230,10 +230,15 @@ database credential holder: any session may declare the marker. The actual
 pre-R1 compiled image is qualified against it in
 `test/legacyImageBarrierPostgres.test.ts` (see `docs/releasing.md`): it cannot
 boot under a single owner, separate principals or a superuser, and cannot
-change a row from code that was already running. Its privilege-reset routine
-can still rewrite grants if invoked outside its boot path (no in-database
-control can stop a schema owner's GRANT/REVOKE); that changes no row, makes
-this build fail closed, and is restored by this build's next boot.
+change a row from code that was already running. No in-database control can
+stop a schema owner's GRANT/REVOKE, so the old privilege-reset routine can
+still rewrite grants when run outside its boot path, or by an old boot under
+a layout both images refuse (a superuser or BYPASSRLS migration principal,
+which bypasses the ledger's row security; that old boot refuses the layout
+only after resetting). Neither changes a row, and this build fails closed
+meanwhile. Its next boot restores the reviewed grants, except that a reset
+run by a superuser also takes over the schema, which the operator must hand
+back first (`docs/troubleshooting.md`).
 
 ## Network and process boundary
 

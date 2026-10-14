@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseConfig } from "../src/core/config.js";
+import { parseConfig, parsePayerAccountTypes } from "../src/core/config.js";
 
 function environment(): NodeJS.ProcessEnv {
   return {
@@ -31,7 +31,21 @@ describe("configuration security", () => {
       CHAIN_ID: 84532,
       DATABASE_POOL_MAX: 10,
       EDGE_RATE_LIMIT_VERIFIED: false,
+      PAYER_ACCOUNT_TYPES: "eoa",
+      PAYER_SIGNATURE_VERIFY_TIMEOUT_MS: 5_000,
     });
+  });
+
+  it("admits contract payers only alongside the offline EOA path", () => {
+    expect(parseConfig({ ...environment(), PAYER_ACCOUNT_TYPES: "eoa, contract" }).PAYER_ACCOUNT_TYPES)
+      .toBe("eoa, contract");
+    expect([...parsePayerAccountTypes("contract,eoa")].sort()).toEqual(["contract", "eoa"]);
+    for (const types of ["contract", "eoa,smart", "", ","]) {
+      expect(() => parseConfig({ ...environment(), PAYER_ACCOUNT_TYPES: types }), types)
+        .toThrow(/PAYER_ACCOUNT_TYPES/);
+    }
+    expect(() => parseConfig({ ...environment(), PAYER_SIGNATURE_VERIFY_TIMEOUT_MS: "100" }))
+      .toThrow(/PAYER_SIGNATURE_VERIFY_TIMEOUT_MS/);
   });
 
   it("requires verified TLS and a separate migration principal in production", () => {

@@ -107,9 +107,13 @@ and evidence bindings during onboarding.
    atomically claims the order in PostgreSQL before the envelope expires.
 5. Your adapter maps the skill to one reviewed API endpoint or MCP tool and
    returns `completed` or `failed` within 50 seconds.
-6. Core persists the terminal result and returns a provider-signed snapshot
-   with a terminal attestation. Exact replays and status reads receive the
-   same durable result, freshly observed and re-signed.
+6. Core validates the result against the listing's admitted result schema,
+   freezes it with its hash, and returns a provider-signed snapshot with a
+   terminal attestation. Exact replays and status reads receive the same
+   durable result, freshly observed and re-signed.
+7. The buyer reads status and the artifact through the gateway's signed
+   lifecycle call; the artifact is the frozen result itself. Follow-up input,
+   cancellation and support are answered as unsupported.
 
 If an external mutation can time out ambiguously and cannot be reconciled
 within that same execution window, use `provider-full`. Never guess whether an

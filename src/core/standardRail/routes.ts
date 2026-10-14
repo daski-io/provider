@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { base, baseSepolia } from "viem/chains";
 import type { Config } from "../config.js";
 import { logError, logWarn } from "../logger.js";
-import { respondAmbiguously } from "../security/servicingIngress.js";
+import { respondAmbiguously, respondLifecycleUnavailable } from "../security/servicingIngress.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { StandardDispatchService, type DispatchDependencies } from "./dispatch.js";
 import {
@@ -11,6 +11,8 @@ import {
   DispatchStatusRejectedError,
   type DispatchRejectionReason,
 } from "./dispatchErrors.js";
+import { StandardLifecycleService, type LifecycleDependencies } from "./lifecycle.js";
+import { LifecycleRefusal, LifecycleRejectedError } from "./lifecycleErrors.js";
 import { StandardQuoteService } from "./quote.js";
 import { boundedRefusalBody, QuoteRefusal, QuoteUnavailable } from "./quoteErrors.js";
 
@@ -37,6 +39,7 @@ export function createStandardRailRouter(
   options: {
     recordServicingFailure?: (req: Request) => void;
     dispatch?: DispatchDependencies;
+    lifecycle?: LifecycleDependencies;
   } = {},
 ): Router {
   const dispatch = new StandardDispatchService(
@@ -45,6 +48,10 @@ export function createStandardRailRouter(
     core.CHAIN_ID,
     options.dispatch,
   );
+  const lifecycle = new StandardLifecycleService(config, core.CHAIN_ID, {
+    signer: options.dispatch?.signer,
+    ...options.lifecycle,
+  });
   const quotes = new StandardQuoteService(config, core.CHAIN_ID);
   const recordFailure = options.recordServicingFailure ?? (() => undefined);
   const router = Router();
@@ -140,6 +147,31 @@ export function createStandardRailRouter(
         causeClass: causeClass(error),
       });
       respondAmbiguously(res);
+    }
+  });
+
+  // G02: only the named refusals reach the buyer, each with exactly one key;
+  // anything that could not be decided is lifecycle_unavailable, never a 500.
+  router.post("/lifecycle", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      res.json(await lifecycle.handle(req.body));
+    } catch (error) {
+      if (error instanceof LifecycleRefusal) {
+        res.status(409).json({ error: error.code });
+        return;
+      }
+      if (error instanceof LifecycleRejectedError) {
+        if (!error.authenticated) recordFailure(req);
+        logWarn("Lifecycle call rejected", { reason: error.reason });
+        res.status(error.status).json({ error: "lifecycle_rejected", reason: error.reason });
+        return;
+      }
+      logError("Lifecycle call answered unavailable", {
+        errorClass: errorClass(error),
+        causeClass: causeClass(error),
+      });
+      respondLifecycleUnavailable(res);
     }
   });
 

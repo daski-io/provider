@@ -71,12 +71,29 @@ migration principal.
 Never reuse Testnet keys or databases on Mainnet. The wallet key signs provider
 offers/terminal attestations and must be separated from product credentials.
 
+| Variable | Purpose and rule |
+| --- | --- |
+| `PAYER_ACCOUNT_TYPES` | Payer accounts accepted for payer-signed lifecycle reads: `eoa` (default) or `eoa,contract`. Must include `eoa`. |
+| `PAYER_SIGNATURE_VERIFY_TIMEOUT_MS` | One deadline, default `5000` (500 to 60,000), for a contract account's code lookup, `isValidSignature` call and at most one RPC failover. |
+
+A payer-signed lifecycle read carries the buyer's EIP-712
+`OrderActionAuthorizationV1`. An EOA signature (65 bytes, low s) is verified
+offline with no RPC. With `contract`, a signature that does not recover to
+the payer is checked against the payer's deployed ERC-1271 contract through
+`BASE_RPC_URL` and the first `BASE_RPC_FALLBACK_URLS` entry: a read-only
+`eth_call` with a 1,000,000 gas bound and a 16 KiB answer bound that must
+return exactly `0x1626ba7e` followed by 28 zero bytes; ERC-6492 counterfactual
+wrappers are refused, at most eight verifications run at once, and RPC
+failure is answered `503 lifecycle_unavailable`, never as an invalid
+signature. `CHAIN_MODE=mock` has no RPC, so contract accounts are
+unavailable there. Read-capability reads never need the RPC.
+
 ## Daski standard rail
 
 | Variable | Purpose and rule |
 | --- | --- |
 | `STANDARD_RAIL_ENVIRONMENT` | Normally `testnet` or `mainnet`; must match every signed envelope. |
-| `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Verifies readiness-quote and intake requests, dispatches, status queries, and forwarded `QuoteV1` envelopes. |
+| `STANDARD_RAIL_GATEWAY_SIGNER` | Reviewed gateway protocol signer. Verifies readiness-quote and intake requests, dispatches, status queries, lifecycle grants, and forwarded `QuoteV1` envelopes; each still names its own key id. |
 | `STANDARD_RAIL_GATEWAY_ORIGIN` | Credential-free HTTPS origin that scopes the installed runtime catalog. Normally identical to `GATEWAY_BASE_URL`. |
 | `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
 | `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |
@@ -132,9 +149,11 @@ the importer once per service; an identical commitment is an idempotent no-op.
 Mainnet bypass/proxy CIDRs must be IPv4 `/24` or IPv6 `/64`, or narrower.
 
 The global and rail limits apply to discovery, quotes and other ordinary
-routes. Dispatch and dispatch status are servicing calls for funded orders:
-they skip the product-readiness gate and both request-charged limits, and keep
-the concurrency and body bounds (status bodies are capped at 64 KiB). Instead,
+routes. Dispatch, dispatch status and lifecycle reads are servicing calls for
+funded orders: they skip the product-readiness gate and both request-charged
+limits, and keep the concurrency and body bounds (status and lifecycle bodies
+are capped at 64 KiB). A lifecycle call refused for concurrency or by the
+failure bucket gets the named `503 lifecycle_unavailable`. Instead,
 a shared PostgreSQL bucket per source admits 120 unauthenticated failures
 (malformed, wrong-domain or badly signed calls and transport faults) per
 minute; verified calls only read it. Middleware refusals of servicing calls

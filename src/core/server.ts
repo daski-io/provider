@@ -20,10 +20,13 @@ import {
   isServicingRequest,
   markServicingRoutes,
   respondAmbiguously,
+  respondLifecycleUnavailable,
   servicingAbuseLimiter,
+  servicingPath,
 } from "./security/servicingIngress.js";
 import type { ProviderStandardRailConfig } from "./standardRail/config.js";
 import type { DispatchDependencies } from "./standardRail/dispatch.js";
+import type { LifecycleDependencies } from "./standardRail/lifecycle.js";
 import { createStandardRailRouter } from "./standardRail/routes.js";
 
 /**
@@ -38,14 +41,15 @@ let server: ReturnType<Express["listen"]> | null = null;
 /**
  * Build the complete HTTP stack; `startServer` only adds the listener.
  *
- * Dispatch and its status are servicing calls for already-funded orders.
- * They keep bounded ingress, authentication and a failure-only abuse limit,
- * but skip the product-readiness gate and the purchase/global rate limits
- * that verified gateway work would otherwise spend (C01, C03).
+ * Dispatch, its status and buyer lifecycle reads are servicing calls for
+ * already-funded orders. They keep bounded ingress, authentication and a
+ * failure-only abuse limit, but skip the product-readiness gate and the
+ * purchase/global rate limits that verified gateway work would otherwise
+ * spend (C01, C03).
  */
 export function createApp(
   standard: ProviderStandardRailConfig,
-  options: { dispatch?: DispatchDependencies } = {},
+  options: { dispatch?: DispatchDependencies; lifecycle?: LifecycleDependencies } = {},
 ): Express {
   const app = express();
   installHttpSecurityBoundary(app);
@@ -95,6 +99,7 @@ export function createApp(
   app.use("/standard-rail", createStandardRailRouter(config, standard, {
     recordServicingFailure: servicingAbuse.recordFailure,
     dispatch: options.dispatch,
+    lifecycle: options.lifecycle,
   }));
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
@@ -107,7 +112,12 @@ export function createApp(
       ...(clientError ? { status } : {}),
     });
     // Middleware refusals are answered where they happen; an error that
-    // escapes a servicing handler may follow an admission, so it is ambiguous.
+    // escapes a dispatch or status handler may follow an admission, so it is
+    // ambiguous. A lifecycle read that escapes is only temporarily unavailable.
+    if (servicingPath(req) === "lifecycle") {
+      respondLifecycleUnavailable(res);
+      return;
+    }
     if (isServicingRequest(req)) {
       respondAmbiguously(res);
       return;

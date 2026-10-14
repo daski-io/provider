@@ -17,6 +17,26 @@ export const strictBooleanEnv = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+export type PayerAccountType = "eoa" | "contract";
+
+/**
+ * Parse PAYER_ACCOUNT_TYPES into the admitted set. The offline EOA path is
+ * always admitted; the set only says whether deployed ERC-1271 contract
+ * accounts are admitted too. Throws on an unknown entry or a set without eoa.
+ */
+export function parsePayerAccountTypes(value: string): ReadonlySet<PayerAccountType> {
+  const entries = value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  const types = new Set<PayerAccountType>();
+  for (const entry of entries) {
+    if (entry !== "eoa" && entry !== "contract") {
+      throw new Error(`PAYER_ACCOUNT_TYPES entry '${entry}' is not eoa or contract`);
+    }
+    types.add(entry);
+  }
+  if (!types.has("eoa")) throw new Error("PAYER_ACCOUNT_TYPES must include eoa");
+  return types;
+}
+
 const address = z.string().refine(isAddress, "must be a valid EVM address");
 const httpsUrl = z.string().trim().refine((value) => {
   try {
@@ -98,6 +118,19 @@ const envSchema = z.object({
   PROVIDER_AGENT_ID: uint256,
   IDENTITY_REGISTRY_ADDRESS: address,
   USDC_ADDRESS: address,
+  // Payer-signed lifecycle reads: EOA signatures always verify offline;
+  // `contract` also admits deployed ERC-1271 accounts through the RPC URLs.
+  PAYER_ACCOUNT_TYPES: z.string().default("eoa").refine((value) => {
+    try {
+      parsePayerAccountTypes(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "must be a comma-separated subset of eoa,contract that includes eoa"),
+  // One deadline for the contract-account code lookup, isValidSignature call
+  // and at most one RPC failover.
+  PAYER_SIGNATURE_VERIFY_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
 
   RATE_LIMIT_HASH_KEY: z.string().min(32).refine(
     (value) => new Set(value).size >= 8 && !/replace/i.test(value),

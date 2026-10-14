@@ -151,15 +151,24 @@ header/body/time/concurrency limits, persists
 shared rail rate limits, and emits generic public errors. Health is rate-limited
 locally so it remains available when PostgreSQL is degraded.
 
-Dispatch and its status are servicing calls for already-funded orders,
-classified by Express's own route matching. They keep bounded ingress,
-authentication, and a per-source PostgreSQL limit charged only by
-unauthenticated failures, but skip the product-readiness gate and the
+Dispatch, its status and buyer lifecycle reads are servicing calls for
+already-funded orders, classified by Express's own route matching. They keep
+bounded ingress, authentication, and a per-source PostgreSQL limit charged
+only by unauthenticated failures, but skip the product-readiness gate and the
 request-charged purchase/global limits. A middleware refusal is a definite
-JSON refusal (no handler ran); only handlers answer ambiguously, and new
-synchronous dispatches still refuse before admission while readiness is
-down. New quotes require complete provider readiness and pass the purchase
-limit.
+JSON refusal (no handler ran); only dispatch and status handlers answer
+ambiguously, and new synchronous dispatches still refuse before admission
+while readiness is down. Lifecycle has no admission to be ambiguous about:
+anything it cannot serve right now, including a busy or rate-limited call and
+an escaped error, is the named `503 lifecycle_unavailable`. New quotes require
+complete provider readiness and pass the purchase limit.
+
+The lifecycle route verifies the gateway's `ProviderLifecycleGrantV1` before
+it interprets the authorization, then serves `status` and `artifact` only:
+one indexed claim read, a fresh observation and fresh signatures, with the
+artifact taken from the frozen result after its hash is re-verified.
+`input`, `cancel` and `support` get the named `unsupported_action` refusal
+without a lookup. It never reaches the adapter (static gate).
 
 Product HTTP must use the bounded outbound helpers, which enforce reviewed
 HTTPS destinations, DNS/IP safety, redirect policy, timeouts, response-size
@@ -181,6 +190,7 @@ user. Hosting configuration is intentionally left to the provider fork.
 - `/standard-rail/quote` (readiness quote and intake)
 - `/standard-rail/dispatch`
 - `/standard-rail/dispatch/status`
+- `/standard-rail/lifecycle` (authenticated status and artifact reads)
 
 There is no public product proxy. The adapter is reachable only after rail
 admission.

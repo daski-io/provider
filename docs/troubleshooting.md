@@ -177,6 +177,17 @@ The gateway acts on it only after the original envelope's `validBefore` plus
 signature, stale query, different existing claim (`409 binding_conflict`),
 database failure, or signing failure is never this answer.
 
+## Lifecycle read is refused or unavailable
+
+| Answer | Cause and fix |
+| --- | --- |
+| `409 artifact_unavailable` | The task is not `completed`; read `status`. Failed tasks never have an artifact. |
+| `409 unsupported_action` | `input`, `cancel` and `support` are not implemented by this starter; nothing happened. Use `provider-full` for them. |
+| `503 lifecycle_unavailable` | Database, signing or contract-account RPC failure, a busy or rate-limited servicing call, or a stored result that no longer matches its frozen hash (logged as `terminal_identity_unverifiable`). Retry; a payer-signed retry needs a fresh authorization. |
+| `401 lifecycle_rejected` / `grant` or `signature` | The grant is not a current `ProviderLifecycleGrantV1` for this provider audience signed by `STANDARD_RAIL_GATEWAY_SIGNER` as `gateway-lifecycle`. Check the environment, chain, audiences and signer. |
+| `403 lifecycle_rejected` / `binding` or `authorization` | The grant does not bind this call, a read capability was used for another action or scope, or the payer signature is invalid for the order's payer (contract accounts need `PAYER_ACCOUNT_TYPES=eoa,contract`). |
+| `404 lifecycle_rejected` / `unknown_task` | No claim for the order and task under this gateway audience. |
+
 ## Product call times out or is ambiguous
 
 The adapter has a hard 50-second budget and should set a smaller product

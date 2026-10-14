@@ -26,6 +26,8 @@ export interface ProviderStandardRailConfig {
   providerAudience: string;
   gatewayDispatchSigner: Address;
   gatewayQuoteSigner: Address;
+  /** Signs ProviderLifecycleGrantV1 as `gateway-lifecycle`. */
+  gatewayLifecycleSigner: Address;
   providerAuthorityKey: Address;
   providerAuthorityPrivateKey: Hex;
   terminalAttestationPrivateKey: Hex;
@@ -165,8 +167,11 @@ export async function loadProviderStandardRailConfig(
     gatewayOrigin,
     providerAudience:
       env.STANDARD_RAIL_PROVIDER_AUDIENCE?.trim() || need(env, "BASE_URL"),
+    // The gateway signs every protocol artifact with its one protocol key;
+    // each key id still names its own role and is checked separately.
     gatewayDispatchSigner: gatewaySigner,
     gatewayQuoteSigner: gatewaySigner,
+    gatewayLifecycleSigner: gatewaySigner,
     providerAuthorityKey,
     providerAuthorityPrivateKey,
     terminalAttestationPrivateKey,

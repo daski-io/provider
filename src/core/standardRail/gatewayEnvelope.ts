@@ -63,6 +63,8 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
   chainId: number;
   audience: string;
   signer: Address;
+  /** Defaults to `gateway-dispatch`; lifecycle grants use `gateway-lifecycle`. */
+  signerKeyId?: string;
 }): Promise<SignedEnvelope<T>> {
   const label = expected.artifactType;
   try {
@@ -78,7 +80,7 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
     || envelope.environment !== expected.environment
     || envelope.chainId !== expected.chainId
     || envelope.audience !== expected.audience
-    || envelope.signerKeyId !== GATEWAY_DISPATCH_KEY_ID
+    || envelope.signerKeyId !== (expected.signerKeyId ?? GATEWAY_DISPATCH_KEY_ID)
     || !Number.isSafeInteger(envelope.issuedAt)
     || !Number.isSafeInteger(envelope.validBefore)
     || envelope.issuedAt > now + MAX_FUTURE_SKEW_SECONDS

@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { config } from "../config.js";
 import { isIpInRanges, requestClientIp } from "./rateLimit.js";
+import { respondLifecycleUnavailable, servicingPath } from "./servicingIngress.js";
 
 export function concurrencyBudget(args: {
   maxConcurrent: number;
@@ -17,6 +18,11 @@ export function concurrencyBudget(args: {
       active >= args.maxConcurrent
       || (!bypassed && sourceActive >= args.maxConcurrentPerIp)
     ) {
+      // A busy lifecycle read gets the gateway's named retryable refusal.
+      if (servicingPath(req) === "lifecycle") {
+        respondLifecycleUnavailable(res);
+        return;
+      }
       res.setHeader("Retry-After", "1");
       res.status(503).json({ error: "server_busy" });
       return;

@@ -1,11 +1,13 @@
-import { EventEmitter } from "node:events";
-import type { Request, Response } from "express";
+import { EventEmitter, once } from "node:events";
+import type { AddressInfo } from "node:net";
+import express, { type Request, type Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { config } from "../src/core/config.js";
 import {
   concurrencyBudget,
   configureHttpTimeouts,
 } from "../src/core/security/httpCapacity.js";
+import { markServicingRoutes } from "../src/core/security/servicingIngress.js";
 
 class TestResponse extends EventEmitter {
   statusCode = 200;
@@ -81,5 +83,24 @@ describe("HTTP concurrency boundary", () => {
       requestTimeout: config.HTTP_REQUEST_TIMEOUT_MS,
       keepAliveTimeout: config.HTTP_KEEP_ALIVE_TIMEOUT_MS,
     });
+  });
+
+  it("tells a busy lifecycle read the gateway's named retryable refusal", async () => {
+    const app = express();
+    markServicingRoutes(app);
+    app.use(concurrencyBudget({ maxConcurrent: 0, maxConcurrentPerIp: 0, bypassIps: [] }));
+    const server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const answer = async (path: string) => {
+        const response = await fetch(`${origin}${path}`, { method: "POST" });
+        return [response.status, await response.text()];
+      };
+      expect(await answer("/standard-rail/lifecycle")).toEqual([503, '{"error":"lifecycle_unavailable"}']);
+      expect(await answer("/standard-rail/dispatch")).toEqual([503, '{"error":"server_busy"}']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

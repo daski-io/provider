@@ -116,8 +116,36 @@ const server = read("src/core/server.ts");
 if (/\bcompression\s*\(|content-encoding/i.test(server)) {
   failures.push("server must not compress or encode responses");
 }
-for (const forbidden of ["/admin", "/webhooks", "/a2a", "/lifecycle", "/assets/"]) {
+for (const forbidden of ["/admin", "/webhooks", "/a2a", "/assets/"]) {
   if (server.includes(forbidden)) failures.push(`server exposes full-only route: ${forbidden}`);
+}
+// Explicit standard-rail boundary: exactly these routes, and exactly the
+// funded-order servicing calls exempt from sales readiness and purchase
+// limits. The lifecycle route serves status and artifact reads only; it never
+// reaches a product adapter.
+const REVIEWED_RAIL_ROUTES = [
+  "GET /outcomes", "POST /quote", "POST /dispatch", "POST /dispatch/status", "POST /lifecycle",
+];
+const railRoutes = read("src/core/standardRail/routes.ts");
+const declaredRailRoutes = [...railRoutes.matchAll(
+  /\brouter\.(get|post|put|patch|delete|all|use)\(\s*"([^"]*)"/g,
+)].map((match) => `${match[1].toUpperCase()} ${match[2]}`);
+if (JSON.stringify(declaredRailRoutes.sort()) !== JSON.stringify([...REVIEWED_RAIL_ROUTES].sort())) {
+  failures.push(`standard-rail routes must be exactly: ${REVIEWED_RAIL_ROUTES.join(", ")}`);
+}
+const servicingMarks = [...read("src/core/security/servicingIngress.ts").matchAll(
+  /\bapp\.(\w+)\(\s*"([^"]*)",\s*mark\(/g,
+)].map((match) => `${match[1].toUpperCase()} ${match[2]}`);
+if (JSON.stringify(servicingMarks.sort()) !== JSON.stringify([
+  "POST /standard-rail/dispatch", "POST /standard-rail/dispatch/status", "POST /standard-rail/lifecycle",
+])) failures.push("servicing calls must be exactly dispatch, dispatch status and lifecycle");
+for (const path of [
+  "src/core/standardRail/lifecycle.ts", "src/core/standardRail/lifecycleRequest.ts",
+]) {
+  const source = read(path);
+  if (/serviceRegistry\/registry|getAdapter|\.execute\(|supplier/.test(source)) {
+    failures.push(`${path} must not reach a product adapter`);
+  }
 }
 const adapter = read("src/core/serviceRegistry/adapterTypes.ts");
 for (const forbidden of ['"working"', '"input-required"', "handleInput(", "cancel("]) {

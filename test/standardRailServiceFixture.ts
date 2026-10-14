@@ -23,6 +23,7 @@ export function railConfig(
     providerAudience: "https://provider.example",
     gatewayDispatchSigner: gatewaySigner,
     gatewayQuoteSigner: gatewaySigner,
+    gatewayLifecycleSigner: gatewaySigner,
     providerAuthorityKey: authority,
     providerAuthorityPrivateKey: providerKey,
     terminalAttestationPrivateKey: providerKey,

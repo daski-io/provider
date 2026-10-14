@@ -26,8 +26,10 @@ function isPlainUtf8Json(header: string | undefined): boolean {
  * call refused here is reported to the abuse limiter.
  */
 export function strictJsonTransport(options: { recordServicingFailure?: (req: Request) => void } = {}) {
+  // Status queries and lifecycle calls are small signed envelopes; only a
+  // dispatch carries a buyer request and its evidence bundle.
   const parsers = {
-    status: express.json({ limit: "64kb", inflate: false, verify: captureRawBody }),
+    small: express.json({ limit: "64kb", inflate: false, verify: captureRawBody }),
     other: express.json({ limit: "2mb", inflate: false, verify: captureRawBody }),
   };
   const refuse = (req: Request, res: Response, status: number, error: string) => {
@@ -44,7 +46,8 @@ export function strictJsonTransport(options: { recordServicingFailure?: (req: Re
       refuse(req, res, 415, "uncompressed_application_json_required");
       return;
     }
-    const parser = servicingPath(req) === "status" ? parsers.status : parsers.other;
+    const kind = servicingPath(req);
+    const parser = kind === "status" || kind === "lifecycle" ? parsers.small : parsers.other;
     parser(req, res, (error?: unknown) => {
       if (error) {
         const tooLarge = (error as { status?: unknown }).status === 413;

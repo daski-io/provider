@@ -8,8 +8,8 @@ not chat history or a harness-specific file.
 
 This is the minimal Express + TypeScript starter for offering fixed-price,
 fully automated, synchronous services through Daski. It receives discovery,
-signed dispatch, payment evidence, status, and terminal-outcome calls over the
-standard Exact-EVM rail.
+signed dispatch, payment evidence, status, terminal-outcome and authenticated
+buyer status/artifact lifecycle calls over the standard Exact-EVM rail.
 
 Use this repository only when every paid operation returns a terminal result
 within 50 seconds and does not create a durable customer asset or later
@@ -97,6 +97,11 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   evidence is only a code listed in the module's `failureCodes`.
 - A terminal task's state, result, result hash and completion time are frozen
   in one write and never change; legacy rows are never reshaped.
+- Lifecycle calls verify the gateway's `ProviderLifecycleGrantV1` before
+  interpreting the authorization. A read capability authorizes only `status`
+  and `artifact`; `input`, `cancel` and `support` answer exactly
+  `409 unsupported_action` with no effect. Lifecycle reads never call the
+  adapter, write, or answer 500.
 - PostgreSQL is mandatory for paid runtime replay/idempotency, evidence,
   rate-limit, and terminal-result state. Do not replace it with memory state.
 - Dispatch claims, financial/evidence state, and external mutation intent use

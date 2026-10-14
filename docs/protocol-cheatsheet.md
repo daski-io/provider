@@ -135,6 +135,65 @@ never the no-claim answer. Status reads are one indexed claim read plus the
 abuse guard's read-only bucket lookup: no product call, no write, no
 request-charged rate limit, and no product-readiness gate.
 
+## Buyer lifecycle
+
+A buyer reads an order through the gateway, which proxies the call to
+`/standard-rail/lifecycle` with header `daski-order-status-view: 1` (accepted;
+lite adds no input or document views) and exactly:
+
+```text
+orderId, providerTaskId, action, request, authorization, grant, payer, gatewayAudience
+```
+
+Core verifies the `ProviderLifecycleGrantV1` `grant` before reading anything
+else: type, version, environment, chain, provider audience, key id
+`gateway-lifecycle` and its signer, canonical signature, lifetime at most 120
+seconds, and that its payload `{orderId, providerTaskId, action, requestHash,
+authorizationHash, payer}` binds this call (`requestHash =
+canonicalHash(request)`, `authorizationHash = canonicalHash(authorization)`,
+payer compared as an address, `gatewayAudience` the configured gateway). Then
+it interprets `authorization`:
+
+- `{"type": "DaskiReadCap", "scope": action}` authorizes only `status` or
+  `artifact` with exactly that scope and an empty request; it never
+  authorizes anything else, even under a valid grant;
+- otherwise it is the buyer's nine-field `OrderActionAuthorizationV1`, which
+  must name this order, action, `POST`, an `/orders/<handle>/actions/<action>`
+  URI on the gateway origin and the request hash, must have been valid when
+  the grant was issued (at most 300 seconds long), and must verify as EIP-712
+  in domain `{name: "DaskiStandardOrder", version: "1", chainId}` with
+  `audienceHash = keccak256(gatewayAudience)` for the grant's payer (see
+  `PAYER_ACCOUNT_TYPES` in configuration). Nothing is consumed: the gateway
+  already spent the nonce.
+
+The task must be this provider's claim for (gateway audience, `orderId`) with
+id `providerTaskId` and the grant's payer. A read is one indexed claim read,
+signed afresh: no product call, write, enqueue or purchase limit.
+
+| Action | Answer |
+| --- | --- |
+| `status` | `200 {orderId, taskId, state, operations, terminalAttestation?, signature}`, never a `result` |
+| `artifact`, completed | `200 {orderId, taskId, state, operations, result, terminalAttestation, signature}`; `result` is the frozen complete `ServiceResult`, whose `canonicalHash` is the attested `resultHash` |
+| `artifact`, not completed | exactly `409 {"error":"artifact_unavailable"}` |
+| `input`, `cancel`, `support` | exactly `409 {"error":"unsupported_action"}`, with no lookup and no effect |
+
+`state` and `operations` follow the dispatch rules above (fresh database-clock
+`observedAt`). `terminalAttestation` is present only for `completed` or
+`failed`: `{payload: {orderId, taskId, state, resultHash, completedAt},
+signature}` by the terminal attestation key, carrying the same `taskId`,
+`state`, `resultHash` and `completedAt` as the dispatch attestation forever.
+`signature` is the provider authority's EIP-191 signature of the raw
+`canonicalHash` of the answer without `signature` (attestation included).
+
+| Refusal | Meaning |
+| --- | --- |
+| 409 `artifact_unavailable`, 409 `unsupported_action` | Named refusals: exactly one key, shown to the buyer |
+| 503 `lifecycle_unavailable` | Named, retryable: database, signing or RPC failure, a frozen identity that no longer verifies, busy or rate-limited servicing |
+| 400/401/403/404 `lifecycle_rejected` / `request_invalid`, `grant`, `signature`, `binding`, `authorization`, `unknown_task` | Not a valid gateway call for one of this provider's tasks; the gateway keeps it internal |
+
+A read capability is retried as is; a payer-signed retry needs a fresh
+authorization because the gateway consumed the first one.
+
 ## Service result
 
 Successful service execution returns:

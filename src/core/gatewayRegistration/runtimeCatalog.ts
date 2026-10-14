@@ -1,5 +1,6 @@
 import type { Address, Hex } from "viem";
 import { randomUUID } from "node:crypto";
+import type { Pool } from "pg";
 import { pool } from "../db/pool.js";
 import type { RuntimeListingCommitmentV1 } from "./runtimeCommitment.js";
 import type {
@@ -85,8 +86,9 @@ export async function promoteRuntimeListingVersions(
   gatewayOrigin: string,
   serviceId: Hex,
   versions: readonly RuntimeListingVersionInput[],
+  database: Pick<Pool, "connect"> = pool,
 ): Promise<void> {
-  const client = await pool.connect();
+  const client = await database.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
     // Service-scoped advisory lock: first-ever promotions have no head rows

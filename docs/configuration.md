@@ -49,6 +49,12 @@ Production's runtime principal must not own tables/schema, create schema,
 create temporary objects, or have superuser/database/role/bypass-RLS powers.
 The migration principal needs schema creation but no cluster-wide powers.
 Boot applies privileges and verifies separation when both URLs are provided.
+The runtime principal receives only the reviewed per-table statements listed
+in `src/core/db/runtimePrivileges.ts`: no `DELETE`, `TRUNCATE`, DDL, or
+migration-ledger access, and read-only access to the runtime catalog. A table
+added by a later migration stays inaccessible until it is reviewed into that
+list. `npm run daski:install-runtime` promotes catalog versions as the
+migration principal.
 
 ## Chain and identity
 

@@ -22,7 +22,8 @@ Mainnet automation.
 mutation, not a learning command. It validates a Daski-issued bundle against
 the configured signers, policy, provider wallet, and exact local service
 contract before applying migrations and atomically promoting append-only
-runtime catalog versions. It does not call the gateway/product or send a chain
+runtime catalog versions as the migration principal; the runtime principal can
+only read that catalog. It does not call the gateway/product or send a chain
 transaction. Run it only with explicit authorization for the intended bundle
 and database; keep the artifact out of Git and support channels.
 

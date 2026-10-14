@@ -7,6 +7,7 @@ import {
   checkDatabase,
   closeMigrationPool,
   configureRuntimePrivileges,
+  migrationPool,
   pool,
   runMigrations,
   verifyDatabaseRoleSeparation,
@@ -371,12 +372,15 @@ async function main(): Promise<void> {
   await runMigrations();
   await configureRuntimePrivileges();
   await verifyDatabaseRoleSeparation();
-  await closeMigrationPool();
+  // The runtime principal only reads the catalog; promotion writes it as the
+  // schema-owning migration principal.
   await promoteRuntimeListingVersions(
     gatewayOrigin,
     artifact.serviceId,
     artifact.versions,
+    migrationPool,
   );
+  await closeMigrationPool();
   process.stdout.write(`${JSON.stringify({
     installed: artifact.versions.length,
     gatewayOrigin,

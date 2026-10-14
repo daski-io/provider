@@ -91,6 +91,12 @@ password error, untrusted certificate name, blocked egress, or wrong role.
 Keep `verify-full`; repair the certificate/hostname. The migration principal
 must own/create schema objects; the runtime principal must not.
 
+`permission denied for table ...` under separate principals means the runtime
+role is missing a reviewed grant. Boot reapplies the allowlist in
+`src/core/db/runtimePrivileges.ts` through `MIGRATION_DATABASE_URL`; confirm
+that variable names the schema owner, then restart. Never grant the runtime
+role ownership, `DELETE`, or DDL to work around it.
+
 An applied migration checksum mismatch means a tracked migration was edited
 after use. Restore it exactly and add a new numbered migration for the change.
 

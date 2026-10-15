@@ -29,6 +29,11 @@ export interface ListingObligation {
   claims: number;
   /** Persisted quotes that may still back a timely-paid order's first dispatch. */
   openQuotes: number;
+  /**
+   * Those an external-job adapter version sold: admitting each one's order
+   * seals its input, so it needs an active encryption key.
+   */
+  externalJobQuotes: number;
   /** Unfinished external jobs; each needs its version's definition. */
   externalJobs: number;
   /**
@@ -60,7 +65,8 @@ export async function loadListingObligations(
   const obligations = new Map<Hex, ListingObligation>();
   const entry = (hash: Hex) => {
     const current = obligations.get(hash) ?? {
-      claims: 0, openQuotes: 0, externalJobs: 0, adapterVersions: new Map(), encryptionKeyIds: new Set(),
+      claims: 0, openQuotes: 0, externalJobQuotes: 0, externalJobs: 0, adapterVersions: new Map(),
+      encryptionKeyIds: new Set(),
     };
     obligations.set(hash, current);
     return current;
@@ -95,11 +101,13 @@ export async function loadListingObligations(
   }
   const quotes = await db.query<{
     listing: Buffer; retained: number; unrecorded: number; latest: string | null; now: string;
-    retained_versions: string[]; unrecorded_versions: string[];
+    retained_sold: number; unrecorded_sold: number; retained_versions: string[]; unrecorded_versions: string[];
   }>(
     `SELECT listing_manifest_hash AS listing,
             count(*) FILTER (WHERE retain_until > now())::int AS retained,
             count(*) FILTER (WHERE retain_until IS NULL)::int AS unrecorded,
+            count(*) FILTER (WHERE retain_until > now() AND adapter_version IS NOT NULL)::int AS retained_sold,
+            count(*) FILTER (WHERE retain_until IS NULL AND adapter_version IS NOT NULL)::int AS unrecorded_sold,
             (max(valid_before) FILTER (WHERE retain_until IS NULL))::text AS latest,
             floor(extract(epoch FROM now()))::bigint::text AS now,
             COALESCE(array_agg(DISTINCT adapter_version)
@@ -118,6 +126,7 @@ export async function loadListingObligations(
     if (open === 0) continue;
     const owed = entry(hash);
     owed.openQuotes = open;
+    owed.externalJobQuotes = row.retained_sold + (unrecordedOpen ? row.unrecorded_sold : 0);
     // A version this build cannot materialize is refused for its definition;
     // otherwise each open quote's order needs the adapter version that sold it.
     const sold = [...row.retained_versions, ...(unrecordedOpen ? row.unrecorded_versions : [])];
@@ -135,9 +144,11 @@ const label = (hash: Hex) => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
  * key its orders' snapshots name; each version whose quotes may still be
  * dispatched, or with unfinished external jobs, also needs its admitted
  * definition (the jobs' result contract); each open quote needs the adapter
- * version that sold it, which will run its order; and each unfinished job
- * needs its own adapter version, every encryption key its stored state names
- * and an active key to seal the reference or candidate it may still produce.
+ * version that sold it, which will run its order, and, when that is an
+ * external-job version, an active key to seal the order's input at
+ * admission; and each unfinished job needs its own adapter version, every
+ * encryption key its stored state names and an active key to seal the
+ * reference or candidate it may still produce.
  * Diagnostics name versions by hash prefix, adapter versions and key ids,
  * never key material.
  */
@@ -170,6 +181,8 @@ export function assertObligationsServiceable(args: {
     }
     if (obligation.externalJobs > 0 && !args.externalJobs.canSeal) {
       problems.push(`${label(hash)} (no active encryption key for unfinished external jobs)`);
+    } else if (obligation.externalJobQuotes > 0 && !args.externalJobs.canSeal) {
+      problems.push(`${label(hash)} (no active encryption key to admit the orders of open external-job quotes)`);
     }
   }
   if (problems.length > 0) {

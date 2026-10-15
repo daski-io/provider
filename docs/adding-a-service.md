@@ -89,7 +89,12 @@ The mode is a property of the installed service, not of its listing
 versions: an order sold by a synchronous adapter records no version and runs
 in the service's current mode. Never switch an installed service between
 synchronous and external-job while orders of its earlier versions may still
-be dispatched; publish the other mode as a new service instead.
+be dispatched; publish the other mode as a new service instead. A service
+whose new sales moved from external-job to synchronous anyway still runs the
+orders its external-job versions sold as their jobs: keep those versions,
+async admission and an active encryption key until their quotes can no
+longer be dispatched (boot refuses a build without the versions or the
+key).
 
 The adapter contract is intentionally terminal:
 

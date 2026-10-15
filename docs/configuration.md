@@ -247,7 +247,9 @@ audience its checkout snapshot named, so:
   `previousExternalJobAdapters`) and every encryption key id its stored
   state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation),
   and, while a quote may still be dispatched, the adapter version that sold
-  it: each quote records it, and its order runs with exactly that version.
+  it (each quote records it, and its order runs with exactly that version)
+  and, for an external-job version, an active `PROVIDER_DATA_ENCRYPTION_KEY`
+  to seal the order's input and async admission on to admit it.
 
 Boot and the importer verify this for every obligation (claims of any state,
 quotes that may still be dispatched, and unfinished external jobs) and refuse

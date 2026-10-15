@@ -25,6 +25,7 @@ import type { ProviderOutcomeConfig } from "../src/core/standardRail/types.js";
 import { json } from "./dispatchHarness.js";
 import { echoCompleted, jobPayer, startJobHarness, type JobHarness } from "./externalJobHarness.js";
 import { jobKeys, jobRuntime, jobService, scriptedAdapter, type ScriptedAdapter } from "./externalJobFixture.js";
+import { parseFieldEncryptionKeys } from "../src/core/security/fieldEncryption.js";
 import { dispatchOrder, quoteOrder, type GatewayOrder } from "./gatewayOrderFixture.js";
 import { nowSeconds, providerKey } from "./gatewayWire.js";
 import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
@@ -258,6 +259,33 @@ describePostgres("external-job orders run by the adapter version that sold them"
       [Buffer.from(order.providerQuoteHash.slice(2), "hex")],
     );
     await expect(takeover([harness.rail.service])).resolves.toBeUndefined();
+  });
+
+  it("refuses to take over open external-job quotes without an active key to admit their orders", async () => {
+    const [v1Version, v2Version] = versions();
+    const v1 = v1Adapter(v1Version);
+    const old = superseded();
+    const harness = await upgraded(v2Version, old, { previousExternalJobAdapters: { [v1Version]: v1 } });
+    await soldBefore(old, v1, { message: "needs a key at admission" });
+    // A quote that recorded no version (a synchronous sale, or one from before 010).
+    const unversioned = superseded();
+    await unrecorded(unversioned, { message: "no version recorded" });
+    const catalog = railConfig([harness.rail.outcome], { versions: [old, unversioned] });
+    const takeover = async (listing: ProviderOutcomeConfig, keys: ReturnType<typeof jobKeys>) => {
+      const all = await loadListingObligations(pool, catalog.gatewayAudience, catalog);
+      assertObligationsServiceable({
+        catalog,
+        obligations: new Map([...all].filter(([hash]) => hash === listing.listingManifestHash)),
+        signingWallets: new Set([catalog.terminalAttestationKey]),
+        externalJobs: externalJobServicing([harness.rail.service], keys),
+      });
+    };
+    // Previous keys alone open stored state but cannot seal a new order's input.
+    const readOnly = parseFieldEncryptionKeys({ activeKeyId: "primary", previousKeys: `k1=0x${"a1".repeat(32)}` });
+    await expect(takeover(old, readOnly))
+      .rejects.toThrow("(no active encryption key to admit the orders of open external-job quotes)");
+    await expect(takeover(old, jobKeys())).resolves.toBeUndefined();
+    await expect(takeover(unversioned, readOnly)).resolves.toBeUndefined();
   });
 
   it("attests a retained version's failure with its code while the module's list keeps it", async () => {

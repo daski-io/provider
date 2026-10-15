@@ -105,9 +105,10 @@ order it would take over (see `docs/configuration.md`):
 | `skill_not_installed` | Its quotes may still be dispatched but the build no longer installs the service or skill; restore it until the window passes. |
 | `definition_invalid`, `schema_invalid` | The version no longer materializes against this build's global policy or schema compiler; do not edit the catalog, restore the matching configuration. |
 | `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
-| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote that may still be dispatched was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish and its quotes can no longer be dispatched. |
+| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote that may still be dispatched was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish and its quotes can no longer be dispatched. A rollback to a build without the version a newer build sold with is refused the same way; give the rollback build that version in `previousExternalJobAdapters`. |
 | `encryption key <id> not configured` | An unfinished job's stored state names a key this build lacks; restore it (after a rotation, in `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`). |
 | `no active encryption key for unfinished external jobs` | Unfinished jobs may still need a job reference or result candidate sealed, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key (a previous key alone only reads). |
+| `no active encryption key to admit the orders of open external-job quotes` | Quotes an external-job adapter version sold may still be dispatched, and admitting each order seals its input, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key. |
 
 Never delete claims or quotes to pass the check.
 

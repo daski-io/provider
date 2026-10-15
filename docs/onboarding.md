@@ -290,7 +290,8 @@ restart resubmits nothing. Before rolling one out:
   dispatched needs (a quote's order runs with the version that sold it), as
   the current adapter or in `previousExternalJobAdapters` (while async
   admission is on, boot also refuses a build that cannot resume a version a
-  running instance sells);
+  running instance sells); a rollback build needs the version the newer
+  build sold with too, until those quotes can no longer be dispatched;
 - keep every encryption key id stored jobs name
   (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`), every previous wallet key
   orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`) and every

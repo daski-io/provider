@@ -337,6 +337,11 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
       refused += 1;
     }
     expect(refused).toBeGreaterThanOrEqual(120);
+    // The bucket refills two tokens a second, so a token can reappear between
+    // the first 429 and the next read: hold it empty to judge an exhausted source.
+    await pool.query(
+      "UPDATE rate_limit_buckets SET tokens=-60, last_refill=now() WHERE bucket_key LIKE 'servicing-failures:%' AND bucket_key NOT LIKE 'servicing-failures:lifecycle:%'",
+    );
     const blocked = await rail.post("/standard-rail/dispatch/status", valid);
     expect([blocked.status, json(blocked).error]).toEqual([429, "rate_limit_exceeded"]);
     expect(classifyStatusAnswer(blocked)).toBe("unavailable");

@@ -212,6 +212,11 @@ describePostgres("lifecycle reads against PostgreSQL", () => {
       refused += 1;
     }
     expect(refused).toBeGreaterThanOrEqual(120);
+    // The bucket refills two tokens a second, so a token can reappear between
+    // the first refusal and the next read: hold it empty to judge an exhausted source.
+    await pool.query(
+      "UPDATE rate_limit_buckets SET tokens=-60, last_refill=now() WHERE bucket_key LIKE 'servicing-failures:lifecycle:%'",
+    );
     const blocked = await read(rail, await call(orderId, taskId, "status", "read"));
     expect([blocked.status, blocked.text]).toEqual([503, '{"error":"lifecycle_unavailable"}']);
     const status = await rail.status(dispatched.orderId, `0x${(await pool.query(

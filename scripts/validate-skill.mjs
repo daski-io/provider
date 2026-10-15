@@ -84,7 +84,7 @@ for (const file of packaged) {
   for (const problem of findRoutingContradictions(text)) failures.push(`${file}: contradictory routing: ${problem}`);
   for (const problem of findUnknownAdapterReferences(text, api)) failures.push(`${file}: ${problem}`);
   for (const match of text.matchAll(/https?:\/\/[^\s)`>"']+/g)) {
-    if (!/^https:\/\/(?:github\.com\/daski-io\/|discord\.gg\/|daski\.io\b|<)/.test(match[0])) {
+    if (!/^https:\/\/(?:github\.com\/daski-io\/(?:provider|provider-full)(?:\.git)?|discord\.gg\/uyeMp7Q2HW|daski\.io|<[a-z-]+)(?:[/#?]|$)/.test(match[0])) {
       failures.push(`${file}: links outside Daski's public repositories and channels: ${match[0]}`);
     }
   }

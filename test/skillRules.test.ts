@@ -33,7 +33,7 @@ describe("skill and documentation consistency rules", () => {
       'return { kind: "safe-to-start", basis: "eventual-search" };',
       'const adapter = { mode: "async" };',
       'return { kind: "retry", issue: { code: "network" } };',
-      "module.retryFailedOrder();",
+      "ServiceModule.retryFailedOrder();",
       "```",
     ].join("\n");
     expect(findUnknownAdapterReferences(text, api).sort()).toEqual([
@@ -41,9 +41,10 @@ describe("skill and documentation consistency rules", () => {
       '"eventual-search" is not a declared safe-to-start basis',
       '"network" is not a declared call-issue code',
       '"running" is not a declared outcome kind',
+      "ServiceModule.retryFailedOrder is not a declared member",
       "adapter.cancel is not a declared member",
+      "cancel(context, ...) is not a declared adapter hook",
       "context.jobUrl is not a declared member",
-      "module.retryFailedOrder is not a declared member",
     ]);
   });
 
@@ -75,6 +76,54 @@ describe("skill and documentation consistency rules", () => {
     ]) {
       expect(findRoutingContradictions(retired), retired).not.toEqual([]);
     }
+  });
+
+  it("catches retired rules phrased other ways, and lifecycle hooks the API lacks", () => {
+    for (const retired of [
+      "Jobs that take more than a minute need provider-full.",
+      "Jobs that run for hours should use the full starter.",
+      "Asynchronous jobs require provider-full.",
+      "The lite starter only supports synchronous calls.",
+      "Lite can't run jobs that outlive the call.",
+      "When in doubt, choose provider-full.",
+      "If you are unsure, choose provider-full.",
+      "Lite supports cancellation without extra code.",
+      "Use the minimal starter when every call finishes within fifty seconds.",
+      "Calls must finish in 50s.",
+    ]) {
+      expect(findRoutingContradictions(retired), retired).not.toEqual([]);
+    }
+    const code = [
+      "1. In the adapter:",
+      "   ```ts",
+      "   await cancel(context, job);",
+      '   return { "kind": "running" };',
+      "   ```",
+      "",
+      "Or `return { kind: 'stalled' }` from `poll`.",
+    ].join("\n");
+    expect(findUnknownAdapterReferences(code, api).sort()).toEqual([
+      '"running" is not a declared outcome kind',
+      '"stalled" is not a declared outcome kind',
+      "cancel(context, ...) is not a declared adapter hook",
+    ]);
+  });
+
+  it("does not flag correct statements, paths or other APIs", () => {
+    for (const correct of [
+      "Lite external-job mode handles long-running product jobs; provider-full is for human review.",
+      "Install the runtime bundle before the provider-full registration step.",
+      "This repository supports fixed prices; dynamic pricing needs provider-full.",
+      "- jobs that run for hours use external-job mode\n- provider-full covers human review",
+    ]) {
+      expect(findRoutingContradictions(correct), correct).toEqual([]);
+    }
+    const code = [
+      "Tests live in `tests/adapter.test.ts`; CommonJS uses `module.exports`.",
+      '`runSupplierOperation({kind: "sample.create"})` and `fetch(url, {mode: "no-cors"})`.',
+      "`request.context.contextId` is the caller's.",
+    ].join("\n");
+    expect(findUnknownAdapterReferences(code, api)).toEqual([]);
   });
 
   it("accepts the three-path rule as the skill states it", () => {

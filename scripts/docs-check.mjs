@@ -63,11 +63,12 @@ for (const file of markdown) {
 }
 
 // The repository's own guides follow the same routing rule and adapter API
-// as the skill; vendored fixtures are another repository's text.
+// as the skill. Vendored fixtures are another repository's text, service
+// docs are buyer-facing product descriptions, and dist/ holds copies.
 const api = readAdapterApi(root);
 for (const file of markdown) {
   const path = relative(root, file).replaceAll("\\", "/");
-  if (path.startsWith("test/fixtures/")) continue;
+  if (/^(?:test\/fixtures|dist|src\/services\/[^/]+\/docs)\//.test(path)) continue;
   const source = readFileSync(file, "utf8").replaceAll("\r\n", "\n");
   for (const problem of findRoutingContradictions(source)) {
     failures.push(`${path}: contradictory routing: ${problem}`);

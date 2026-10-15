@@ -1,8 +1,8 @@
 {
   "name": "@daski-io/provider",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Minimal starter for synchronous Daski service providers",
+  "description": "Minimal starter for fixed-price Daski service providers, synchronous or external-job",
   "license": "MIT",
   "type": "module",
   "repository": {

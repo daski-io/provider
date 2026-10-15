@@ -3,7 +3,7 @@ name: daski-provider
 description: Choose, acquire, build, diagnose, and onboard the correct Daski provider starter and mode (lite synchronous, lite external job, or provider-full) for an existing API, MCP, SDK, or job-running product. Use for provider-side service integration and Testnet/Mainnet preparation; do not use for Daski buyer clients or unrelated API/MCP gateways.
 license: MIT
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # Daski provider

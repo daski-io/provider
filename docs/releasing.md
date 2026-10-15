@@ -22,6 +22,9 @@ archive, and checksums. Do not hand-build replacement archives from a dirty
 working tree.
 
 The initial stable release is `v1.0.0`; version `0.x` remains pre-release.
+Version `0.2.0`, called R1 in these guides, is the first with external-job
+mode, the schema-epoch barrier and the lifecycle reads; a "pre-R1" image is
+any `0.1.x` build.
 Changing a reviewed public contract after approval requires a new candidate and
 usually a new Daski artifact set.
 

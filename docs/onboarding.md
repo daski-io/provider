@@ -224,8 +224,9 @@ Before Mainnet:
 
 ## Upgrading a pre-R1 deployment (stop-and-drain cutover)
 
-The first upgrade from a released pre-R1 image is a coordinated cutover, not
-a rolling deployment: an old process already in a product call cannot be made
+The first upgrade from a released pre-R1 image (any `0.1.x` build; R1 is
+`0.2.0`, see `docs/releasing.md`) is a coordinated cutover, not a rolling
+deployment: an old process already in a product call cannot be made
 safe by fencing its later write, and the old image fails every executing row
 whenever it boots. Hand this sequence to the operator:
 

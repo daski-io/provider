@@ -29,14 +29,16 @@ export function serviceableVersions(): ServiceableVersion[] {
 }
 
 /**
- * The durable external-job worker (L04, L06). Each round claims due jobs
- * from the database under fresh leases, at most `maxConcurrentCalls` across
- * every process, and steps each one through its persisted phase; a step's
- * call never keeps a transaction open, and its lease is released between
- * calls. Work is found again from the database after a restart, so nothing
- * is resubmitted merely because a process restarted, and no request ever
- * waits for an upstream job. Waiting is persisted (`next_run_at`), so an
- * eight-hour job costs one short call per poll interval.
+ * The durable external-job worker (L04, L06). Each round claims due jobs of
+ * this provider's gateway audience from the database under fresh leases, at
+ * most `maxConcurrentCalls` across every process, and steps each one
+ * through its persisted phase; a step's call never keeps a transaction
+ * open, and its lease is released between calls. Work is found again from
+ * the database after a restart, so nothing is resubmitted merely because a
+ * process restarted, and no request ever waits for an upstream job.
+ * Waiting is persisted (`next_run_at`), so an eight-hour job costs one short
+ * call per poll interval. A process without an active encryption key claims
+ * nothing: it could not seal the reference or candidate a call may produce.
  */
 export class ExternalJobWorker {
   private readonly inFlight = new Set<Promise<void>>();
@@ -51,6 +53,7 @@ export class ExternalJobWorker {
 
   constructor(private readonly deps: {
     owner: string;
+    gatewayAudience: string;
     settings: ExternalJobWorkerSettings;
     keys: FieldEncryptionKeyRing;
     resultContracts: ResultContracts;
@@ -101,6 +104,7 @@ export class ExternalJobWorker {
     );
     this.inspection = await inspectExternalJobs(
       pool, externalJobServicing(getAllServices(), this.deps.keys), this.deps.settings.leaseSeconds,
+      this.deps.gatewayAudience,
     );
     this.lastHealthAt = (this.deps.now ?? Date.now)();
     const codes = externalJobHealthCodes(this.inspection, this.running());
@@ -161,9 +165,10 @@ export class ExternalJobWorker {
 
   private async claimAndStep(): Promise<Promise<void>[]> {
     const { settings } = this.deps;
-    const free = settings.maxConcurrentCalls - this.inFlight.size;
+    const free = this.deps.keys.activeKeyId ? settings.maxConcurrentCalls - this.inFlight.size : 0;
     const claimed = free < 1 ? [] : await claimDueJobs({
       owner: this.deps.owner,
+      gatewayAudience: this.deps.gatewayAudience,
       limit: free,
       leaseSeconds: settings.leaseSeconds,
       maxConcurrentCalls: settings.maxConcurrentCalls,

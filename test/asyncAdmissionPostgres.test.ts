@@ -116,6 +116,14 @@ describePostgres("database-backed async-admission switch", () => {
       expect(accepted.checks.find((check) => check.name === "external_job_services"))
         .toMatchObject({ ok: true, detail: "1 adapter versions on every instance" });
       await modules.activation.deactivateAsyncAdmission(modules.pool.migrationPool);
+      // Another running instance sells v8, which the first cannot resume.
+      await worker("00000000-0000-4000-8000-0000000000e3", {
+        syncExecutionLeases: true, externalJobWorker: true,
+        externalJobAdapters: { dummy: ["v7", "v8"] }, externalJobSales: { dummy: "v8" },
+      });
+      const mixed = await activate();
+      expect(failed(mixed.checks)).toEqual(["external_job_services"]);
+      expect(mixed.enabled).toBe(false);
     } finally {
       registry.clearServicesForTests();
     }

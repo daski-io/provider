@@ -186,10 +186,15 @@ serviceable with this build's handlers and keys (unfinished external jobs
 included), at least one running instance with every running instance (fresh
 heartbeat in `provider_runtime_instances`) a compatible external-job worker,
 an active `PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`), and every
-running instance declaring every external-job adapter version new sales or
-unfinished jobs need (`external_job_services`). It records the checks as
-evidence. Every process of this build runs the worker, so stop older
-processes before activating. The command never migrates.
+running instance declaring every external-job adapter version new sales (of
+this build or of any running instance) or unfinished jobs need
+(`external_job_services`). It records the checks as evidence. Every process
+of this build runs the worker, so stop older processes before activating.
+The command never migrates. While the switch is on, boot also refuses a build
+that cannot resume an adapter version a running instance still sells, so jobs
+admitted during a rolling upgrade never outlive every process that can resume
+them. Give every replica the same active key: a process without one claims no
+external job.
 
 ### External-job worker
 

@@ -36,6 +36,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     codec: typeof import("../src/core/externalJobs/jobCodec.js");
     handoff: typeof import("../src/core/externalJobs/journalHandoff.js");
     health: typeof import("../src/core/externalJobs/health.js");
+    servicing: typeof import("../src/core/externalJobs/servicing.js");
   };
 
   beforeAll(async () => {
@@ -58,6 +59,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       codec: await import("../src/core/externalJobs/jobCodec.js"),
       handoff: await import("../src/core/externalJobs/journalHandoff.js"),
       health: await import("../src/core/externalJobs/health.js"),
+      servicing: await import("../src/core/externalJobs/servicing.js"),
     };
     await modules.pool.runMigrations();
     await modules.pool.configureRuntimePrivileges();
@@ -187,13 +189,28 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     });
     expect(admitted.transaction.state).toBe("external_job");
     const claim = () => modules.claims.claimDueJobs({
-      owner: "00000000-0000-4000-8000-0000000000e2", limit: 1, leaseSeconds: 30, maxConcurrentCalls: 4,
-      serviceable: [{ serviceSlug: "dummy", adapterVersion: "v1" }],
+      owner: "00000000-0000-4000-8000-0000000000e2", gatewayAudience: ORIGIN, limit: 1, leaseSeconds: 30,
+      maxConcurrentCalls: 4, serviceable: [{ serviceSlug: "dummy", adapterVersion: "v1" }],
     });
     const [queued] = await claim();
     await expect(modules.claims.renewJobLease(queued!, 30)).resolves.toBe(true);
-    const intent = await modules.transitions.recordStartIntent({ job: queued!, from: "queued", retentionSeconds: 3_600 });
-    const started = { ...queued!, ...intent! };
+    const intent = await modules.transitions.recordStartIntent({
+      job: queued!, from: "queued", retentionSeconds: 3_600, leaseSeconds: 30,
+    });
+    // An ambiguous start, then a settled restart under the same journal entry.
+    const first = { ...queued!, ...intent! };
+    await expect(modules.transitions.fenced(first, "starting", (client) => modules.transitions.updateJob(client, first, {
+      phase: "reconciling", delaySeconds: 0, failures: "increment", errorCode: "start.timeout",
+      journal: { ambiguous: "timeout" },
+    }))).resolves.toBe("committed");
+    await expect(modules.handoff.startSettlesIn(modules.pool.pool, first, 0)).resolves.toBe(0);
+    const [reconciling] = await claim();
+    const restarted = await modules.transitions.recordStartIntent({
+      job: reconciling!, from: "reconciling", retentionSeconds: 3_600, leaseSeconds: 30,
+      restart: { basis: "authoritative-absence", replayMarginSeconds: 0, settleSeconds: 0 },
+    });
+    expect(restarted?.journalOperationId).toBe(intent!.journalOperationId);
+    const started = { ...reconciling!, ...restarted! };
     await expect(modules.transitions.fenced(started, "starting", (client) => modules.transitions.updateJob(client, started, {
       phase: "polling", reference: modules.codec.sealJobField(keys, "reference", started, { jobId: "j" }),
       delaySeconds: 0, failures: "reset", errorCode: null, journal: "confirmed",
@@ -204,7 +221,8 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     await expect(modules.transitions.finishJob(polling!, "polling", { status: "completed" })).resolves.toBe("committed");
     await expect(modules.health.inspectExternalJobs(modules.pool.pool, {
       adapterVersions: () => new Set(["v1"]), keyIds: new Set(["k1"]), canSeal: true,
-    }, 30)).resolves.toMatchObject({ active: 0 });
+    }, 30, ORIGIN)).resolves.toMatchObject({ active: 0 });
+    await expect(modules.servicing.verifyLiveExternalJobSales(modules.pool.pool, [])).resolves.toBeUndefined();
     await modules.pool.pool.query(
       "UPDATE provider_runtime_instances SET worker_heartbeat_at=now() WHERE instance_id=gen_random_uuid()",
     );

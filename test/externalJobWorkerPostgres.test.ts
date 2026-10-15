@@ -25,6 +25,7 @@ import { createDisposableDatabase, describePostgres, type DisposableDatabase } f
 import { echoResultSchema } from "./standardRailOutcomeFixture.js";
 
 const never = () => new Promise<never>(() => undefined);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // L04/L06 against PostgreSQL: the worker drives each job through its
 // persisted phases with fenced leases; every non-definitive start answer
@@ -162,6 +163,32 @@ describePostgres("external-job worker against PostgreSQL", () => {
     expect(await harness.reference(job.taskId)).toEqual({ jobId: "up-1" });
     expect(upstream.size).toBe(1);
     expect(harness.adapter.calls.map((entry) => entry.method)).toEqual(["start", "recoverStart"]);
+  });
+
+  it("never sends a start its lease cannot outlast, and reconciles the recorded intent", async () => {
+    h = await startJobHarness({ settings: { callTimeoutMs: 1_000, leaseSeconds: 3, leaseRenewMs: 1_000 } });
+    const harness = h;
+    const job = await harness.admit();
+    const { idempotency_key: key } = await harness.job(job.taskId);
+    // The start intent waits behind the journal lock until the lease could
+    // no longer cover a call and a renewal: it commits, the call is not sent.
+    const blocker = await pool.connect();
+    try {
+      await blocker.query("SELECT pg_advisory_lock(hashtext('dummy'), hashtext($1))", [key]);
+      const round = harness.round();
+      await sleep(2_800);
+      await blocker.query("SELECT pg_advisory_unlock(hashtext('dummy'), hashtext($1))", [key]);
+      await round;
+    } finally {
+      blocker.release();
+    }
+    expect(harness.adapter.calls).toEqual([]);
+    expect(await harness.job(job.taskId)).toMatchObject({ phase: "starting", start_attempts: 1 });
+    // Like any interrupted start, the recorded intent is reconciled.
+    await harness.expireLease(job.taskId);
+    await harness.round();
+    expect(await harness.job(job.taskId)).toMatchObject({ phase: "reconciling", last_error_code: "start.interrupted" });
+    expect(harness.adapter.calls.map((entry) => entry.method)).toEqual([]);
   });
 
   it("delays a queued job while the product is down instead of starting or failing it", async () => {

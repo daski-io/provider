@@ -127,27 +127,44 @@ export interface StartIntent {
 
 /**
  * Record a start intent before the call: queued or reconciling becomes
- * starting under the same lease, the first attempt time and the conservative
- * replay horizon (first attempt plus the declared retention) are fixed once,
- * and no start is recorded at or after the fulfillment deadline. A restart
- * after recovery additionally needs its basis to still hold at this
- * database instant: proven absence, or a replay horizon that leaves room for
- * the bounded call plus a safety margin. The start journal records the same
- * intent in this transaction (begun, or reopened under the same identity; a
- * confirmed journal, a start known to have executed, refuses).
+ * starting under the same lease, renewed to its full length for the call,
+ * the first attempt time and the conservative replay horizon (first attempt
+ * plus the declared retention) are fixed once, and no start is recorded at
+ * or after the fulfillment deadline. A restart after recovery additionally
+ * needs its basis to still hold at this database instant: proven absence of
+ * a start that has settled (ambiguous in the journal for at least
+ * `settleSeconds`, so a request still in flight has landed), or a replay
+ * horizon that leaves room for the bounded call plus a safety margin. The
+ * start journal records the same intent in this transaction (begun, or
+ * reopened under the same identity; a confirmed journal, a start known to
+ * have executed, refuses).
  */
 export async function recordStartIntent(args: {
   job: ClaimedJob;
   from: "queued" | "reconciling";
   retentionSeconds: number | null;
-  restart?: { basis: "authoritative-absence" | "idempotent-replay"; replayMarginSeconds: number };
+  leaseSeconds: number;
+  restart?: {
+    basis: "authoritative-absence" | "idempotent-replay";
+    replayMarginSeconds: number;
+    settleSeconds?: number;
+  };
 }): Promise<StartIntent | null> {
   const { job } = args;
   let intent: StartIntent | null = null;
   const outcome = await fenced(job, args.from, async (client) => {
+    if (args.restart?.settleSeconds !== undefined) {
+      const settled = await client.query(
+        `SELECT 1 FROM supplier_operations
+          WHERE id=$1 AND state='ambiguous' AND updated_at <= now() - make_interval(secs => $2)`,
+        [job.journalOperationId, args.restart.settleSeconds],
+      );
+      expectOne(settled.rowCount);
+    }
     const journalOperationId = await journalStartIntent(client, job);
     const result = await client.query<{ first: string; horizon: string | null }>(
       `UPDATE provider_external_jobs SET phase='starting', journal_operation_id=$5,
+          lease_expires_at=now() + make_interval(secs => $6),
           first_start_attempt_at=COALESCE(first_start_attempt_at, now()),
           idempotency_valid_before=CASE WHEN first_start_attempt_at IS NULL AND $2::int IS NOT NULL
             THEN now() + make_interval(secs => $2::int) ELSE idempotency_valid_before END,
@@ -161,7 +178,7 @@ export async function recordStartIntent(args: {
                   floor(extract(epoch FROM idempotency_valid_before))::bigint::text AS horizon`,
       [
         job.taskId, args.retentionSeconds, args.restart?.basis ?? null,
-        args.restart?.replayMarginSeconds ?? 0, journalOperationId,
+        args.restart?.replayMarginSeconds ?? 0, journalOperationId, args.leaseSeconds,
       ],
     );
     expectOne(result.rowCount);

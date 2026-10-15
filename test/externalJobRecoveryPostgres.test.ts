@@ -10,7 +10,10 @@ const target = vi.hoisted(() => {
   return { name };
 });
 
+import { randomUUID } from "node:crypto";
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
+import { claimDueJobs } from "../src/core/externalJobs/jobClaims.js";
+import { recordStartIntent } from "../src/core/externalJobs/jobTransitions.js";
 import type { ExternalJobContext } from "../src/core/serviceRegistry/types.js";
 import { echoCompleted, startJobHarness, type JobHarness } from "./externalJobHarness.js";
 import { acceptDispatchSnapshotAsGateway } from "./gatewayWire.js";
@@ -93,6 +96,7 @@ describePostgres("external-job recovery, backoff and deadlines against PostgreSQ
     const first = await h.job(job.taskId);
     h.adapter.onRecover = async () => ({ kind: "safe-to-start", basis: "idempotent-replay" });
     h.adapter.onStart = async () => ({ kind: "accepted", job: { jobId: "replayed" } });
+    // The product deduplicates the same key: a replay needs no settle time.
     await h.due(job.taskId);
     await h.round();
     const replayed = await h.job(job.taskId);
@@ -127,6 +131,7 @@ describePostgres("external-job recovery, backoff and deadlines against PostgreSQ
     const job = await ambiguousJob(h);
     h.adapter.onRecover = async () => ({ kind: "safe-to-start", basis: "authoritative-absence" });
     h.adapter.onStart = async () => ({ kind: "terminal", result: { status: "completed", message: 7 } } as never);
+    await h.settle(job.taskId);
     await h.due(job.taskId);
     await h.round();
     // The second start answered with a result the contract refuses: the
@@ -139,6 +144,40 @@ describePostgres("external-job recovery, backoff and deadlines against PostgreSQ
     await h.round();
     expect(await h.job(job.taskId)).toMatchObject({ start_attempts: 2, last_error_code: "recover.restart_not_permitted" });
     expect(starts(h)).toHaveLength(2);
+  });
+
+  it("starts again on proven absence only after the ambiguous start has settled", async () => {
+    h = await startJobHarness();
+    const harness = h;
+    const job = await ambiguousJob(harness);
+    harness.adapter.onRecover = async () => ({ kind: "safe-to-start", basis: "authoritative-absence" });
+    harness.adapter.onStart = async () => ({ kind: "accepted", job: { jobId: "after-settling" } });
+    // Proven absence right after the timeout is not acted on: the original
+    // request may still reach the product. Recovery waits out the call
+    // limit plus the safety margin from the ambiguity, then starts again.
+    await harness.due(job.taskId);
+    await harness.round();
+    expect(await harness.job(job.taskId)).toMatchObject({
+      phase: "reconciling", start_attempts: 1, last_error_code: "recover.restart_settling",
+    });
+    expect(await harness.waitSeconds(job.taskId)).toBeGreaterThanOrEqual(115);
+    expect(starts(harness)).toHaveLength(1);
+    // A restart intent recorded too early is refused by the database too.
+    await harness.due(job.taskId);
+    const [claimed] = await claimDueJobs({
+      owner: randomUUID(), gatewayAudience: harness.rail.config.gatewayAudience, limit: 1, leaseSeconds: 3,
+      maxConcurrentCalls: 4, serviceable: [{ serviceSlug: "dummy", adapterVersion: harness.adapter.version }],
+    });
+    await expect(recordStartIntent({
+      job: claimed!, from: "reconciling", retentionSeconds: null, leaseSeconds: 3,
+      restart: { basis: "authoritative-absence", replayMarginSeconds: 121, settleSeconds: 121 },
+    })).resolves.toBeNull();
+    await harness.expireLease(job.taskId);
+    await harness.settle(job.taskId);
+    await harness.due(job.taskId);
+    await harness.round();
+    expect(await harness.job(job.taskId)).toMatchObject({ phase: "polling", start_attempts: 2 });
+    expect(starts(harness)).toHaveLength(2);
   });
 
   it("keeps hundreds of pending polls off the failure budget and backs off failures without a new job", async () => {

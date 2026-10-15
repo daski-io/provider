@@ -13,7 +13,9 @@ const target = vi.hoisted(() => {
 });
 
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
-import { externalJobServicing } from "../src/core/externalJobs/servicing.js";
+import { inspectExternalJobs } from "../src/core/externalJobs/health.js";
+import { externalJobSalesStop } from "../src/core/externalJobs/sales.js";
+import { externalJobServicing, verifyLiveExternalJobSales } from "../src/core/externalJobs/servicing.js";
 import { ExternalJobWorker } from "../src/core/externalJobs/worker.js";
 import { parseFieldEncryptionKeys } from "../src/core/security/fieldEncryption.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
@@ -24,7 +26,7 @@ import {
   type ExternalJobServicing,
 } from "../src/core/standardRail/retainedObligations.js";
 import { echoCompleted, startJobHarness, TEST_WORKER_SETTINGS, type JobHarness } from "./externalJobHarness.js";
-import { jobKeys, jobService, scriptedAdapter } from "./externalJobFixture.js";
+import { jobKeys, jobRuntime, jobService, scriptedAdapter, setAsyncAdmission } from "./externalJobFixture.js";
 import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
 import { echoResultSchema } from "./standardRailOutcomeFixture.js";
 
@@ -59,7 +61,10 @@ describePostgres("external jobs across upgrades against PostgreSQL", () => {
   });
 
   const worker = (harness: JobHarness, keys = jobKeys(), contracts = new ResultContracts(harness.rail.config)) =>
-    new ExternalJobWorker({ owner: randomUUID(), settings: TEST_WORKER_SETTINGS, keys, resultContracts: contracts, random: () => 0.5 });
+    new ExternalJobWorker({
+      owner: randomUUID(), gatewayAudience: harness.rail.config.gatewayAudience, settings: TEST_WORKER_SETTINGS,
+      keys, resultContracts: contracts, random: () => 0.5,
+    });
 
   it("resumes a job with the adapter version that admitted it while new sales use the next", async () => {
     h = await startJobHarness({ version: "v1" });
@@ -149,5 +154,79 @@ describePostgres("external jobs across upgrades against PostgreSQL", () => {
       parseFieldEncryptionKeys({ activeKeyId: "primary", previousKeys: `k1=0x${"a1".repeat(32)}` }))))
       .rejects.toThrow(/\(no active encryption key for unfinished external jobs\)/);
     expect((await harness.job(pending.taskId)).phase).toBe("queued");
+  });
+  it("joins running instances only if it resumes every adapter version they sell", async () => {
+    h = await startJobHarness({ version: "v1" });
+    const harness = h;
+    const current = jobService(harness.adapter);
+    const older = randomUUID();
+    await pool.query(
+      `INSERT INTO provider_runtime_instances (instance_id,runtime_epoch,revision,capabilities)
+       VALUES ($1,1,'older',$2::jsonb)`,
+      [older, JSON.stringify({
+        syncExecutionLeases: true, externalJobWorker: true,
+        externalJobAdapters: { dummy: ["v0"] }, externalJobSales: { dummy: "v0" },
+      })],
+    );
+    try {
+      // The older instance may still admit v0 jobs: a build that cannot resume them is refused at boot.
+      await expect(verifyLiveExternalJobSales(pool, [current]))
+        .rejects.toThrow("running instances sell external-job adapter versions this build cannot resume: dummy@v0");
+      await expect(verifyLiveExternalJobSales(pool, [
+        jobService(harness.adapter, { previousExternalJobAdapters: { v0: scriptedAdapter("v0") } }),
+      ])).resolves.toBeUndefined();
+      // While async admission is off nobody admits external jobs.
+      await setAsyncAdmission(pool, false);
+      await expect(verifyLiveExternalJobSales(pool, [current])).resolves.toBeUndefined();
+    } finally {
+      await setAsyncAdmission(pool, true);
+      await pool.query("UPDATE provider_runtime_instances SET stopped_at=now() WHERE instance_id=$1", [older]);
+    }
+  });
+
+  it("claims nothing without an active key, and reports the jobs it cannot service", async () => {
+    h = await startJobHarness({ version: "v1" });
+    const harness = h;
+    const job = await harness.admit();
+    // Read-only keys open stored state but cannot seal the reference a start returns.
+    const readOnly = parseFieldEncryptionKeys({ activeKeyId: "primary", previousKeys: `k1=0x${"a1".repeat(32)}` });
+    expect(await harness.round(worker(harness, readOnly))).toBe(0);
+    expect(harness.adapter.calls).toEqual([]);
+    const inspection = await inspectExternalJobs(
+      pool, externalJobServicing([jobService(harness.adapter)], readOnly), TEST_WORKER_SETTINGS.leaseSeconds,
+      harness.rail.config.gatewayAudience,
+    );
+    expect(inspection.keyMissing).toBe(inspection.active);
+    expect(inspection.active).toBeGreaterThan(0);
+    // A process with an active key takes the job over.
+    await harness.round();
+    expect((await harness.job(job.taskId)).phase).toBe("polling");
+  });
+
+  it("services, reports and stops sales only for its own gateway audience", async () => {
+    h = await startJobHarness({ version: "v1" });
+    const harness = h;
+    const job = await harness.admit();
+    const other = "https://other-gateway.example";
+    const elsewhere = new ExternalJobWorker({
+      owner: randomUUID(), gatewayAudience: other, settings: TEST_WORKER_SETTINGS, keys: jobKeys(),
+      resultContracts: new ResultContracts(harness.rail.config), random: () => 0.5,
+    });
+    expect(await harness.round(elsewhere)).toBe(0);
+    const servicing = externalJobServicing([jobService(harness.adapter)], jobKeys());
+    await expect(inspectExternalJobs(pool, servicing, TEST_WORKER_SETTINGS.leaseSeconds, other))
+      .resolves.toMatchObject({ active: 0 });
+    // A rejected result of this audience stops its sales; another audience's never does.
+    await pool.query(
+      "UPDATE provider_external_jobs SET result_diagnostic='result_schema_mismatch', revision=revision + 1 WHERE task_id=$1",
+      [job.taskId],
+    );
+    const sale = { serviceSlug: "dummy", skillId: harness.rail.outcome.skillId, adapter: harness.adapter };
+    const runtime = jobRuntime(jobKeys());
+    await expect(externalJobSalesStop(runtime, pool, { ...sale, gatewayAudience: harness.rail.config.gatewayAudience }))
+      .resolves.toBe("invalid_result_mapping");
+    await expect(externalJobSalesStop(runtime, pool, { ...sale, gatewayAudience: other })).resolves.toBeNull();
+    await harness.round();
+    expect((await harness.job(job.taskId)).phase).toBe("polling");
   });
 });

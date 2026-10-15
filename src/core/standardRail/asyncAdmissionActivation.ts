@@ -30,8 +30,9 @@ const outcome = async (name: ActivationCheck["name"], work: () => Promise<string
  * no pre-R1 execution awaits the cutover, this build can service every
  * retained obligation with its handlers and keys (unfinished external jobs
  * included), every running instance is a compatible external-job worker (at
- * least one) that declares every adapter version new sales or unfinished
- * jobs need, and an active key can seal new jobs' input.
+ * least one) that declares every adapter version new sales (this build's or
+ * any running instance's) or unfinished jobs need, and an active key can
+ * seal new jobs' input.
  */
 export async function asyncActivationChecks(
   db: Queryable,
@@ -67,8 +68,8 @@ export async function asyncActivationChecks(
       return `active key ${keys.activeKeyId}`;
     }),
     await outcome("external_job_services", async () => {
-      const required = await requiredAdapterVersions(db);
       const live = await liveRuntimeInstances(db);
+      const required = await requiredAdapterVersions(db, config.gatewayAudience, live);
       const lacking = live.filter((instance) => [...required].some(([slug, versions]) =>
         [...versions].some((version) => !declaredVersions(instance, slug).includes(version))));
       if (lacking.length > 0) {
@@ -80,17 +81,33 @@ export async function asyncActivationChecks(
   ];
 }
 
-/** New sales' current external-job adapter versions and those unfinished jobs were admitted under. */
-async function requiredAdapterVersions(db: Queryable): Promise<Map<string, Set<string>>> {
+/**
+ * The external-job adapter versions new sales use (this build's and every
+ * running instance's declared ones) and those unfinished jobs of this
+ * gateway audience were admitted under.
+ */
+async function requiredAdapterVersions(
+  db: Queryable,
+  gatewayAudience: string,
+  live: readonly LiveRuntimeInstance[],
+): Promise<Map<string, Set<string>>> {
   const required = new Map<string, Set<string>>();
   const add = (slug: string, version: string) => required.set(slug, (required.get(slug) ?? new Set()).add(version));
   for (const service of getAllServices()) {
     if (service.adapter.mode === "external-job") add(service.manifest.slug, service.adapter.version);
   }
+  for (const instance of live) {
+    const sales = instance.capabilities.externalJobSales;
+    if (!sales || typeof sales !== "object" || Array.isArray(sales)) continue;
+    for (const [slug, version] of Object.entries(sales as Record<string, unknown>)) {
+      if (typeof version === "string") add(slug, version);
+    }
+  }
   const open = await db.query<{ slug: string; version: string }>(
     `SELECT DISTINCT t.service_slug AS slug, j.adapter_version AS version
        FROM provider_external_jobs j JOIN provider_transactions t ON t.id=j.task_id
-      WHERE j.phase IN ('queued','starting','reconciling','polling')`,
+      WHERE j.phase IN ('queued','starting','reconciling','polling') AND t.gateway_audience=$1`,
+    [gatewayAudience],
   );
   for (const row of open.rows) add(row.slug, row.version);
   return required;

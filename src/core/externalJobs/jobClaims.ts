@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
 import { inTransaction } from "../db/queryable.js";
@@ -20,6 +21,12 @@ export interface ClaimedJob {
   reference: SealedField | null;
   candidate: SealedField | null;
   leaseToken: string;
+  /**
+   * The local monotonic time (`performance.now()`, ms) until which this
+   * holder can count on its lease: the claim's lease length measured from
+   * before its transaction began, so never later than the database expiry.
+   */
+  leaseValidUntil: number;
   /** Unix seconds, from the database clock. */
   acceptedAt: number;
   fulfillmentDeadline: number;
@@ -50,18 +57,20 @@ const sealed = (ciphertext: string | null, keyId: string | null): SealedField | 
  * Claim due jobs under fresh leases. Claims are serialized by a transaction
  * advisory lock and count every live lease, so at most `maxConcurrentCalls`
  * database-fenced calls run across all processes sharing the database. Only
- * jobs whose persisted adapter version this build can resume are claimed;
- * a job whose lease expired is due again (its interrupted call is then
- * reconciled, never repeated blindly).
+ * jobs of this provider's gateway audience whose persisted adapter version
+ * this build can resume are claimed; a job whose lease expired is due again
+ * (its interrupted call is then reconciled, never repeated blindly).
  */
 export async function claimDueJobs(args: {
   owner: string;
+  gatewayAudience: string;
   limit: number;
   leaseSeconds: number;
   maxConcurrentCalls: number;
   serviceable: readonly ServiceableVersion[];
 }): Promise<ClaimedJob[]> {
   if (args.limit < 1 || args.serviceable.length === 0) return [];
+  const requestedAt = performance.now();
   return inTransaction(pool, async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [CLAIM_LOCK]);
     const live = await client.query<{ live: number }>(
@@ -76,6 +85,7 @@ export async function claimDueJobs(args: {
            JOIN provider_transactions t ON t.id=j.task_id
           WHERE j.phase IN ('queued','starting','reconciling','polling') AND j.next_run_at <= now()
             AND (j.lease_expires_at IS NULL OR j.lease_expires_at <= now())
+            AND t.gateway_audience=$6
             AND (t.service_slug, j.adapter_version) IN (SELECT * FROM unnest($1::text[], $2::text[]))
           ORDER BY j.next_run_at, j.task_id
           LIMIT $3
@@ -93,14 +103,14 @@ export async function claimDueJobs(args: {
       [
         args.serviceable.map((entry) => entry.serviceSlug),
         args.serviceable.map((entry) => entry.adapterVersion),
-        free, args.owner, args.leaseSeconds,
+        free, args.owner, args.leaseSeconds, args.gatewayAudience,
       ],
     );
-    return claimed.rows.map(claimedJob);
+    return claimed.rows.map((row) => claimedJob(row, requestedAt + args.leaseSeconds * 1_000));
   });
 }
 
-function claimedJob(row: Record<string, unknown>): ClaimedJob {
+function claimedJob(row: Record<string, unknown>, leaseValidUntil: number): ClaimedJob {
   const seconds = (value: unknown) => value === null || value === undefined ? null : Number(value);
   return {
     taskId: String(row.task_id),
@@ -117,6 +127,7 @@ function claimedJob(row: Record<string, unknown>): ClaimedJob {
     reference: sealed(row.job_reference_ciphertext as string | null, row.job_reference_key_id as string | null),
     candidate: sealed(row.result_candidate_ciphertext as string | null, row.result_candidate_key_id as string | null),
     leaseToken: String(row.lease_token),
+    leaseValidUntil,
     acceptedAt: seconds(row.accepted_epoch)!,
     fulfillmentDeadline: seconds(row.deadline_epoch)!,
     firstStartAttemptAt: seconds(row.first_start_epoch),
@@ -142,28 +153,79 @@ export async function renewJobLease(job: ClaimedJob, leaseSeconds: number): Prom
 
 /** One lease held for a whole step: renewed until stopped, its loss aborts the signal. */
 export interface HeldJobLease {
+  /** Aborted once the lease is lost, or one renewal interval before it could expire unrenewed. */
   readonly lost: AbortSignal;
+  /**
+   * Whether a call bounded by `timeoutMs` ends while this holder surely
+   * still holds the lease, with one renewal interval to spare: no other
+   * worker can claim the job before the call has ended.
+   */
+  covers(timeoutMs: number): boolean;
+  /** A fenced write extended the lease from a transaction begun after `requestedAt` (local monotonic ms). */
+  extendedFrom(requestedAt: number): void;
   stop(): void;
 }
 
+/**
+ * Hold a claimed lease for one step. Its validity is tracked locally from
+ * the moment each claim, renewal or extension was requested (never later
+ * than the database expiry it produced), so a holder whose renewals fail or
+ * stall stops waiting on its call before any other worker can take the job
+ * over, whatever the database answers.
+ */
 export function holdJobLease(
   job: ClaimedJob,
   timing: { leaseSeconds: number; leaseRenewMs: number },
   warn: (message: string) => void,
+  deps: { renew?: typeof renewJobLease; clock?: () => number } = {},
 ): HeldJobLease {
+  const renew = deps.renew ?? renewJobLease;
+  const clock = deps.clock ?? (() => performance.now());
+  const leaseMs = timing.leaseSeconds * 1_000;
   const controller = new AbortController();
+  let validUntil = job.leaseValidUntil;
   let renewing = false;
+  let stopped = false;
+  let expiry: NodeJS.Timeout | undefined;
+  const lose = (message: string) => {
+    if (stopped || controller.signal.aborted) return;
+    warn(message);
+    controller.abort();
+  };
+  const arm = () => {
+    clearTimeout(expiry);
+    if (stopped || controller.signal.aborted) return;
+    expiry = setTimeout(
+      () => lose("External job lease could not be kept"),
+      Math.max(0, validUntil - timing.leaseRenewMs - clock()),
+    );
+    expiry.unref();
+  };
+  const extendedFrom = (requestedAt: number) => {
+    validUntil = Math.max(validUntil, requestedAt + leaseMs);
+    arm();
+  };
+  arm();
   const timer = setInterval(() => {
     if (renewing || controller.signal.aborted) return;
     renewing = true;
-    renewJobLease(job, timing.leaseSeconds).then((held) => {
-      if (held) return;
-      warn("External job lease was lost");
-      controller.abort();
+    const requestedAt = clock();
+    renew(job, timing.leaseSeconds).then((held) => {
+      if (held) extendedFrom(requestedAt);
+      else lose("External job lease was lost");
     }, () => warn("External job lease could not be renewed")).finally(() => {
       renewing = false;
     });
   }, timing.leaseRenewMs);
   timer.unref();
-  return { lost: controller.signal, stop: () => clearInterval(timer) };
+  return {
+    lost: controller.signal,
+    covers: (timeoutMs) => !controller.signal.aborted && validUntil - clock() >= timeoutMs + timing.leaseRenewMs,
+    extendedFrom,
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+      clearTimeout(expiry);
+    },
+  };
 }

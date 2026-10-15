@@ -97,6 +97,26 @@ export async function journalStartConfirmed(client: Queryable, job: StartOperati
   await confirmSupplierOperationWithJobReference(job.journalOperationId, job.taskId, client);
 }
 
+/**
+ * Seconds until a job's last ambiguous start has been settled for
+ * `settleSeconds` (0 once it has), on the database clock; null unless the
+ * journal records the start as ambiguous. Recovery starts nothing earlier,
+ * so a start request still in flight lands before another could be sent.
+ */
+export async function startSettlesIn(
+  db: Queryable,
+  job: Pick<StartOperation, "journalOperationId">,
+  settleSeconds: number,
+): Promise<number | null> {
+  if (!job.journalOperationId) return null;
+  const row = (await db.query<{ remaining: number }>(
+    `SELECT GREATEST(0, ceil(extract(epoch FROM updated_at + make_interval(secs => $2) - now())))::int AS remaining
+       FROM supplier_operations WHERE id=$1 AND state='ambiguous'`,
+    [job.journalOperationId, settleSeconds],
+  )).rows[0];
+  return row ? row.remaining : null;
+}
+
 /** What the start journal says, its job-row reference followed and decrypted. */
 export type StartReplay =
   | { state: "none" | "intent" | "ambiguous" | "failed" }

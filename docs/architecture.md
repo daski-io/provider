@@ -166,15 +166,21 @@ job. Core admits the funded order (above), then the worker in
 | `polling` | `poll` (read-only) the original upstream job | `working` |
 | `completed` / `failed` | Serve the frozen result | `completed` / `failed` |
 
-- **Leases and fencing.** Each round claims due jobs (`next_run_at` passed,
-  no live lease) under a fresh lease token, serialized by an advisory lock
-  and limited to the configured number of live leases across every process
-  sharing the database. The holder renews its lease while one bounded call
-  runs and releases it with its outcome; every write runs in one short
-  transaction that first locks the row only while this holder still owns an
-  unexpired lease in the expected phase, so a stale worker cannot change
-  phase, schedule, reference or result. No transaction stays open across a
-  call.
+- **Leases and fencing.** Each round claims due jobs of this provider's
+  gateway audience (`next_run_at` passed, no live lease) under a fresh lease
+  token, serialized by an advisory lock and limited to the configured number
+  of live leases across every process sharing the database; a process
+  without an active encryption key claims none. The holder renews its lease
+  while one bounded call runs and releases it with its outcome; every write
+  runs in one short transaction that first locks the row only while this
+  holder still owns an unexpired lease in the expected phase, so a stale
+  worker cannot change phase, schedule, reference or result. No transaction
+  stays open across a call. The holder also tracks its lease on its own
+  monotonic clock, from when each claim, renewal or start intent was
+  requested: a call starts only while that lease still covers the call limit
+  plus one renewal interval, and the holder stops waiting one renewal
+  interval before an unrenewed lease could expire, so no other worker can
+  take a job over while its call is awaited.
 - **Calls.** Only `calls.ts` invokes an adapter, under the per-call limit and
   the lease. Core stops waiting at either, even if the adapter ignores its
   signal, and never writes the late answer. Any throw, abort, timeout or
@@ -186,8 +192,9 @@ job. Core admits the funded order (above), then the worker in
 - **Start.** `queued` becomes `starting` only by recording the intent first,
   in the same write as the first attempt time and the replay horizon (first
   attempt plus the adapter's declared `idempotencyRetentionSeconds`); both
-  are fixed once and no retry extends them. A product outage defers a queued
-  job (`product_unavailable`) instead of starting or failing it. A job whose
+  are fixed once and no retry extends them. The same write renews the lease
+  to its full length for the call. A product outage defers a queued job
+  (`product_unavailable`) instead of starting or failing it. A job whose
   lease expired while `starting` was interrupted and always reconciles.
 - **Start journal.** Core owns the start's supplier-operation journal entry
   (`external-job.start`, keyed by the service and the job's idempotency
@@ -205,11 +212,14 @@ job. Core admits the funded order (above), then the worker in
   confirmed entry means the start executed, so no restart follows it.
 - **Recovery.** `recoverStart` may return the original job or result, or a
   safe-to-start verdict, which core acts on only with the same key, never
-  past the deadline, never after the start is known to have executed, and,
-  for `idempotent-replay`, only with a declared retention whose persisted
-  horizon still leaves the call limit plus a 120-second margin (checked at
-  the database instant of the new intent). An empty eventually consistent
-  search is the adapter's `unknown`, never a basis.
+  past the deadline, never after the start is known to have executed, for
+  `authoritative-absence` only once the previous start has settled
+  (ambiguous in the journal for the call limit plus 120 seconds, so a
+  request still in flight lands first; `recover.restart_settling` until
+  then), and, for `idempotent-replay`, only with a declared retention whose
+  persisted horizon still leaves the call limit plus a 120-second margin
+  (both checked at the database instant of the new intent). An empty
+  eventually consistent search is the adapter's `unknown`, never a basis.
 - **Scheduling.** A pending poll waits the poll interval (or the product's
   hint) and resets the consecutive-failure count; it never spends the failure
   budget. Failures and unresolved recoveries back off exponentially from 15
@@ -245,10 +255,12 @@ job. Core admits the funded order (above), then the worker in
   activation refuse a build that cannot resume every unfinished job (its
   version's definition, its adapter version, its encryption keys), so an
   incompatible build cannot take one over. Each process declares the adapter
-  versions it resumes in its heartbeat, and activation requires every running
-  instance to declare every version new sales or unfinished jobs need, so
-  compatible R1 processes may overlap while the fences keep each call
-  single.
+  versions it resumes and the one it sells in its heartbeat. Activation
+  requires every running instance to resume every version new sales (of any
+  running instance) or unfinished jobs need, and while async admission is on,
+  boot refuses a build that cannot resume a version a running instance still
+  sells, so compatible R1 processes may overlap while the fences keep each
+  call single.
 
 ## Execution ownership and why one replica
 

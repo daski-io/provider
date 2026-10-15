@@ -5,7 +5,12 @@ import { config } from "./core/config.js";
 import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
-import { declaredExternalJobAdapters, externalJobServicing } from "./core/externalJobs/servicing.js";
+import {
+  declaredExternalJobAdapters,
+  externalJobServicing,
+  sellingExternalJobAdapters,
+  verifyLiveExternalJobSales,
+} from "./core/externalJobs/servicing.js";
 import { workerSettingsFromConfig } from "./core/externalJobs/settings.js";
 import { ExternalJobWorker } from "./core/externalJobs/worker.js";
 import { BUILD_CAPABILITIES, registerRuntimeInstance, RUNTIME_INSTANCE_ID } from "./core/runtimeInstance.js";
@@ -58,6 +63,9 @@ async function main(): Promise<void> {
   // unfinished external job needs its definition, its adapter version and
   // the keys its stored state names.
   await verifyRetainedObligations(pool, standard, externalJobServicing(services, jobKeys));
+  // Overlapping running instances may still admit jobs: join them only if
+  // this build resumes every adapter version they sell.
+  await verifyLiveExternalJobSales(pool, services);
   await pruneQuotes(standard);
   await closeMigrationPool();
   await stopSalesOnCommitmentDrift({
@@ -69,6 +77,7 @@ async function main(): Promise<void> {
   stopInstance = await registerRuntimeInstance(pool, config.DEPLOYMENT_REVISION ?? "unknown", {
     ...BUILD_CAPABILITIES,
     externalJobAdapters: declaredExternalJobAdapters(services),
+    externalJobSales: sellingExternalJobAdapters(services),
   });
   // Only executions whose lease expired are failed; another process's live
   // call is never swept. Pre-R1 rows wait for the operator's cutover.
@@ -91,6 +100,7 @@ async function main(): Promise<void> {
   // work resumes in its persisted phase, nothing is resubmitted.
   worker = new ExternalJobWorker({
     owner: RUNTIME_INSTANCE_ID,
+    gatewayAudience: standard.gatewayAudience,
     settings: workerSettingsFromConfig(config),
     keys: jobKeys,
     resultContracts: new ResultContracts(standard),

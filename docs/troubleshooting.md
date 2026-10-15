@@ -84,6 +84,13 @@ order it would take over (see `docs/configuration.md`):
 
 Never delete claims or quotes to pass the check.
 
+If boot refuses with `running instances sell external-job adapter versions
+this build cannot resume: <service>@<version>`, async admission is on and an
+older running instance may still admit jobs under that version, which this
+build could never resume once the older instances stop. Keep the version in
+`previousExternalJobAdapters` for this rollout, or stop the older instances
+before starting this build.
+
 If boot logs `listing commitment drift` (diagnostic `listing_contract_drift`),
 this build's published skill contract changed after the installed bundle was
 issued. New quotes for that listing version stop with
@@ -185,11 +192,11 @@ job's next poll scheduled, reports no code.
 | `external_job_worker_stopped` | This process's worker has not completed a claim round for a minute (typically the database is unreachable) or was stopped. | Restore the database or restart the process; due work resumes from PostgreSQL. |
 | `external_job_lease_stale` | A job lease expired more than one lease length ago and nobody reclaimed it. | Check that a compatible worker runs and can resume the job's adapter version (see the next codes). |
 | `external_job_overdue` | Unfinished work is past its fulfillment deadline. It stays `working` and keeps polling or reconciling at the overdue cadence; nothing new is started. | Check the product for the original jobs. Lite cannot close or refund them. |
-| `external_job_start_ambiguous` | Starts whose outcome is unknown are reconciling through `recoverStart`. | If it persists, check that the product's lookup by order key works. |
+| `external_job_start_ambiguous` | Starts whose outcome is unknown are reconciling through `recoverStart` (`last_error_code` `recover.*`; `recover.restart_settling` while a restart on proven absence waits for the previous start to settle). | If it persists, check that the product's lookup by order key works. |
 | `external_job_result_invalid` | A terminal result failed its admitted contract (see above). | Repair the mapping. |
 | `external_job_failing` | A job's last ten or more calls failed. Backoff applies; the job is never failed for it. | Check the product's availability and the adapter's error mapping. |
 | `external_job_handler_missing` | An unfinished job names an adapter version this build cannot resume. | Restore that version (boot normally refuses this build). |
-| `external_job_key_missing` | An unfinished job's stored state names an encryption key this build lacks. | Restore the key (boot normally refuses this build). |
+| `external_job_key_missing` | An unfinished job's stored state names an encryption key this build lacks, or this process has no active key (its worker then claims nothing). | Restore the key, or set `PROVIDER_DATA_ENCRYPTION_KEY` on every replica (boot normally refuses this build while jobs are unfinished). |
 
 ## Quote is refused or unavailable
 

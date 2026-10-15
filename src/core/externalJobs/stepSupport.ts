@@ -54,7 +54,7 @@ export async function defer(step: Step, phase: ActiveJobPhase, errorCode: string
 export const call = (step: Step, method: AdapterMethod, argument: Record<string, unknown>, start?: StartIntent) =>
   callAdapter({
     adapter: step.adapter, method, job: step.job, argument, start,
-    timeoutMs: step.ctx.settings.callTimeoutMs, leaseLost: step.lease.lost,
+    timeoutMs: step.ctx.settings.callTimeoutMs, lease: step.lease,
   });
 
 export const input = (step: Step) => openJobField(step.ctx.keys, "input", step.job, step.job.input);

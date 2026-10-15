@@ -14,14 +14,15 @@ export type ExternalJobSalesStop = "external_jobs_unavailable" | "invalid_result
  * mapped a terminal product result to something its admitted contract
  * refuses: that integration is broken until a repaired mapper recovers the
  * job (it then finishes and clears the diagnostic) or new sales move to a
- * new adapter version. Any stop affects new sales only; admitted jobs,
- * funded dispatches and reads continue. An unreadable switch throws, which
- * the quote answers as unavailable.
+ * new adapter version. Only jobs of this provider's gateway audience count.
+ * Any stop affects new sales only; admitted jobs, funded dispatches and
+ * reads continue. An unreadable switch throws, which the quote answers as
+ * unavailable.
  */
 export async function externalJobSalesStop(
   runtime: Pick<ExternalJobRuntime, "keys" | "workerRunning">,
   db: Queryable,
-  sale: { serviceSlug: string; skillId: string; adapter: ExternalJobAdapter },
+  sale: { gatewayAudience: string; serviceSlug: string; skillId: string; adapter: ExternalJobAdapter },
 ): Promise<ExternalJobSalesStop | null> {
   if (!runtime.keys.activeKeyId || !runtime.workerRunning()) return "external_jobs_unavailable";
   if (!(await readAsyncAdmission(db)).enabled) return "external_jobs_unavailable";
@@ -30,8 +31,9 @@ export async function externalJobSalesStop(
        SELECT 1 FROM provider_external_jobs j JOIN provider_transactions t ON t.id=j.task_id
         WHERE j.result_diagnostic IS NOT NULL
           AND j.phase IN ('queued','starting','reconciling','polling')
-          AND t.service_slug=$1 AND t.skill_id=$2 AND j.adapter_version=$3) AS broken`,
-    [sale.serviceSlug, sale.skillId, sale.adapter.version],
+          AND t.service_slug=$1 AND t.skill_id=$2 AND j.adapter_version=$3
+          AND t.gateway_audience=$4) AS broken`,
+    [sale.serviceSlug, sale.skillId, sale.adapter.version, sale.gatewayAudience],
   );
   return broken.rows[0]?.broken === true ? "invalid_result_mapping" : null;
 }

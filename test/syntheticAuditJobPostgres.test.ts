@@ -69,7 +69,7 @@ describePostgres("synthetic eight-hour audit against PostgreSQL", () => {
 
   it("completes the audit through signed reads after a lost start answer and eight fake hours", async () => {
     const worker = new ExternalJobWorker({
-      owner: randomUUID(), settings: TEST_WORKER_SETTINGS, keys: jobKeys(),
+      owner: randomUUID(), gatewayAudience: rail.config.gatewayAudience, settings: TEST_WORKER_SETTINGS, keys: jobKeys(),
       resultContracts: new ResultContracts(rail.config), random: () => 0.5,
     });
     const order = await quoteOrder({

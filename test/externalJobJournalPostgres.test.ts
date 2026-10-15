@@ -144,6 +144,7 @@ describePostgres("external-job start journal handoff against PostgreSQL", () => 
     expect(first.op).toMatchObject({ state: "ambiguous", error_code: "execute.transport", attempts: 2 });
     harness.adapter.onRecover = async () => ({ kind: "safe-to-start", basis: "authoritative-absence" });
     harness.adapter.onStart = async () => ({ kind: "accepted", job: { jobId: "second-try" } });
+    await harness.settle(admitted.taskId);
     await harness.due(admitted.taskId);
     await harness.round();
     const second = await journalOf(admitted.taskId);

@@ -18,6 +18,8 @@ export interface RuntimeCapabilities {
   externalJobWorker: boolean;
   /** The external-job adapter versions it resumes, per service. */
   externalJobAdapters?: Record<string, string[]>;
+  /** The external-job adapter version it sells new jobs with, per service. */
+  externalJobSales?: Record<string, string>;
 }
 
 export const BUILD_CAPABILITIES: Readonly<RuntimeCapabilities> = {

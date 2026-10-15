@@ -111,6 +111,7 @@ export class StandardQuoteService {
     if (service.adapter.mode === "external-job") {
       // Never sell a job this provider could not admit, seal or progress.
       const stop = await externalJobSalesStop(this.externalJobs, pool, {
+        gatewayAudience: this.config.gatewayAudience,
         serviceSlug: outcome.serviceSlug, skillId: outcome.skillId, adapter: service.adapter,
       }).catch(() => "service_unavailable" as const);
       if (stop) throw new QuoteUnavailable(stop);

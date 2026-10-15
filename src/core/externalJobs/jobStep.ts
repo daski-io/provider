@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { pool } from "../db/pool.js";
 import { logError, logWarn } from "../logger.js";
 import { getExternalJobAdapter, getService } from "../serviceRegistry/registry.js";
@@ -6,7 +7,7 @@ import { EXTERNAL_JOB_NOT_STARTED, failureEvidence } from "../standardRail/servi
 import { holdJobLease, type ClaimedJob } from "./jobClaims.js";
 import { openJobField } from "./jobCodec.js";
 import { finishJob, recordStartIntent, type StartIntent } from "./jobTransitions.js";
-import { replayStartJournal } from "./journalHandoff.js";
+import { replayStartJournal, startSettlesIn } from "./journalHandoff.js";
 import { pollVerdict, recoveryVerdict, startVerdict, type CallResult, type ReviewedIssue } from "./outcomes.js";
 import {
   accepted,
@@ -26,7 +27,9 @@ export type { StepContext } from "./stepSupport.js";
 /**
  * Margin a same-key replay must leave before its persisted horizon, beyond
  * the bounded call itself: clock skew and network between core and the
- * product.
+ * product. A restart on proven absence also waits this long, plus the call
+ * limit, after the previous start became ambiguous, so a request still in
+ * flight lands first.
  */
 export const REPLAY_SAFETY_MARGIN_SECONDS = 120;
 
@@ -98,10 +101,29 @@ async function queued(step: Step, service: ServiceModule): Promise<void> {
   // Open the input before recording an intent: an unreadable input never
   // leaves a recorded start that was not called.
   const opened = input(step);
-  const intent = await recordStartIntent({
-    job, from: "queued", retentionSeconds: step.adapter.idempotencyRetentionSeconds ?? null,
-  });
+  const intent = await intendStart(step, "queued");
   if (intent) await start(step, intent, opened);
+}
+
+/**
+ * Record the start intent; it renews the held lease to its full length, so
+ * the call that follows starts with the whole lease ahead of it.
+ */
+async function intendStart(
+  step: Step,
+  from: "queued" | "reconciling",
+  restart?: Parameters<typeof recordStartIntent>[0]["restart"],
+): Promise<StartIntent | null> {
+  const requestedAt = performance.now();
+  const intent = await recordStartIntent({
+    job: step.job,
+    from,
+    retentionSeconds: step.adapter.idempotencyRetentionSeconds ?? null,
+    leaseSeconds: step.ctx.settings.leaseSeconds,
+    ...(restart ? { restart } : {}),
+  });
+  if (intent) step.lease.extendedFrom(requestedAt);
+  return intent;
 }
 
 /** Call start under a recorded intent; any non-definitive answer reconciles. */
@@ -156,6 +178,7 @@ async function reconcile(step: Step): Promise<void> {
  * Only core schedules a start after recovery, with the same key and
  * journal identity, and only while the verdict's basis holds: never past
  * the deadline, never after the original start is known to have executed,
+ * on proven absence only once the previous ambiguous start has settled,
  * and a same-key replay only with a declared retention whose persisted
  * horizon still leaves room for the call and a safety margin.
  */
@@ -173,12 +196,17 @@ async function restart(
   // confirmed entry resolves only through this job's row, never by starting.
   const journal = await replayStartJournal(pool, step.ctx.keys, job);
   if (journal.state === "confirmed") return unresolved(step, null, null, "recover.restart_not_permitted");
-  const intent = await recordStartIntent({
-    job, from: "reconciling", retentionSeconds: retention,
-    restart: {
-      basis,
-      replayMarginSeconds: Math.ceil(step.ctx.settings.callTimeoutMs / 1_000) + REPLAY_SAFETY_MARGIN_SECONDS,
-    },
+  const margin = Math.ceil(step.ctx.settings.callTimeoutMs / 1_000) + REPLAY_SAFETY_MARGIN_SECONDS;
+  // A start that timed out or was interrupted may still reach the product,
+  // and absence offers no key to deduplicate it: wait until it has settled
+  // (the intent rechecks this atomically). A same-key replay needs no wait.
+  const absence = basis === "authoritative-absence";
+  if (absence) {
+    const settlesIn = await startSettlesIn(pool, job, margin);
+    if (settlesIn !== null && settlesIn > 0) return unresolved(step, null, settlesIn, "recover.restart_settling");
+  }
+  const intent = await intendStart(step, "reconciling", {
+    basis, replayMarginSeconds: margin, ...(absence ? { settleSeconds: margin } : {}),
   });
   if (!intent) return unresolved(step, null, null, "recover.restart_not_permitted");
   logWarn("Starting an external job again after recovery", { ...facts(job), basis });

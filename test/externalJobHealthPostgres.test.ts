@@ -53,8 +53,9 @@ describePostgres("external-job servicing health against PostgreSQL", () => {
     await database?.drop();
   });
 
-  const inspect = (keys = jobKeys()) =>
-    inspectExternalJobs(pool, externalJobServicing(getAllServices(), keys), TEST_WORKER_SETTINGS.leaseSeconds);
+  const inspect = (keys = jobKeys(), audience = h!.rail.config.gatewayAudience) => inspectExternalJobs(
+    pool, externalJobServicing(getAllServices(), keys), TEST_WORKER_SETTINGS.leaseSeconds, audience,
+  );
 
   it("reports no code for a healthy worker waiting on a long job, then each servicing problem", async () => {
     h = await startJobHarness({ outcome: { fulfillmentSeconds: 2 } });
@@ -106,7 +107,8 @@ describePostgres("external-job servicing health against PostgreSQL", () => {
       [owner],
     );
     const worker = new ExternalJobWorker({
-      owner, settings: TEST_WORKER_SETTINGS, keys: jobKeys(), resultContracts: new ResultContracts(harness.rail.config),
+      owner, gatewayAudience: harness.rail.config.gatewayAudience, settings: TEST_WORKER_SETTINGS, keys: jobKeys(),
+      resultContracts: new ResultContracts(harness.rail.config),
     });
     worker.start();
     await vi.waitFor(async () => {

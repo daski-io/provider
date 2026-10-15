@@ -63,6 +63,8 @@ export interface JobHarness {
   claim(taskId: string): Promise<Record<string, any>>;
   /** Make the job's next run due now. */
   due(taskId: string): Promise<void>;
+  /** Age the job's last ambiguous start past the settle time a restart waits for. */
+  settle(taskId: string): Promise<void>;
   /** Expire the job's lease, as if its holder crashed. */
   expireLease(taskId: string): Promise<void>;
   /** Seconds from now until the job's next run. */
@@ -96,6 +98,7 @@ export async function startJobHarness(options: {
   await setAsyncAdmission(pool, true);
   const newWorker = (settings: Partial<ExternalJobWorkerSettings> = {}) => new ExternalJobWorker({
     owner: randomUUID(),
+    gatewayAudience: rail.config.gatewayAudience,
     settings: validateWorkerSettings({ ...TEST_WORKER_SETTINGS, ...options.settings, ...settings }),
     keys,
     resultContracts: new ResultContracts(rail.config),
@@ -123,6 +126,13 @@ export async function startJobHarness(options: {
     async due(taskId) {
       await pool.query(
         "UPDATE provider_external_jobs SET next_run_at=now(), revision=revision + 1 WHERE task_id=$1",
+        [taskId],
+      );
+    },
+    async settle(taskId) {
+      await pool.query(
+        `UPDATE supplier_operations SET updated_at=updated_at - interval '1 hour'
+          WHERE id=(SELECT journal_operation_id FROM provider_external_jobs WHERE task_id=$1)`,
         [taskId],
       );
     },

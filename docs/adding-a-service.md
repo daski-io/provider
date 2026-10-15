@@ -60,9 +60,16 @@ running worker in the process; otherwise they answer `503 quote_unavailable`
 A job is always resumed by the adapter version that admitted it. When a new
 version changes how job references are interpreted, give it a new `version`
 and keep the old adapter in `previousExternalJobAdapters` (keyed by its own
-version) until its jobs finish; boot refuses a build that dropped a version
-an unfinished job needs. A mapper fix that keeps the reference format keeps
-its version.
+version) until its jobs finish and no older instance still sells it; boot
+refuses a build that dropped a version an unfinished job needs or, while
+async admission is on, one a running instance still sells. A mapper fix that
+keeps the reference format keeps its version.
+
+The mode is a property of the installed service, not of its listing
+versions: a funded order of an earlier version is executed in the service's
+current mode. Never switch an installed service between synchronous and
+external-job while orders of its earlier versions may still be dispatched;
+publish the other mode as a new service instead.
 
 The adapter contract is intentionally terminal:
 

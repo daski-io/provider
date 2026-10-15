@@ -158,9 +158,12 @@ export class StandardQuoteService {
       validBefore: issuedAt + FIXED_QUOTE_LIFETIME_SECONDS,
     };
     // The adapter version selling this quote is the one that runs its order,
-    // whatever new sales use by the time it is dispatched.
-    const sellingVersion = service.adapter.mode === "external-job" ? service.adapter.version : null;
-    const quoteHash = await persistProviderQuote(payload, outcome.fulfillmentSeconds, sellingVersion);
+    // whatever new sales use by the time it is dispatched; its order carries
+    // the control profile it is issued under, whatever the provider uses then.
+    const quoteHash = await persistProviderQuote(payload, {
+      adapterVersion: service.adapter.mode === "external-job" ? service.adapter.version : null,
+      controlProfileHash: outcome.providerControlProfileHash,
+    });
     return { ...payload, signature: await this.sign(quoteHash) };
   }
 

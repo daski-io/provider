@@ -62,6 +62,39 @@ export function parseServicingAudiences(
   return audiences;
 }
 
+/** At most this many earlier control profiles are retained. */
+const MAX_RETAINED_CONTROL_PROFILES = 16;
+
+/**
+ * Earlier provider control profiles a first dispatch may still carry: the
+ * gateway dispatches every order with the control-profile hash its checkout
+ * snapshot committed, even after the provider's profile changed and long
+ * after the quote expired. Comma-separated bytes32 hashes in
+ * `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`, distinct and never the
+ * current one. Each quote records the profile it was issued under, so boot,
+ * the importer and the doctor name one still owed but no longer listed.
+ */
+export function parseRetainedControlProfiles(env: NodeJS.ProcessEnv, current: Hex): readonly Hex[] {
+  const retained: Hex[] = [];
+  for (const raw of (env.STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES ?? "").split(",")) {
+    const value = raw.trim().toLowerCase();
+    if (!value) continue;
+    if (!/^0x[0-9a-f]{64}$/.test(value)) {
+      throw new Error("STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES must list bytes32 hashes");
+    }
+    if (value === current.toLowerCase() || retained.includes(value as Hex)) {
+      throw new Error("STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES must list distinct previous profiles only");
+    }
+    retained.push(value as Hex);
+  }
+  if (retained.length > MAX_RETAINED_CONTROL_PROFILES) {
+    throw new Error(
+      `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES accepts at most ${MAX_RETAINED_CONTROL_PROFILES} hashes`,
+    );
+  }
+  return retained;
+}
+
 /** A recorded agent wallet, checksummed; null when the bundle field is unusable. */
 export function walletAddress(value: unknown): Address | null {
   try {

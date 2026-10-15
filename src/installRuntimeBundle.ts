@@ -30,7 +30,7 @@ import {
   materializeOutcome,
   type StandardRailGlobalPolicy,
 } from "./core/standardRail/catalogOutcomes.js";
-import { parseRetainedSigningKeys } from "./core/standardRail/retainedConfig.js";
+import { parseRetainedControlProfiles, parseRetainedSigningKeys } from "./core/standardRail/retainedConfig.js";
 import {
   assertObligationsServiceable,
   loadListingObligations,
@@ -406,6 +406,10 @@ export async function assertCandidateServicesObligations(
       configuredServices(config.CHAIN_ID),
       externalJobKeyRing(config, retained.values()),
     ),
+    controlProfiles: new Set([
+      candidate.providerControlProfileHash,
+      ...parseRetainedControlProfiles(process.env, candidate.providerControlProfileHash),
+    ]),
   });
 }
 

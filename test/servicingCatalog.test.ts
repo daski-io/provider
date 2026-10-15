@@ -3,7 +3,11 @@ import type { Hex } from "viem";
 import { describe, expect, it } from "vitest";
 import { loadProviderStandardRailConfig } from "../src/core/standardRail/config.js";
 import { DEFAULT_FULFILLMENT_SECONDS } from "../src/core/standardRail/catalogOutcomes.js";
-import { parseRetainedSigningKeys, parseServicingAudiences } from "../src/core/standardRail/retainedConfig.js";
+import {
+  parseRetainedControlProfiles,
+  parseRetainedSigningKeys,
+  parseServicingAudiences,
+} from "../src/core/standardRail/retainedConfig.js";
 import {
   buildGlobalPolicyFixture,
   buildRuntimeHeadFixture,
@@ -116,5 +120,18 @@ describe("retained servicing configuration", () => {
         { STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES: value }, "https://provider.example",
       )).toThrow(/STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES/);
     }
+  });
+
+  it("lists previous control profiles a first dispatch may carry, never the current one", () => {
+    const current = hash("3");
+    const variable = "STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES";
+    expect(parseRetainedControlProfiles({ [variable]: ` ${hash("A")}, ${hash("4")} ` }, current))
+      .toEqual([hash("a"), hash("4")]);
+    expect(parseRetainedControlProfiles({}, current)).toEqual([]);
+    for (const value of [current, `${hash("4")},${hash("4")}`, "0x1234", "not-a-hash"]) {
+      expect(() => parseRetainedControlProfiles({ [variable]: value }, current)).toThrow(new RegExp(variable));
+    }
+    const many = Array.from({ length: 17 }, (_, index) => `0x${index.toString(16).padStart(64, "0")}`).join(",");
+    expect(() => parseRetainedControlProfiles({ [variable]: many }, current)).toThrow(/at most 16/);
   });
 });

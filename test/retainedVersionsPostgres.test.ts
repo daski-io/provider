@@ -173,7 +173,7 @@ describePostgres("retained listing versions against PostgreSQL", () => {
     await expect(verifyRetainedObligations(pool, railConfig([railOutcome()], retained), NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
-  it("refuses to boot while quotes of an unserviceable version may still be dispatched", async () => {
+  it("refuses to boot while an unserviceable version has quotes, however old", async () => {
     await pool.query(
       `INSERT INTO provider_quotes
          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
@@ -181,31 +181,25 @@ describePostgres("retained listing versions against PostgreSQL", () => {
          decode(repeat('b3',32),'hex'),'10000',NULL,$1::bigint,$1::bigint + 120)`,
       [nowSeconds()],
     );
+    const b2 = `0x${"b2".repeat(32)}` as Hex;
     const config = railConfig([railOutcome()], retained);
     await expect(verifyRetainedObligations(pool, config, NO_EXTERNAL_JOBS))
       .rejects.toThrow(/0xb2b2b2b2…b2b2 \(listing version not installed\)/);
-    const known = { ...config, listingWallets: new Map([...config.listingWallets, [`0x${"b2".repeat(32)}` as Hex, previousWallet]]) };
+    const known = { ...config, listingWallets: new Map([...config.listingWallets, [b2, previousWallet]]) };
     await expect(verifyRetainedObligations(pool, {
-      ...known, unserviceable: new Map([[`0x${"b2".repeat(32)}` as Hex, "skill_not_installed" as const]]),
+      ...known, unserviceable: new Map([[b2, "skill_not_installed" as const]]),
     }, NO_EXTERNAL_JOBS)).rejects.toThrow(/0xb2b2b2b2…b2b2 \(skill_not_installed\)/);
-    // A quote past every possible dispatch window owes nothing.
-    await pool.query("UPDATE provider_quotes SET issued_at=1000, valid_before=1120 WHERE listing_manifest_hash=decode(repeat('b2',32),'hex')");
-    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
-    // A quote's recorded retention decides, even for an unknown version.
-    const recorded = (byte: string, retainUntil: string) => pool.query(
-      `INSERT INTO provider_quotes
-         (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,retain_until)
-       VALUES (decode(repeat($1,32),'hex'),'echo',decode(repeat('c2',32),'hex'),
-         decode(repeat('b3',32),'hex'),'10000',NULL,$2::bigint,$2::bigint + 120,${retainUntil})`,
-      [byte, nowSeconds()],
-    );
-    await recorded("c1", "now() - interval '1 second'");
-    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
-    await recorded("c3", "now() + interval '1 day'");
+    // Long expired and never claimed, the quote still owes its version: the
+    // gateway's first dispatch of a timely-paid order may still name it, and
+    // nothing bounds when that order's release is observed.
+    await pool.query("UPDATE provider_quotes SET issued_at=1000, valid_before=1120 WHERE listing_manifest_hash=$1",
+      [Buffer.from(b2.slice(2), "hex")]);
     await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS))
-      .rejects.toThrow(/0xc2c2c2c2…c2c2 \(listing version not installed\)/);
-    await pool.query("UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=decode(repeat('c3',32),'hex')");
-    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
+      .rejects.toThrow(/0xb2b2b2b2…b2b2 \(definition_unavailable\)/);
+    // Serving the version, not forgetting the quote, meets the obligation.
+    await expect(verifyRetainedObligations(pool, {
+      ...known, servicing: new Map([...known.servicing, [b2, railOutcome({ listingManifestHash: b2 })]]),
+    }, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
   it("keeps serving reads while new sales are paused", async () => {

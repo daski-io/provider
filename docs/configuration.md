@@ -54,7 +54,7 @@ in `src/core/db/runtimePrivileges.ts`: no `DELETE`, `TRUNCATE`, DDL, or
 migration-ledger access, and read-only access to the runtime catalog. A table
 added by a later migration stays inaccessible until it is reviewed into that
 list. `npm run daski:install-runtime` promotes catalog versions as the
-migration principal, and boot prunes settled provider quotes as it
+migration principal. No principal can delete a provider quote
 (`docs/architecture.md`).
 
 Every connection this build opens declares its supported schema epoch through
@@ -134,6 +134,7 @@ unavailable there. Read-capability reads never need the RPC.
 | `STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES` | Optional comma-separated previous provider audiences that dispatch, status and lifecycle calls for older orders may still name. Quotes and intake use only the current audience. |
 | `STANDARD_RAIL_GLOBAL_POLICY_JSON` | Daski-issued JSON containing the signed chain-evidence, active-rail, and capability envelopes plus reviewed global code hashes. Preserve exactly. |
 | `STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH` | Reviewed bytes32 provider endpoint/control profile binding. |
+| `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES` | Optional comma-separated previous control-profile hashes (at most 16) that first dispatches of orders quoted under them may still carry. Never the current one, never repeated. |
 | `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Positive evidence-finality requirement; default 12, coordinated with Daski. |
 | `REPUTATION_STORAGE_ADDRESS` | Reviewed reputation contract. |
 | `EAS_ADDRESS` | Reviewed EAS contract. |
@@ -196,8 +197,8 @@ included), at least one running instance with every running instance (fresh
 heartbeat in `provider_runtime_instances`) a compatible external-job worker,
 an active `PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`), and every
 running instance declaring every external-job adapter version new sales (of
-this build or of any running instance), quotes that may still be dispatched or
-unfinished jobs need (`external_job_services`). It records the checks as
+this build or of any running instance), quotes or unfinished jobs need
+(`external_job_services`). It records the checks as
 evidence. Every process of this build runs the worker, so stop older processes
 before activating. The command never migrates. Deactivation stops new
 external-job quotes and also refuses, retryably, funded external-job
@@ -238,21 +239,30 @@ audience its checkout snapshot named, so:
   a key the snapshot does not name;
 - after moving the public origin, keep the old origin routed to this provider
   and list the old audience in `STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES`
-  (the standard-rail paths themselves never change); and
-- keep every retained version's service and skill installed while its quotes
-  may still be dispatched: up to the quote's window plus the version's
-  fulfillment window plus 30 days; and
+  (the standard-rail paths themselves never change);
+- after a control-profile change, list each previous profile hash in
+  `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`: the gateway dispatches an
+  order with the profile its checkout snapshot committed, so an order quoted
+  before the change still carries the old one. Each quote records the
+  profile it was issued under; keep a profile while any of its quotes is
+  kept. Quotes from before migration 012 recorded none, so keep the profile
+  that was current then;
+- keep every retained version's service and skill installed while it has
+  quotes. The gateway may make a timely-paid order's first dispatch at any
+  time after it observes the payment's release, which nothing bounds
+  relative to the quote, so every quote is kept and stays an obligation
+  until a verified gateway inventory can retire it; and
 - keep, while any unfinished external job needs them, the adapter version
   that admitted it (as the current adapter or in
   `previousExternalJobAdapters`) and every encryption key id its stored
   state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation),
-  and, while a quote may still be dispatched, the adapter version that sold
-  it (each quote records it, and its order runs with exactly that version)
+  and, for every quote, the adapter version that sold it (each quote records
+  it, and its order runs with exactly that version)
   and, for an external-job version, an active `PROVIDER_DATA_ENCRYPTION_KEY`
   to seal the order's input and async admission on to admit it.
 
 Boot and the importer verify this for every obligation (claims of any state,
-quotes that may still be dispatched, and unfinished external jobs) and refuse
+quotes, and unfinished external jobs) and refuse
 with
 `retained listing obligations are not serviceable by this build` otherwise,
 so an incompatible build cannot take over. Paused sales never block servicing.

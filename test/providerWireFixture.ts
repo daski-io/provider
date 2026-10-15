@@ -74,6 +74,8 @@ export function wireConfig(): ProviderStandardRailConfig {
     listingWallets: new Map([[fixedListing.listingManifestHash, keys.providerTerminalAttestation!.address]]),
     retainedSigningKeys: new Map(),
     servicingAudiences: new Set([context.provider.audience]),
+    providerControlProfileHash: wireOutcome().providerControlProfileHash,
+    retainedControlProfileHashes: [],
     globalPolicy: {} as never,
     finalityConfirmations: 12,
     sanctionsOracleAddress: "0x5555555555555555555555555555555555555555",

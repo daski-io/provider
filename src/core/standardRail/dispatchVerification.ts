@@ -156,13 +156,19 @@ export function assertDispatchIsCurrent(
   ) throw new DispatchRejectedError("envelope_lifetime");
 }
 
+/**
+ * The dispatched order must match the policy of the listing version it
+ * names. Its control profile is the one its checkout snapshot committed:
+ * the outcome's own, or an earlier profile this deployment retains.
+ */
 export function assertOutcomeBinding(
   dispatch: StandardRailDispatchV2,
   outcome: ProviderOutcomeConfig,
   config: ProviderStandardRailConfig,
 ): void {
+  const profile = dispatch.providerControlProfileHash;
   if (
-    outcome.providerControlProfileHash !== dispatch.providerControlProfileHash
+    (profile !== outcome.providerControlProfileHash && !config.retainedControlProfileHashes.includes(profile))
     || outcome.serviceId !== dispatch.serviceId
     || outcome.activeRailProfileHash !== dispatch.activeRailProfileHash
     || dispatch.buyerIdentityProofHash.toLowerCase() !== ZERO_BYTES32

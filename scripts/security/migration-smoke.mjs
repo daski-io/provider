@@ -162,18 +162,18 @@ try {
   if (!await rejects(quote("NULL", 1_120, 1_120))) {
     throw new Error("quote window constraint was not enforced");
   }
-  // Quote retention: only a quote past its retention that no claim names can
-  // be deleted, and a claim keeps the quote it was admitted against.
-  const retained = (byte, retainUntil) => `INSERT INTO provider_quotes
+  // Quote retention (011): no quote is ever deleted, however old and whether
+  // or not a claim names it, and a claim keeps the quote it was admitted
+  // against.
+  const retained = (byte, issuedAt = "1000") => `INSERT INTO provider_quotes
       (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
-       issued_at,valid_before,retain_until)
+       issued_at,valid_before)
     VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
-      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,${retainUntil})`;
+      decode(repeat('55',32),'hex'),'10000',NULL,${issuedAt},${issuedAt} + 120)`;
   const deleteQuote = (byte) => `DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('${byte}',32),'hex')`;
-  await client.query(retained("e1", "NULL"));
-  await client.query(retained("e2", "now() + interval '1 day'"));
-  await client.query(retained("e3", "now() - interval '1 day'"));
-  await client.query(retained("e4", "now() - interval '1 day'"));
+  await client.query(retained("e1"));
+  await client.query(retained("e2", "extract(epoch FROM now())::bigint"));
+  await client.query(retained("e4"));
   await client.query(`UPDATE provider_transactions SET provider_quote_hash=decode(repeat('e4',32),'hex')
       WHERE id='task-smoke'`).then(
     () => { throw new Error("a claim's provider quote changed"); },
@@ -183,16 +183,15 @@ try {
     "task-quoted", "now() + interval '5 minutes'", undefined, "decode(repeat('e4',32),'hex')",
   ));
   for (const byte of ["e1", "e2", "e4"]) {
-    if (!await rejects(deleteQuote(byte))) throw new Error(`a retained provider quote was deleted: ${byte}`);
+    if (!await rejects(deleteQuote(byte))) throw new Error(`a provider quote was deleted: ${byte}`);
   }
-  await client.query(deleteQuote("e3"));
   // The adapter version that sold a quote (010): a reviewed version or none,
   // never changed once recorded, not even on a quote that recorded none.
   const sold = (byte, version) => `INSERT INTO provider_quotes
       (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
-       issued_at,valid_before,retain_until,adapter_version)
+       issued_at,valid_before,adapter_version)
     VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
-      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,now() + interval '1 day',${version})`;
+      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,${version})`;
   await client.query(sold("f1", "'v1.2_b-3'"));
   for (const version of ["''", "'-v1'", "'v 1'", `'${"v".repeat(65)}'`]) {
     if (!await rejects(sold("f2", version))) throw new Error(`an invalid quote adapter version was recorded: ${version}`);
@@ -202,6 +201,26 @@ try {
         WHERE quote_hash=decode(repeat('${byte}',32),'hex')`).then(() => "changed", (error) => error.message);
     if (change !== "a provider quote keeps the adapter version that sold it") {
       throw new Error(`a quote's recorded adapter version changed: ${byte} to ${version}`);
+    }
+  }
+  // The control profile a quote was issued under (012): bytes32 or none,
+  // never changed once recorded, not even on a quote that recorded none.
+  const profiled = (byte, profile) => `INSERT INTO provider_quotes
+      (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
+       issued_at,valid_before,provider_control_profile_hash)
+    VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
+      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,${profile})`;
+  await client.query(profiled("d1", "decode(repeat('66',32),'hex')"));
+  if (!await rejects(profiled("d2", "decode(repeat('66',31),'hex')"))) {
+    throw new Error("a malformed quote control profile was recorded");
+  }
+  for (const [byte, profile] of [
+    ["d1", "decode(repeat('77',32),'hex')"], ["d1", "NULL"], ["e1", "decode(repeat('66',32),'hex')"],
+  ]) {
+    const change = await client.query(`UPDATE provider_quotes SET provider_control_profile_hash=${profile}
+        WHERE quote_hash=decode(repeat('${byte}',32),'hex')`).then(() => "changed", (error) => error.message);
+    if (change !== "a provider quote keeps the control profile it was issued under") {
+      throw new Error(`a quote's recorded control profile changed: ${byte} to ${profile}`);
     }
   }
 

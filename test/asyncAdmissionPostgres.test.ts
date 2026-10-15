@@ -129,7 +129,7 @@ describePostgres("database-backed async-admission switch", () => {
     }
   });
 
-  it("requires the adapter version that sold a quote still open for dispatch, on this build and every instance", async () => {
+  it("requires the adapter version that sold a quote, on this build and every instance", async () => {
     const registry = await import("../src/core/serviceRegistry/registry.js");
     const fixture = await import("./externalJobFixture.js");
     const listing = [...config.servicing.keys()][0]!.slice(2);
@@ -140,9 +140,9 @@ describePostgres("database-backed async-admission switch", () => {
     await owner.query(
       `INSERT INTO provider_quotes
          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,
-          retain_until,adapter_version)
+          adapter_version)
        VALUES (decode(repeat('5a',32),'hex'),'echo',decode($1,'hex'),decode(repeat('5b',32),'hex'),'10000',NULL,
-         1000,1120,now() + interval '1 day','v5')`,
+         1000,1120,'v5')`,
       [listing],
     );
     try {
@@ -169,9 +169,12 @@ describePostgres("database-backed async-admission switch", () => {
         .toMatch(/\(external-job adapter dummy@v5 not installed\)/);
     } finally {
       registry.clearServicesForTests();
-      await owner.query(
-        "UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=decode(repeat('5a',32),'hex')",
-      );
+      // Test-only cleanup, as the table owner and in one implicit transaction,
+      // of a synthetic quote the database otherwise never lets anyone delete:
+      // later cases judge activation without it.
+      await owner.query(`ALTER TABLE provider_quotes DISABLE TRIGGER provider_quotes_retention;
+        DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('5a',32),'hex');
+        ALTER TABLE provider_quotes ENABLE TRIGGER provider_quotes_retention`);
     }
   });
 

@@ -16,7 +16,7 @@ before relying on anything here, and follow its `docs/adding-a-service.md`.
 | Records the start intent and the replay horizon before the first call | `poll`: read-only look at the original job |
 | Leases, fencing, scheduling, backoff, restart recovery, overdue handling | Maps product states and the report to typed outcomes |
 | Validates and freezes the result; signs status and artifact reads | Pins the product endpoints and validates any URL it stores |
-| Runs each order with the adapter version that sold its quote, and resumes its job with that version, the keys, and the contract that admitted it | Declares its `version` and replay retention, and keeps old adapters in `previousExternalJobAdapters` while their jobs run or the quotes they sold may still be dispatched |
+| Runs each order with the adapter version that sold its quote, and resumes its job with that version, the keys, and the contract that admitted it | Declares its `version` and replay retention, and keeps old adapters in `previousExternalJobAdapters` while their jobs run or the quotes they sold are kept (every quote is kept) |
 
 Never build a private polling server, hold an HTTP request open for the job,
 raise the 50-second synchronous budget, sleep inside an adapter call, or copy

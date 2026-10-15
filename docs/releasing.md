@@ -49,7 +49,7 @@ Record the deployed gateway revision with the release evidence.
 
 ## Schema epoch and upgrade guards
 
-This release's migrations 005 to 010 ship together at schema epoch 1 (no
+This release's migrations 005 to 012 ship together at schema epoch 1 (no
 intermediate build of them was released), so its upgrade from the pre-R1
 image is the one stop-and-drain cutover in `docs/onboarding.md`. Rules for
 every later release:

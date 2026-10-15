@@ -18,6 +18,8 @@ export function railConfig(
     versions?: ProviderOutcomeConfig[];
     keys?: Hex[];
     audiences?: string[];
+    /** Earlier control profiles a first dispatch may still carry. */
+    controlProfiles?: Hex[];
   } = {},
 ): ProviderStandardRailConfig {
   const authority = privateKeyToAccount(providerKey).address;
@@ -44,6 +46,8 @@ export function railConfig(
     ])),
     retainedSigningKeys: new Map((retained.keys ?? []).map((key) => [privateKeyToAccount(key).address, key])),
     servicingAudiences: new Set(["https://provider.example", ...(retained.audiences ?? [])]),
+    providerControlProfileHash: (outcomes[0] ?? railOutcome()).providerControlProfileHash,
+    retainedControlProfileHashes: retained.controlProfiles ?? [],
     globalPolicy: {} as never,
     finalityConfirmations: 12,
     sanctionsOracleAddress: "0x5555555555555555555555555555555555555555",

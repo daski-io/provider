@@ -78,11 +78,12 @@ funded order paid against a superseded version is served exactly as it was
 sold, an external job by the adapter version that sold its quote. Answers
 about an order are signed with the provider wallet its version recorded, from
 a retained previous key after a rotation, and servicing calls may name a
-retained previous provider audience (`docs/configuration.md`). Boot and the
-importer refuse a build that cannot service every obligation: claims need
-their version's signing key, and versions whose quotes may still be dispatched
-also need their definition, handler and the external-job adapter version that
-sold each quote.
+retained previous provider audience (`docs/configuration.md`); a first
+dispatch may carry a retained previous control profile. Boot and the importer
+refuse a build that cannot service every obligation: claims need their
+version's signing key, and versions with quotes also need their definition,
+handler, the external-job adapter version that sold each quote and the
+control profile it was issued under.
 
 ## Dispatch state machine
 
@@ -260,8 +261,8 @@ job. Core admits the funded order (above), then the worker in
   with, and the key its stored state names. Boot, the importer and
   activation refuse a build that cannot resume every unfinished job (its
   version's definition, its adapter version, its encryption keys) or run
-  the order of every quote that may still be dispatched (the adapter version
-  recorded with the quote), so an incompatible build cannot take one over.
+  the order of every quote (the adapter version recorded with the quote),
+  so an incompatible build cannot take one over.
   Each process declares the adapter versions it resumes and the one it sells
   in its heartbeat. Activation requires every running instance to resume
   every version new sales (of any running instance), open quotes or
@@ -337,17 +338,16 @@ static-gate allowlist together with the tables each one creates. Production
 uses a schema-owning migration principal and a separate runtime principal that
 receives only the reviewed per-table grants in `src/core/db/runtimePrivileges.ts`.
 
-A provider quote can back a dispatch long after it expires, because the
-gateway re-dispatches a timely-paid order until its first release observation
-plus the snapshot's fulfillment window. Each quote therefore records
-`retain_until` (its `validBefore` plus its listing version's fulfillment
-window plus 30 days) and the external-job adapter version that sold it
-(migration 010; it never changes), and every claim records the provider quote
-it was admitted against. Boot prunes, as the schema owner and in bounded
-batches, only quotes past that retention, older than every installed version's
-window plus the margin, and named by no claim; a trigger refuses any other
-quote deletion, whoever attempts it. Claims, terminal results and their reads
-are never pruned.
+A provider quote can back a dispatch long after it expires: the gateway
+re-dispatches a timely-paid order until its first release observation plus
+the snapshot's fulfillment window, and nothing bounds when that observation
+comes. Every quote is therefore kept, and a trigger refuses any quote
+deletion, whoever attempts it (migration 011), until a verified gateway
+obligation inventory can retire quotes. Each quote records the external-job
+adapter version that sold it (migration 010) and the control profile it was
+issued under (migration 012), neither of which ever changes, and every claim
+records the provider quote it was admitted against. Claims, terminal results
+and their reads are never deleted either.
 
 ## Upgrade compatibility barrier
 

@@ -291,11 +291,13 @@ restart resubmits nothing. Before rolling one out:
   the current adapter or in `previousExternalJobAdapters` (while async
   admission is on, boot also refuses a build that cannot resume a version a
   running instance sells); a rollback build needs the version the newer
-  build sold with too, until those quotes can no longer be dispatched;
+  build sold with too, since every quote is kept;
 - keep every encryption key id stored jobs name
   (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`), every previous wallet key
-  orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`) and every
-  old audience still routed (`STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES`);
+  orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`), every
+  old audience still routed (`STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES`) and
+  every previous control profile quotes were issued under
+  (`STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`);
 - run `npm run doctor -- --stage=testnet --database` with the new build's
   configuration: `RETAINED_OBLIGATIONS` must pass; and
 - read the release notes: a release that raises the schema epoch is a new

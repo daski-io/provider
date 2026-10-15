@@ -1,8 +1,6 @@
 import type { Address, Hex } from "viem";
 import type { Queryable } from "../db/queryable.js";
-import { MAX_FULFILLMENT_SECONDS } from "../serviceRegistry/deadlines.js";
 import type { ProviderStandardRailConfig } from "./config.js";
-import { QUOTE_DISPATCH_MARGIN_SECONDS } from "./quoteStore.js";
 import type { UnserviceableReason } from "./servicingCatalog.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
@@ -27,7 +25,10 @@ export interface ExternalJobServicing {
 export interface ListingObligation {
   /** Admitted claims in any state: their reads are owed indefinitely. */
   claims: number;
-  /** Persisted quotes that may still back a timely-paid order's first dispatch. */
+  /**
+   * Persisted quotes, every one of which may still back a timely-paid order's
+   * first dispatch: only a verified gateway inventory could prove otherwise.
+   */
   openQuotes: number;
   /**
    * Those an external-job adapter version sold: admitting each one's order
@@ -43,19 +44,18 @@ export interface ListingObligation {
   adapterVersions: Map<string, Set<string>>;
   /** The key ids their encrypted input, reference or candidate name. */
   encryptionKeyIds: Set<string>;
+  /** The control profiles the open quotes were issued under, which their orders carry. */
+  controlProfiles: Set<Hex>;
 }
 
 const hex = (value: Buffer) => `0x${value.toString("hex")}` as Hex;
 
 /**
- * Obligations by listing version: claims of this gateway audience, quotes
- * that may still back a first dispatch with the adapter versions that sold
- * them, and unfinished external jobs with the adapter versions and keys they
- * need. A quote's recorded retention (`retain_until`, set when it was
- * issued) decides; a quote from before retention was recorded is held to
- * its window plus its version's fulfillment window and the margin, and to
- * the longest window the gateway admits when this build cannot materialize
- * the version.
+ * Obligations by listing version: claims of this gateway audience, every
+ * persisted quote (any may still back a first dispatch: the gateway's window
+ * starts at a release observation nothing bounds) with the adapter versions
+ * that sold them and the control profiles they were issued under, and
+ * unfinished external jobs with the adapter versions and keys they need.
  */
 export async function loadListingObligations(
   db: Queryable,
@@ -66,7 +66,7 @@ export async function loadListingObligations(
   const entry = (hash: Hex) => {
     const current = obligations.get(hash) ?? {
       claims: 0, openQuotes: 0, externalJobQuotes: 0, externalJobs: 0, adapterVersions: new Map(),
-      encryptionKeyIds: new Set(),
+      encryptionKeyIds: new Set(), controlProfiles: new Set(),
     };
     obligations.set(hash, current);
     return current;
@@ -100,37 +100,26 @@ export async function loadListingObligations(
     for (const keyId of row.key_ids) owed.encryptionKeyIds.add(keyId);
   }
   const quotes = await db.query<{
-    listing: Buffer; retained: number; unrecorded: number; latest: string | null; now: string;
-    retained_sold: number; unrecorded_sold: number; retained_versions: string[]; unrecorded_versions: string[];
+    listing: Buffer; count: number; sold: number; versions: string[]; profiles: string[];
   }>(
-    `SELECT listing_manifest_hash AS listing,
-            count(*) FILTER (WHERE retain_until > now())::int AS retained,
-            count(*) FILTER (WHERE retain_until IS NULL)::int AS unrecorded,
-            count(*) FILTER (WHERE retain_until > now() AND adapter_version IS NOT NULL)::int AS retained_sold,
-            count(*) FILTER (WHERE retain_until IS NULL AND adapter_version IS NOT NULL)::int AS unrecorded_sold,
-            (max(valid_before) FILTER (WHERE retain_until IS NULL))::text AS latest,
-            floor(extract(epoch FROM now()))::bigint::text AS now,
+    `SELECT listing_manifest_hash AS listing, count(*)::int AS count,
+            count(*) FILTER (WHERE adapter_version IS NOT NULL)::int AS sold,
             COALESCE(array_agg(DISTINCT adapter_version)
-              FILTER (WHERE retain_until > now() AND adapter_version IS NOT NULL), '{}') AS retained_versions,
-            COALESCE(array_agg(DISTINCT adapter_version)
-              FILTER (WHERE retain_until IS NULL AND adapter_version IS NOT NULL), '{}') AS unrecorded_versions
+              FILTER (WHERE adapter_version IS NOT NULL), '{}') AS versions,
+            COALESCE(array_agg(DISTINCT encode(provider_control_profile_hash,'hex'))
+              FILTER (WHERE provider_control_profile_hash IS NOT NULL), '{}') AS profiles
        FROM provider_quotes GROUP BY 1`,
   );
   for (const row of quotes.rows) {
     const hash = hex(row.listing);
-    const outcome = catalog.servicing.get(hash);
-    const window = outcome?.fulfillmentSeconds ?? MAX_FULFILLMENT_SECONDS;
-    const unrecordedOpen = row.unrecorded > 0 && row.latest !== null
-      && Number(row.latest) + window + QUOTE_DISPATCH_MARGIN_SECONDS > Number(row.now);
-    const open = row.retained + (unrecordedOpen ? row.unrecorded : 0);
-    if (open === 0) continue;
     const owed = entry(hash);
-    owed.openQuotes = open;
-    owed.externalJobQuotes = row.retained_sold + (unrecordedOpen ? row.unrecorded_sold : 0);
+    owed.openQuotes = row.count;
+    owed.externalJobQuotes = row.sold;
+    for (const profile of row.profiles) owed.controlProfiles.add(`0x${profile}` as Hex);
     // A version this build cannot materialize is refused for its definition;
-    // otherwise each open quote's order needs the adapter version that sold it.
-    const sold = [...row.retained_versions, ...(unrecordedOpen ? row.unrecorded_versions : [])];
-    if (outcome) needs(owed, outcome.serviceSlug, sold);
+    // otherwise each quote's order needs the adapter version that sold it.
+    const outcome = catalog.servicing.get(hash);
+    if (outcome) needs(owed, outcome.serviceSlug, row.versions);
   }
   return obligations;
 }
@@ -141,22 +130,25 @@ const label = (hash: Hex) => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
 /**
  * Refuse to run (boot), take over (import) or activate unless this build
  * can service every obligation: each version with claims needs the signing
- * key its orders' snapshots name; each version whose quotes may still be
- * dispatched, or with unfinished external jobs, also needs its admitted
- * definition (the jobs' result contract); each open quote needs the adapter
- * version that sold it, which will run its order, and, when that is an
- * external-job version, an active key to seal the order's input at
- * admission; and each unfinished job needs its own adapter version, every
- * encryption key its stored state names and an active key to seal the
- * reference or candidate it may still produce.
- * Diagnostics name versions by hash prefix, adapter versions and key ids,
- * never key material.
+ * key its orders' snapshots name; each version with quotes, or with
+ * unfinished external jobs, also needs its admitted definition (the jobs'
+ * result contract); each quote needs the adapter version that sold it,
+ * which will run its order, the control profile it was issued under, which
+ * its order's dispatch carries, and, when its version is an external-job
+ * one, an active key to seal the order's input at admission; and each
+ * unfinished job needs its own adapter version, every encryption key its
+ * stored state names and an active key to seal the reference or candidate
+ * it may still produce.
+ * Diagnostics name versions and profiles by hash prefix, adapter versions
+ * and key ids, never key material.
  */
 export function assertObligationsServiceable(args: {
   catalog: ServicingView;
   obligations: ReadonlyMap<Hex, ListingObligation>;
   signingWallets: ReadonlySet<Address>;
   externalJobs: ExternalJobServicing;
+  /** The control profiles a first dispatch may carry: the current one and those retained. */
+  controlProfiles: ReadonlySet<Hex>;
 }): void {
   const problems: string[] = [];
   for (const [hash, obligation] of [...args.obligations].sort(([a], [b]) => a.localeCompare(b))) {
@@ -178,6 +170,9 @@ export function assertObligationsServiceable(args: {
     }
     for (const keyId of [...obligation.encryptionKeyIds].sort()) {
       if (!args.externalJobs.keyIds.has(keyId)) problems.push(`${label(hash)} (encryption key ${keyId} not configured)`);
+    }
+    for (const profile of [...obligation.controlProfiles].sort()) {
+      if (!args.controlProfiles.has(profile)) problems.push(`${label(hash)} (control profile ${label(profile)} not retained)`);
     }
     if (obligation.externalJobs > 0 && !args.externalJobs.canSeal) {
       problems.push(`${label(hash)} (no active encryption key for unfinished external jobs)`);
@@ -201,5 +196,6 @@ export async function verifyRetainedObligations(
     obligations: await loadListingObligations(db, config.gatewayAudience, config),
     signingWallets: new Set([config.terminalAttestationKey, ...config.retainedSigningKeys.keys()]),
     externalJobs,
+    controlProfiles: new Set([config.providerControlProfileHash, ...config.retainedControlProfileHashes]),
   });
 }

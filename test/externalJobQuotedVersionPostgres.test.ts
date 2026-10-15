@@ -160,7 +160,9 @@ describePostgres("external-job orders run by the adapter version that sold them"
       issuedAt,
       validBefore: issuedAt + FIXED_QUOTE_LIFETIME_SECONDS,
     };
-    const quoteHash = await persistProviderQuote(payload, listing.fulfillmentSeconds, null);
+    const quoteHash = await persistProviderQuote(payload, {
+      adapterVersion: null, controlProfileHash: listing.providerControlProfileHash,
+    });
     const signature = await privateKeyToAccount(providerKey).signMessage({ message: { raw: quoteHash } });
     const quotes = { quote: async () => ({ ...payload, signature }) } as unknown as StandardQuoteService;
     return quoteOrder({ quotes, outcome: listing, payer: jobPayer, request });
@@ -239,6 +241,7 @@ describePostgres("external-job orders run by the adapter version that sold them"
         obligations: new Map([...all].filter(([hash]) => hash === old.listingManifestHash)),
         signingWallets: new Set([config.terminalAttestationKey]),
         externalJobs: externalJobServicing(services, jobKeys()),
+        controlProfiles: new Set([config.providerControlProfileHash]),
       });
     };
     await expect(takeover([harness.rail.service]))
@@ -253,12 +256,11 @@ describePostgres("external-job orders run by the adapter version that sold them"
     expect([admitted.state, (await harness.job(taskId)).adapter_version]).toEqual(["submitted", v1Version]);
     await runToPoll(harness, taskId);
     expect(await harness.claim(taskId)).toMatchObject({ state: "completed", result: echoCompleted });
-    // Once the quote can no longer back a dispatch and its job finished, nothing needs v1.
-    await pool.query(
-      "UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=$1",
-      [Buffer.from(order.providerQuoteHash.slice(2), "hex")],
-    );
-    await expect(takeover([harness.rail.service])).resolves.toBeUndefined();
+    // Its job finished, yet the quote still needs v1: only the gateway could
+    // prove no other dispatch will name it (an identical request quoted in
+    // the same second shares the quote).
+    await expect(takeover([harness.rail.service]))
+      .rejects.toThrow(`(external-job adapter dummy@${v1Version} not installed)`);
   });
 
   it("refuses to take over open external-job quotes without an active key to admit their orders", async () => {
@@ -278,6 +280,7 @@ describePostgres("external-job orders run by the adapter version that sold them"
         obligations: new Map([...all].filter(([hash]) => hash === listing.listingManifestHash)),
         signingWallets: new Set([catalog.terminalAttestationKey]),
         externalJobs: externalJobServicing([harness.rail.service], keys),
+        controlProfiles: new Set([catalog.providerControlProfileHash]),
       });
     };
     // Previous keys alone open stored state but cannot seal a new order's input.

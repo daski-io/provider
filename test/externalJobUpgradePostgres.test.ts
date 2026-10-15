@@ -130,6 +130,7 @@ describePostgres("external jobs across upgrades against PostgreSQL", () => {
         obligations: new Map([...all].filter(([hash]) => hash === harness.rail.outcome.listingManifestHash)),
         signingWallets: new Set([config.terminalAttestationKey]),
         externalJobs,
+        controlProfiles: new Set([config.providerControlProfileHash]),
       });
     };
     await expect(takeover(servicing())).resolves.toBeUndefined();

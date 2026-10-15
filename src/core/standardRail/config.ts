@@ -11,7 +11,11 @@ import {
 } from "./catalogOutcomes.js";
 import type { ProviderOutcomeLaunchPolicy } from "./launchPolicy.js";
 import { validateOutcome } from "./outcomeValidation.js";
-import { parseRetainedSigningKeys, parseServicingAudiences } from "./retainedConfig.js";
+import {
+  parseRetainedControlProfiles,
+  parseRetainedSigningKeys,
+  parseServicingAudiences,
+} from "./retainedConfig.js";
 import { buildServicingCatalog, type UnserviceableReason } from "./servicingCatalog.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
@@ -45,6 +49,10 @@ export interface ProviderStandardRailConfig {
   retainedSigningKeys: ReadonlyMap<Address, Hex>;
   /** Provider audiences servicing calls may name: current plus retained. */
   servicingAudiences: ReadonlySet<string>;
+  /** The provider control profile new quotes are issued under. */
+  providerControlProfileHash: Hex;
+  /** Earlier control profiles a first dispatch may still carry. */
+  retainedControlProfileHashes: readonly Hex[];
   globalPolicy: StandardRailGlobalPolicy;
   finalityConfirmations: number;
   sanctionsOracleAddress: Address;
@@ -216,6 +224,8 @@ export async function loadProviderStandardRailConfig(
     listingWallets: catalog.listingWallets,
     retainedSigningKeys: parseRetainedSigningKeys(env, providerAuthorityPrivateKey),
     servicingAudiences: parseServicingAudiences(env, providerAudience),
+    providerControlProfileHash,
+    retainedControlProfileHashes: parseRetainedControlProfiles(env, providerControlProfileHash),
     globalPolicy,
     finalityConfirmations,
     sanctionsOracleAddress: getAddress(need(env, "SANCTIONS_ORACLE_ADDRESS")),

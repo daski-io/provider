@@ -67,7 +67,9 @@ describe("signed fixed readiness quote", () => {
     expect(`0x${(params[0] as Buffer).toString("hex")}`).toBe(accepted.providerQuoteHash);
     expect(params.slice(4, 8)).toEqual(["10000", payer, accepted.issuedAt, accepted.validBefore]);
     // A synchronous adapter sold it: there is no external-job version to record.
-    expect(params[9]).toBeNull();
+    expect(params[8]).toBeNull();
+    // Its order's first dispatch carries the control profile it was issued under.
+    expect(`0x${(params[9] as Buffer).toString("hex")}`).toBe(railConfig().providerControlProfileHash);
   });
 
   it("echoes a null payer literally and binds it as unbound", async () => {
@@ -213,7 +215,7 @@ describe("signed fixed readiness quote", () => {
     const body = await ask(jobQuotes(keyed, true));
     await expect(acceptQuoteAsGateway({ listing, body, request, payer })).resolves.toBeDefined();
     // The quote records the adapter version that sells it, which will run its order.
-    expect((insertedQuotes().at(-1) as unknown as [string, unknown[]])[1][9]).toBe("v1");
+    expect((insertedQuotes().at(-1) as unknown as [string, unknown[]])[1][8]).toBe("v1");
     // A request too large to store as the job's input is declined before payment.
     const large = { message: "x".repeat(500) };
     const bounded = await import("../src/core/externalJobs/jobCodec.js");

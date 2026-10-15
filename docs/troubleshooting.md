@@ -102,13 +102,14 @@ order it would take over (see `docs/configuration.md`):
 | Reason | Fix |
 | --- | --- |
 | `signing key not retained` | Orders of that listing version were admitted under a previous wallet; add its key to `PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`. |
-| `skill_not_installed` | Its quotes may still be dispatched but the build no longer installs the service or skill; restore it until the window passes. |
+| `skill_not_installed` | The version has quotes, any of which may still back a first dispatch, but the build no longer installs the service or skill; restore it. |
 | `definition_invalid`, `schema_invalid` | The version no longer materializes against this build's global policy or schema compiler; do not edit the catalog, restore the matching configuration. |
 | `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
-| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote that may still be dispatched was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish and its quotes can no longer be dispatched. A rollback to a build without the version a newer build sold with is refused the same way; give the rollback build that version in `previousExternalJobAdapters`. |
+| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` while its jobs run or its quotes are kept (every quote is kept). A rollback to a build without the version a newer build sold with is refused the same way; give the rollback build that version in `previousExternalJobAdapters`. |
 | `encryption key <id> not configured` | An unfinished job's stored state names a key this build lacks; restore it (after a rotation, in `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`). |
 | `no active encryption key for unfinished external jobs` | Unfinished jobs may still need a job reference or result candidate sealed, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key (a previous key alone only reads). |
 | `no active encryption key to admit the orders of open external-job quotes` | Quotes an external-job adapter version sold may still be dispatched, and admitting each order seals its input, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key. |
+| `control profile 0x…abcd not retained` | Quotes of that listing version were issued under a control profile this build neither uses nor retains, and their orders' first dispatches still carry it; list it in `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`. |
 
 Never delete claims or quotes to pass the check.
 
@@ -175,7 +176,7 @@ off unless every check in its JSON report passes:
 | `retained_obligations` | This build cannot service an obligation (see the boot refusal below). |
 | `compatible_workers` | No running instance runs the external-job worker, or an older process (without the worker, or at another schema epoch) still runs. Stop it, start this build, retry. |
 | `encryption_keys` | `PROVIDER_DATA_ENCRYPTION_KEY` is not configured for the command; external jobs cannot be sealed without it. |
-| `external_job_services` | A running instance does not declare an external-job adapter version that new sales, a quote that may still be dispatched or an unfinished job need (an older build); stop it and run this build. |
+| `external_job_services` | A running instance does not declare an external-job adapter version that new sales, a quote or an unfinished job need (an older build); stop it and run this build. |
 
 ## Startup refuses the database schema
 

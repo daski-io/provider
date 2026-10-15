@@ -42,7 +42,7 @@ canonical home of the portable Daski provider agent skill.
 | Daski-issued runtime listing catalog and fixed payment bindings | One fixed API or MCP operation per skill |
 | PostgreSQL replay/idempotency ledger and terminal results | Product credentials and response mapping |
 | Provider terminal attestations and status lookup | Product-specific tests and safe error codes |
-| External-job worker: persistence, stable operation keys, leases, polling, restart recovery, running each order with the adapter version that sold it, encrypted job state | For a product job: start, read-only recovery lookup, poll and report mapping, and keeping old adapter versions while their jobs run or their quotes may still be dispatched |
+| External-job worker: persistence, stable operation keys, leases, polling, restart recovery, running each order with the adapter version that sold it, encrypted job state | For a product job: start, read-only recovery lookup, poll and report mapping, and keeping old adapter versions while their jobs run or their quotes are kept |
 | HTTP limits, rate limits, outbound-network controls, health, and logging | Product dependency readiness and operations |
 
 This is not a buyer SDK, generic API proxy, MCP gateway, payment simulator, or

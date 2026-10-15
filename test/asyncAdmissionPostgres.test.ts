@@ -142,7 +142,7 @@ describePostgres("database-backed async-admission switch", () => {
          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,
           adapter_version)
        VALUES (decode(repeat('5a',32),'hex'),'echo',decode($1,'hex'),decode(repeat('5b',32),'hex'),'10000',NULL,
-         1000,1120,'v5')`,
+         extract(epoch FROM now())::bigint,extract(epoch FROM now())::bigint + 120,'v5')`,
       [listing],
     );
     try {
@@ -169,12 +169,12 @@ describePostgres("database-backed async-admission switch", () => {
         .toMatch(/\(external-job adapter dummy@v5 not installed\)/);
     } finally {
       registry.clearServicesForTests();
-      // Test-only cleanup, as the table owner and in one implicit transaction,
-      // of a synthetic quote the database otherwise never lets anyone delete:
-      // later cases judge activation without it.
-      await owner.query(`ALTER TABLE provider_quotes DISABLE TRIGGER provider_quotes_retention;
-        DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('5a',32),'hex');
-        ALTER TABLE provider_quotes ENABLE TRIGGER provider_quotes_retention`);
+      // Later cases judge activation without the quote: aged past the
+      // first-dispatch bound and named by no claim, it owes nothing and its
+      // owner may delete it.
+      await owner.query(`UPDATE provider_quotes SET issued_at=1000, valid_before=1120
+        WHERE quote_hash=decode(repeat('5a',32),'hex')`);
+      await owner.query("DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('5a',32),'hex')");
     }
   });
 

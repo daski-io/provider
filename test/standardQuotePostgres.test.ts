@@ -14,7 +14,12 @@ const target = vi.hoisted(() => {
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
-import { countOpenObligations, loadProviderQuote } from "../src/core/standardRail/quoteStore.js";
+import {
+  countOpenObligations,
+  loadProviderQuote,
+  pruneRetiredQuotes,
+  QUOTE_RETENTION_SECONDS,
+} from "../src/core/standardRail/quoteStore.js";
 import { completeTransaction } from "../src/core/standardRail/transactionStore.js";
 import { acceptQuoteAsGateway, gatewayQuoteRequest } from "./gatewayWire.js";
 import { createDisposableDatabase, describePostgres, type DisposableDatabase } from "./postgresHarness.js";
@@ -109,7 +114,7 @@ describePostgres("provider quotes in PostgreSQL", () => {
     await expect(countOpenObligations(`0x${"aa".repeat(32)}` as Hex)).resolves.toBe(2);
     await expect(countOpenObligations(`0x${"bb".repeat(32)}` as Hex)).resolves.toBe(1);
   });
-  it("keeps every quote, however old or unclaimed, with the profile it was issued under", async () => {
+  it("retains each quote for the first-dispatch bound, then prunes it unless a claim names it", async () => {
     const listing = gatewayListing();
     const config = railConfig();
     const service = new StandardQuoteService(config, 84532);
@@ -122,21 +127,46 @@ describePostgres("provider quotes in PostgreSQL", () => {
       bound(accepted.providerQuoteHash),
     )).rows[0];
     expect(issued).toEqual({ adapter_version: null, profile: config.providerControlProfileHash });
-    // Issued 400 days ago and never claimed: the gateway's first dispatch of
-    // a timely-paid order may still name it, since nothing bounds when its
-    // release is observed.
-    const old = Math.floor(Date.now() / 1_000) - 400 * 86_400;
-    await pool.query(
+    // The 30-day first-dispatch bound plus a day past the quote's own validBefore.
+    expect(QUOTE_RETENTION_SECONDS).toBe(2_678_400);
+    const now = Math.floor(Date.now() / 1_000);
+    const quote = (byte: string, validBefore: number) => pool.query(
       `INSERT INTO provider_quotes
          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
-       VALUES (decode(repeat('f1',32),'hex'),'echo',decode(repeat('11',32),'hex'),decode(repeat('12',32),'hex'),
-         '10000',NULL,$1::bigint,$1::bigint + 120)`,
-      [old],
+       VALUES (decode(repeat($1,32),'hex'),'echo',decode(repeat('11',32),'hex'),decode(repeat('12',32),'hex'),
+         '10000',NULL,$2::bigint - 120,$2::bigint)`,
+      [byte, validBefore],
     );
-    for (const quoteHash of [`0x${"f1".repeat(32)}`, accepted.providerQuoteHash]) {
+    await quote("f1", now - QUOTE_RETENTION_SECONDS + 600);
+    await quote("f2", now - QUOTE_RETENTION_SECONDS - 600);
+    await quote("f3", now - 400 * 86_400);
+    await quote("f4", now - 400 * 86_400);
+    // A claim keeps the quote it was admitted against, however old.
+    await pool.query(
+      `INSERT INTO provider_transactions (
+         id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,
+         service_slug,skill_id,listing_manifest_hash,state,dispatch_valid_before,
+         execution_owner,execution_lease_token,execution_lease_expires_at,provider_quote_hash
+       ) VALUES ('task-quoted','https://gateway.example','ord_quoted',decode(repeat('f5',32),'hex'),
+         decode(repeat('f6',32),'hex'),decode(repeat('f7',32),'hex'),$1,'dummy','echo',
+         decode(repeat('11',32),'hex'),'executing',now() + interval '5 minutes',
+         gen_random_uuid(),gen_random_uuid(),now() + interval '1 hour',decode(repeat('f4',32),'hex'))`,
+      [payer],
+    );
+    for (const quoteHash of [`0x${"f1".repeat(32)}`, `0x${"f4".repeat(32)}`, accepted.providerQuoteHash]) {
       await expect(pool.query("DELETE FROM provider_quotes WHERE quote_hash=$1", bound(quoteHash)))
         .rejects.toThrow("a provider quote is retained while a dispatch may still name it");
     }
+    const fixtures = ["f1", "f2", "f3", "f4"].map((byte) => Buffer.from(byte.repeat(32), "hex"));
+    const remaining = async () => (await pool.query<{ hash: string }>(
+      "SELECT encode(quote_hash,'hex') AS hash FROM provider_quotes WHERE quote_hash = ANY($1) ORDER BY 1",
+      [fixtures],
+    )).rows.map((row) => row.hash.slice(0, 2));
+    // Bounded batches: only past the bound and unclaimed, never more than asked.
+    await expect(pruneRetiredQuotes(pool, 1)).resolves.toBe(1);
+    await expect(pruneRetiredQuotes(pool)).resolves.toBe(1);
+    await expect(pruneRetiredQuotes(pool)).resolves.toBe(0);
+    expect(await remaining()).toEqual(["f1", "f4"]);
     await expect(pool.query(
       "UPDATE provider_quotes SET provider_control_profile_hash=NULL WHERE quote_hash=$1", bound(accepted.providerQuoteHash),
     )).rejects.toThrow("a provider quote keeps the control profile it was issued under");

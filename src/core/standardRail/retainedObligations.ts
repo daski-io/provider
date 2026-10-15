@@ -1,6 +1,7 @@
 import type { Address, Hex } from "viem";
 import type { Queryable } from "../db/queryable.js";
 import type { ProviderStandardRailConfig } from "./config.js";
+import { QUOTE_RETENTION_SECONDS } from "./quoteStore.js";
 import type { UnserviceableReason } from "./servicingCatalog.js";
 import type { ProviderOutcomeConfig } from "./types.js";
 
@@ -26,8 +27,8 @@ export interface ListingObligation {
   /** Admitted claims in any state: their reads are owed indefinitely. */
   claims: number;
   /**
-   * Persisted quotes, every one of which may still back a timely-paid order's
-   * first dispatch: only a verified gateway inventory could prove otherwise.
+   * Persisted quotes that may still back a timely-paid order's first
+   * dispatch: those within their validBefore plus QUOTE_RETENTION_SECONDS.
    */
   openQuotes: number;
   /**
@@ -51,11 +52,12 @@ export interface ListingObligation {
 const hex = (value: Buffer) => `0x${value.toString("hex")}` as Hex;
 
 /**
- * Obligations by listing version: claims of this gateway audience, every
- * persisted quote (any may still back a first dispatch: the gateway's window
- * starts at a release observation nothing bounds) with the adapter versions
- * that sold them and the control profiles they were issued under, and
- * unfinished external jobs with the adapter versions and keys they need.
+ * Obligations by listing version: claims of this gateway audience, the
+ * quotes that may still back a first dispatch (within the protocol's
+ * first-dispatch bound plus a day of their validBefore) with the adapter
+ * versions that sold them and the control profiles they were issued under,
+ * and unfinished external jobs with the adapter versions and keys they need.
+ * A quote past that bound owes nothing: no new claim can name it.
  */
 export async function loadListingObligations(
   db: Queryable,
@@ -108,7 +110,9 @@ export async function loadListingObligations(
               FILTER (WHERE adapter_version IS NOT NULL), '{}') AS versions,
             COALESCE(array_agg(DISTINCT encode(provider_control_profile_hash,'hex'))
               FILTER (WHERE provider_control_profile_hash IS NOT NULL), '{}') AS profiles
-       FROM provider_quotes GROUP BY 1`,
+       FROM provider_quotes WHERE valid_before + $1::bigint >= extract(epoch FROM now())
+      GROUP BY 1`,
+    [QUOTE_RETENTION_SECONDS],
   );
   for (const row of quotes.rows) {
     const hash = hex(row.listing);
@@ -130,9 +134,9 @@ const label = (hash: Hex) => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
 /**
  * Refuse to run (boot), take over (import) or activate unless this build
  * can service every obligation: each version with claims needs the signing
- * key its orders' snapshots name; each version with quotes, or with
+ * key its orders' snapshots name; each version with open quotes, or with
  * unfinished external jobs, also needs its admitted definition (the jobs'
- * result contract); each quote needs the adapter version that sold it,
+ * result contract); each open quote needs the adapter version that sold it,
  * which will run its order, the control profile it was issued under, which
  * its order's dispatch carries, and, when its version is an external-job
  * one, an active key to seal the order's input at admission; and each

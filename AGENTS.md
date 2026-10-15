@@ -140,8 +140,11 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
 - A dispatch JSON `error` means "definitely not admitted". Once a claim exists
   or its commit is uncertain, answer the signed snapshot or the empty-body
   503; only a verified status query with no claim gets the `outcome_policy`
-  404. Never refuse a funded dispatch for capacity, paused sales, or quote
-  age, and never cache a signed response.
+  404. Never refuse a funded dispatch for capacity or paused sales, or for
+  quote age within the protocol's first-dispatch bound (a new claim from a
+  dispatch issued more than 30 days after its `QuoteV1` expired is refused
+  `quote_window`), and never cache a signed response. A quote is kept until
+  its `validBefore` plus 31 days, and forever once a claim names it.
 - For a non-convergent product mutation, journal intent before the call and
   reconcile authoritative product state after ambiguity. If reconciliation
   cannot complete within the synchronous call, run the product's own job in

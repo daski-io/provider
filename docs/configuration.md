@@ -54,8 +54,9 @@ in `src/core/db/runtimePrivileges.ts`: no `DELETE`, `TRUNCATE`, DDL, or
 migration-ledger access, and read-only access to the runtime catalog. A table
 added by a later migration stays inaccessible until it is reviewed into that
 list. `npm run daski:install-runtime` promotes catalog versions as the
-migration principal. No principal can delete a provider quote
-(`docs/architecture.md`).
+migration principal, and boot prunes, as that principal, only provider
+quotes past the first-dispatch bound that no claim names; no principal can
+delete any other quote (`docs/architecture.md`).
 
 Every connection this build opens declares its supported schema epoch through
 the session setting `daski.runtime_epoch`, sent in the connection's startup
@@ -197,8 +198,8 @@ included), at least one running instance with every running instance (fresh
 heartbeat in `provider_runtime_instances`) a compatible external-job worker,
 an active `PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`), and every
 running instance declaring every external-job adapter version new sales (of
-this build or of any running instance), quotes or unfinished jobs need
-(`external_job_services`). It records the checks as
+this build or of any running instance), quotes that may still be dispatched
+or unfinished jobs need (`external_job_services`). It records the checks as
 evidence. Every process of this build runs the worker, so stop older processes
 before activating. The command never migrates. Deactivation stops new
 external-job quotes and also refuses, retryably, funded external-job
@@ -244,25 +245,27 @@ audience its checkout snapshot named, so:
   `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`: the gateway dispatches an
   order with the profile its checkout snapshot committed, so an order quoted
   before the change still carries the old one. Each quote records the
-  profile it was issued under; keep a profile while any of its quotes is
-  kept. Quotes from before migration 012 recorded none, so keep the profile
-  that was current then;
+  profile it was issued under; keep a profile while any of its quotes may
+  still be dispatched (below). Quotes from before migration 012 recorded
+  none, so keep the profile that was current then until they pass the
+  bound;
 - keep every retained version's service and skill installed while it has
-  quotes. The gateway may make a timely-paid order's first dispatch at any
-  time after it observes the payment's release, which nothing bounds
-  relative to the quote, so every quote is kept and stays an obligation
-  until a verified gateway inventory can retire it; and
+  quotes that may still be dispatched: the gateway never makes an order's
+  first dispatch more than 30 days after its quote expired, so a quote stays
+  an obligation until its `validBefore` plus 31 days (the extra day covers
+  the dispatch envelope's lifetime and clock skew); and
 - keep, while any unfinished external job needs them, the adapter version
   that admitted it (as the current adapter or in
   `previousExternalJobAdapters`) and every encryption key id its stored
   state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation),
-  and, for every quote, the adapter version that sold it (each quote records
-  it, and its order runs with exactly that version)
+  and, for every quote that may still be dispatched, the adapter version
+  that sold it (each quote records it, and its order runs with exactly that
+  version)
   and, for an external-job version, an active `PROVIDER_DATA_ENCRYPTION_KEY`
   to seal the order's input and async admission on to admit it.
 
 Boot and the importer verify this for every obligation (claims of any state,
-quotes, and unfinished external jobs) and refuse
+quotes within that bound, and unfinished external jobs) and refuse
 with
 `retained listing obligations are not serviceable by this build` otherwise,
 so an incompatible build cannot take over. Paused sales never block servicing.

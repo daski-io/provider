@@ -166,6 +166,13 @@ describePostgres("provider entrypoint booted under production database roles", (
           head.runtimeCommitment, head.bundle,
         ],
       );
+      // Past the first-dispatch bound and named by no claim, a quote of a
+      // version no longer installed owes nothing: boot's housekeeping, as
+      // the schema owner, prunes it.
+      await owner.query(`INSERT INTO provider_quotes
+          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
+        VALUES (decode(repeat('0e',32),'hex'),'echo',decode(repeat('0f',32),'hex'),
+          decode(repeat('0d',32),'hex'),'10000',NULL,1000,1120)`);
     } finally {
       await owner.end();
     }
@@ -228,6 +235,7 @@ describePostgres("provider entrypoint booted under production database roles", (
     const asRuntime = new pg.Client({ connectionString: databaseUrl(database.name, runtime) });
     await asRuntime.connect();
     try {
+      // Only the quote just served: the retired one was pruned at boot.
       const quotes = await asRuntime.query("SELECT count(*)::int AS count FROM provider_quotes");
       expect(quotes.rows[0].count).toBe(1);
       await expect(asRuntime.query("DELETE FROM provider_runtime_listing_versions"))

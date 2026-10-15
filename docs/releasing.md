@@ -33,23 +33,28 @@ usually a new Daski artifact set.
 A release names the gateway revision it was qualified against. This
 repository's tested revision is the `daski-io/gateway` commit recorded in
 `test/fixtures/provider-wire.source.json`, whose canonical fixtures the
-suite replays (below). The release requires a gateway with two companion
+suite replays (below). The release requires a gateway with three companion
 changes that no provider-side check can substitute for:
 
 - named lifecycle refusals: the gateway relays a provider's
   `409 unsupported_action`, `409 action_conflict` and
   `503 lifecycle_unavailable` to the buyer by name, where an older gateway
-  answered `500`; and
+  answered `500`;
 - deadline protection: a paid order's fulfillment deadline is never shorter
   than its checkout snapshot or a recorded extension, and is still enforced
-  while sales are paused or a listing is unavailable.
+  while sales are paused or a listing is unavailable; and
+- the first-dispatch bound: the gateway never signs a new dispatch envelope
+  for an order more than 30 days (`MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS`)
+  after its `QuoteV1` expired, holding the order instead. The provider
+  refuses such a dispatch and retires a quote 31 days after its own
+  `validBefore`, so an older gateway could strand a timely-paid order.
 
 Do not claim compatibility with a deployed gateway older than that revision.
 Record the deployed gateway revision with the release evidence.
 
 ## Schema epoch and upgrade guards
 
-This release's migrations 005 to 013 ship together at schema epoch 1 (no
+This release's migrations 005 to 014 ship together at schema epoch 1 (no
 intermediate build of them was released), so its upgrade from the pre-R1
 image is the one stop-and-drain cutover in `docs/onboarding.md`. Rules for
 every later release:

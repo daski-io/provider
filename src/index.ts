@@ -2,7 +2,7 @@ import { base, baseSepolia } from "viem/chains";
 import { startProviderIdentityMonitor } from "./core/chain/providerIdentity.js";
 import { verifyRuntimeChainTrust } from "./core/chain/runtimeTrust.js";
 import { config } from "./core/config.js";
-import { closeMigrationPool, pool } from "./core/db/pool.js";
+import { closeMigrationPool, migrationPool, pool } from "./core/db/pool.js";
 import { prepareProviderDatabase } from "./core/db/startup.js";
 import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
 import {
@@ -23,6 +23,7 @@ import { loadProviderStandardRailConfig } from "./core/standardRail/config.js";
 import { assertCatalogComposition } from "./core/standardRail/catalogComposition.js";
 import { deriveProviderLaunchPolicy } from "./core/standardRail/launchPolicy.js";
 import { countLegacyExecutions } from "./core/standardRail/legacyCutover.js";
+import { pruneRetiredQuotes } from "./core/standardRail/quoteStore.js";
 import { startStandardRailReadiness } from "./core/standardRail/readiness.js";
 import { ResultContracts } from "./core/standardRail/resultContracts.js";
 import { verifyRetainedObligations } from "./core/standardRail/retainedObligations.js";
@@ -53,14 +54,15 @@ async function main(): Promise<void> {
   assertCatalogComposition(standard);
   const jobKeys = externalJobKeyRing(config, standard.retainedSigningKeys.values());
   // An incompatible build cannot take over: every claim's listing version
-  // needs its signing key, every version with quotes needs its admitted
-  // definition and handler and each quote's control profile, and every
+  // needs its signing key, every version with open quotes needs its admitted
+  // definition and handler and each open quote's control profile, and every
   // unfinished external job needs its definition, its adapter version and
   // the keys its stored state names.
   await verifyRetainedObligations(pool, standard, externalJobServicing(services, jobKeys));
   // Overlapping running instances may still admit jobs: join them only if
   // this build resumes every adapter version they sell.
   await verifyLiveExternalJobSales(pool, services);
+  await pruneQuotes();
   await closeMigrationPool();
   await stopSalesOnCommitmentDrift({
     gatewayOrigin: standard.gatewayOrigin,
@@ -107,6 +109,19 @@ async function main(): Promise<void> {
 
   process.on("SIGTERM", () => void shutdown("SIGTERM", 0));
   process.on("SIGINT", () => void shutdown("SIGINT", 0));
+}
+
+/**
+ * Housekeeping as the schema owner: drop quotes no dispatch can name any
+ * more (quoteStore.ts). Best effort; a failure never blocks servicing.
+ */
+async function pruneQuotes(): Promise<void> {
+  try {
+    const pruned = await pruneRetiredQuotes(migrationPool);
+    if (pruned > 0) logInfo("Pruned retired provider quotes", { count: pruned });
+  } catch (error) {
+    logError("Retired provider quotes could not be pruned", errorExtra(error));
+  }
 }
 
 async function shutdown(reason: string, exitCode: number): Promise<void> {

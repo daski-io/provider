@@ -1,7 +1,18 @@
 import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
+import type { Queryable } from "../db/queryable.js";
 import { parseSupplierCostCeiling, type SupplierCostCeiling } from "../serviceRegistry/supplierCost.js";
 import { canonicalHash } from "./canonical.js";
+import { MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS } from "./dispatchContract.js";
+
+/**
+ * How long past its own validBefore a provider quote stays an obligation:
+ * the first-dispatch bound plus one day, for the longest dispatch envelope
+ * lifetime and clock skew. The gateway's QuoteV1 never outlives the provider
+ * quote it names, so no new claim can name a quote after this; one that no
+ * claim names may then be deleted (migration 014 enforces the same rule).
+ */
+export const QUOTE_RETENTION_SECONDS = MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS + 86_400;
 
 const bytes = (value: Hex): Buffer => Buffer.from(value.slice(2), "hex");
 const hex = (value: Buffer): Hex => `0x${value.toString("hex")}` as Hex;
@@ -50,12 +61,10 @@ export const providerQuoteHash = (payload: ProviderQuotePayload): Hex => canonic
  * with the external-job adapter version that sells it (null for a
  * synchronous one), the control profile it is issued under and its
  * supplier-cost ceiling (null when the service reported no supplier price).
- * Every quote is kept: the gateway's first dispatch of a timely-paid order
- * can come at any time after its first release observation, which nothing
- * bounds, so only a verified gateway inventory could retire one (migration
- * 011). The same signed quote issued again (same payer, request and second)
- * keeps the row, the version, the profile and the ceiling that recorded it
- * first.
+ * It is kept for its validBefore plus QUOTE_RETENTION_SECONDS, and forever
+ * once a claim names it. The same signed quote issued again (same payer,
+ * request and second) keeps the row, the version, the profile and the
+ * ceiling that recorded it first.
  */
 export async function persistProviderQuote(
   payload: ProviderQuotePayload,
@@ -80,6 +89,30 @@ export async function persistProviderQuote(
     ],
   );
   return quoteHash;
+}
+
+/**
+ * Delete, in bounded batches, quotes no dispatch can name any more: past
+ * their validBefore plus QUOTE_RETENTION_SECONDS and named by no claim. A
+ * trigger refuses any other deletion, whoever runs it (migration 014). Runs
+ * as the schema owner (the runtime role cannot delete).
+ */
+export async function pruneRetiredQuotes(db: Queryable, maxRows = 5_000): Promise<number> {
+  let pruned = 0;
+  while (pruned < maxRows) {
+    const result = await db.query(
+      `DELETE FROM provider_quotes WHERE quote_hash IN (
+         SELECT q.quote_hash FROM provider_quotes q
+          WHERE q.valid_before + $1::bigint < extract(epoch FROM now())
+            AND NOT EXISTS (SELECT 1 FROM provider_transactions t
+                             WHERE t.provider_quote_hash = q.quote_hash)
+          LIMIT $2)`,
+      [QUOTE_RETENTION_SECONDS, Math.min(1_000, maxRows - pruned)],
+    );
+    pruned += result.rowCount ?? 0;
+    if ((result.rowCount ?? 0) === 0) break;
+  }
+  return pruned;
 }
 
 /**

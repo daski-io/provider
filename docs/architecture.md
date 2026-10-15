@@ -89,9 +89,10 @@ a retained previous key after a rotation, and servicing calls may name a
 retained previous provider audience (`docs/configuration.md`); a first
 dispatch may carry a retained previous control profile. Boot and the importer
 refuse a build that cannot service every obligation: claims need their
-version's signing key, and versions with quotes also need their definition,
-handler, the external-job adapter version that sold each quote and the
-control profile it was issued under.
+version's signing key, and versions with quotes that may still be dispatched
+(below) also need their definition, handler, the external-job adapter
+version that sold each such quote and the control profile it was issued
+under.
 
 ## Dispatch state machine
 
@@ -156,7 +157,11 @@ Core verifies before claim: envelope shape, duplicate keys, environment,
 chain, audience, signer, lifetime, exact outcome, service/skill, quote,
 request hashes/schema, payer, self-purchase policy, deposit/release ordering,
 contract provenance, finality, source agreement, and sanctions state. Listing
-capacity, paused sales and quote age never refuse a funded dispatch.
+capacity and paused sales never refuse a funded dispatch. Quote age refuses a
+new claim only past the protocol's first-dispatch bound: a dispatch issued
+more than 30 days (`MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS`) after the
+forwarded QuoteV1's `validBefore`, which the gateway never sends, is refused
+as `quote_window`, judged on those two signed values.
 
 The verified payer is supplied to the adapter as context. It is not inferred
 from input. The request body is not persisted. A terminal result is persisted
@@ -269,8 +274,8 @@ job. Core admits the funded order (above), then the worker in
   with, and the key its stored state names. Boot, the importer and
   activation refuse a build that cannot resume every unfinished job (its
   version's definition, its adapter version, its encryption keys) or run
-  the order of every quote (the adapter version recorded with the quote),
-  so an incompatible build cannot take one over.
+  the order of every quote that may still be dispatched (the adapter version
+  recorded with the quote), so an incompatible build cannot take one over.
   Each process declares the adapter versions it resumes and the one it sells
   in its heartbeat. Activation requires every running instance to resume
   every version new sales (of any running instance), open quotes or
@@ -348,15 +353,21 @@ receives only the reviewed per-table grants in `src/core/db/runtimePrivileges.ts
 
 A provider quote can back a dispatch long after it expires: the gateway
 re-dispatches a timely-paid order until its first release observation plus
-the snapshot's fulfillment window, and nothing bounds when that observation
-comes. Every quote is therefore kept, and a trigger refuses any quote
-deletion, whoever attempts it (migration 011), until a verified gateway
-obligation inventory can retire quotes. Each quote records the external-job
-adapter version that sold it (migration 010), the control profile it was
-issued under (migration 012) and its supplier-cost ceiling (migration 013,
-which admits only a valid ceiling), none of which ever changes, and every
-claim records the provider quote it was admitted against. Claims, terminal
-results and their reads are never deleted either.
+the snapshot's fulfillment window. The protocol bounds the first dispatch
+instead: the gateway never signs one more than 30 days after the order's
+QuoteV1 expired, a new claim from a later one is refused, the QuoteV1 never
+outlives the provider quote it names, and a dispatch envelope lives at most
+a day. A quote therefore stays an obligation until its own `validBefore`
+plus 31 days (`QUOTE_RETENTION_SECONDS`), and is kept forever once a claim
+names it. Boot prunes, as the schema owner and in bounded batches (best
+effort; a failure never blocks boot), only quotes past that bound that no
+claim names; a trigger refuses any other quote deletion, whoever attempts it
+(migration 014, replacing 011's refusal of every deletion). Each quote
+records the external-job adapter version that sold it (migration 010), the
+control profile it was issued under (migration 012) and its supplier-cost
+ceiling (migration 013, which admits only a valid ceiling), none of which
+ever changes, and every claim records the provider quote it was admitted
+against. Claims, terminal results and their reads are never deleted.
 
 ## Upgrade compatibility barrier
 

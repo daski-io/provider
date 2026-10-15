@@ -15,6 +15,7 @@ const target = vi.hoisted(() => {
 import { closeMigrationPool, pool, runMigrations } from "../src/core/db/pool.js";
 import { clearServicesForTests, registerService } from "../src/core/serviceRegistry/registry.js";
 import { StandardQuoteService } from "../src/core/standardRail/quote.js";
+import { QUOTE_RETENTION_SECONDS } from "../src/core/standardRail/quoteStore.js";
 import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/salesStops.js";
 import { verifyRetainedObligations } from "../src/core/standardRail/retainedObligations.js";
 
@@ -173,7 +174,7 @@ describePostgres("retained listing versions against PostgreSQL", () => {
     await expect(verifyRetainedObligations(pool, railConfig([railOutcome()], retained), NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
-  it("refuses to boot while an unserviceable version has quotes, however old", async () => {
+  it("refuses to boot while an unserviceable version has quotes within the first-dispatch bound", async () => {
     await pool.query(
       `INSERT INTO provider_quotes
          (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
@@ -189,17 +190,22 @@ describePostgres("retained listing versions against PostgreSQL", () => {
     await expect(verifyRetainedObligations(pool, {
       ...known, unserviceable: new Map([[b2, "skill_not_installed" as const]]),
     }, NO_EXTERNAL_JOBS)).rejects.toThrow(/0xb2b2b2b2…b2b2 \(skill_not_installed\)/);
-    // Long expired and never claimed, the quote still owes its version: the
-    // gateway's first dispatch of a timely-paid order may still name it, and
-    // nothing bounds when that order's release is observed.
-    await pool.query("UPDATE provider_quotes SET issued_at=1000, valid_before=1120 WHERE listing_manifest_hash=$1",
-      [Buffer.from(b2.slice(2), "hex")]);
+    const expired = (seconds: number) => pool.query(
+      "UPDATE provider_quotes SET issued_at=$2::bigint - 120, valid_before=$2::bigint WHERE listing_manifest_hash=$1",
+      [Buffer.from(b2.slice(2), "hex"), nowSeconds() - seconds],
+    );
+    // Expired 20 days ago and never claimed, the quote still owes its
+    // version: the gateway may still make its order's first dispatch.
+    await expired(20 * 86_400);
     await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS))
       .rejects.toThrow(/0xb2b2b2b2…b2b2 \(definition_unavailable\)/);
     // Serving the version, not forgetting the quote, meets the obligation.
     await expect(verifyRetainedObligations(pool, {
       ...known, servicing: new Map([...known.servicing, [b2, railOutcome({ listingManifestHash: b2 })]]),
     }, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
+    // Past the first-dispatch bound plus a day no new claim can name it: it owes nothing.
+    await expired(QUOTE_RETENTION_SECONDS + 60);
+    await expect(verifyRetainedObligations(pool, known, NO_EXTERNAL_JOBS)).resolves.toBeUndefined();
   });
 
   it("keeps serving reads while new sales are paused", async () => {

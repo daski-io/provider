@@ -160,10 +160,12 @@ describeLegacy("the actual pre-R1 image against an R1 database", () => {
       expect(switchRow.rows).toEqual([{ enabled: false }]);
     });
     await admin(database, async (client) => {
+      // A quote still within the first-dispatch bound: later R1 boots keep it.
       await client.query(`INSERT INTO provider_quotes
           (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before)
         VALUES (decode(repeat('05',32),'hex'),'echo',decode($1,'hex'),
-          decode(repeat('06',32),'hex'),'10000',NULL,1000,1120)`, [listing]);
+          decode(repeat('06',32),'hex'),'10000',NULL,
+          extract(epoch FROM now())::bigint,extract(epoch FROM now())::bigint + 120)`, [listing]);
       if (withExecutingRows) {
         await client.query(`INSERT INTO provider_transactions (
             id,gateway_audience,order_id,dispatch_nonce,dispatch_hash,request_hash,payer,

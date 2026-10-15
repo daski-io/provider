@@ -74,12 +74,13 @@ listing version the order was paid under. When a new version changes how job
 references are read, or maps reports to a new listing version's result
 contract, give it a new `version` and keep the old adapter in
 `previousExternalJobAdapters` (keyed by its own version) until its jobs
-finish, the quotes it sold can no longer be dispatched (their window, the
-version's fulfillment window and 30 days) and no older instance still sells
-it. A dispatch whose selling version this build lacks is refused before
-admission (`outcome_policy`), and boot, the importer and activation refuse a
-build that dropped a version an unfinished job or such a quote needs or, while
-async admission is on, one a running instance still sells. A mapper fix that
+finish, the quotes it sold can no longer be dispatched (31 days after their
+`validBefore`: the gateway's 30-day first-dispatch bound plus a day) and no
+older instance still sells it. A dispatch whose selling version this build
+lacks is refused before admission (`outcome_policy`), and boot, the importer
+and activation refuse a build that dropped a version an unfinished job or
+such a quote needs or, while async admission is on, one a running instance
+still sells. A mapper fix that
 keeps the reference format and the result contract keeps its version. A quote
 that recorded no version (a synchronous adapter sold it, or it was issued
 before migration 010) is admitted under the service's current adapter, as

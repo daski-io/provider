@@ -86,10 +86,16 @@ order) before anything else:
   payer compared as addresses, and a provider window covering the gateway
   window), the request schema, readiness, chain evidence and sanctions.
 
-There is no quote-age limit: settlement timeliness is judged by the deposit
-block timestamp against the `QuoteV1` window. A claim cannot commit at or
-after the dispatch envelope's `validBefore`; PostgreSQL enforces that at
-commit time. Funded dispatches are never refused for listing capacity or
+The only quote-age limit is the protocol's first-dispatch bound: a new claim
+is refused (`quote_window`) when the dispatch's `issuedAt` is more than 30
+days (`MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS`, 2,592,000) after the
+`QuoteV1`'s `validBefore`; the gateway never sends such a dispatch, and an
+admitted claim's exact replay and status are unaffected. Settlement
+timeliness is judged by the deposit block timestamp against the `QuoteV1`
+window. A claim cannot commit at or after the dispatch envelope's
+`validBefore`; PostgreSQL enforces that at commit time. A provider quote is
+kept until its own `validBefore` plus 31 days, and forever once a claim
+names it. Funded dispatches are never refused for listing capacity or
 paused sales. While provider readiness is down, a new synchronous dispatch is
 refused before admission so the gateway retries it later.
 

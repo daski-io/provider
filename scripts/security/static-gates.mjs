@@ -84,6 +84,7 @@ const REVIEWED_MIGRATIONS = [
   ["011_quote_retention_until_retired.sql", []],
   ["012_quote_control_profile.sql", []],
   ["013_quote_supplier_cost_ceiling.sql", []],
+  ["014_quote_retention_bound.sql", []],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();

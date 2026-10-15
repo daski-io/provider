@@ -1,7 +1,7 @@
 import { getAddress, type Hex } from "viem";
 import { assertExactKeys, canonicalHash, SIGNED_ENVELOPE_KEYS } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
-import { HASH32_PATTERN as HASH32 } from "./dispatchContract.js";
+import { HASH32_PATTERN as HASH32, MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS } from "./dispatchContract.js";
 import { DispatchRejectedError } from "./dispatchErrors.js";
 import { gatewayEnvelopeSigner } from "./gatewayEnvelope.js";
 import { assertFixedQuotePolicy } from "./paymentBinding.js";
@@ -23,8 +23,11 @@ const nowSeconds = () => Math.floor(Date.now() / 1_000);
 /**
  * Verify the forwarded gateway QuoteV1. It may have expired long ago: a
  * timely-paid order can be dispatched freshly until the gateway's recovery
- * horizon, so no quote age is enforced here. Settlement timeliness is proven
- * by the deposit block timestamp during evidence verification.
+ * horizon. Settlement timeliness is proven by the deposit block timestamp
+ * during evidence verification. The only age limit is the protocol's
+ * first-dispatch bound, judged on the signed values the gateway judges: a
+ * new claim from a dispatch issued more than 30 days after the QuoteV1's
+ * validBefore is refused (an admitted claim's exact replay never gets here).
  */
 export async function verifyQuoteEnvelope(
   envelope: SignedEnvelope<QuoteV1>,
@@ -73,6 +76,9 @@ export async function verifyQuoteEnvelope(
     || getAddress(quote.token) !== getAddress(outcome.token)
     || getAddress(quote.splitter) !== getAddress(outcome.splitter)
   ) throw new DispatchRejectedError("quote_window");
+  if (dispatch.issuedAt > quote.validBefore + MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS) {
+    throw new DispatchRejectedError("quote_window");
+  }
   if (quote.grossAmount !== dispatch.grossAmount) throw new DispatchRejectedError("price");
   assertFixedQuotePolicy(outcome);
 }

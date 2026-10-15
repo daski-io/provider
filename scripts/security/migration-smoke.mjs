@@ -162,18 +162,21 @@ try {
   if (!await rejects(quote("NULL", 1_120, 1_120))) {
     throw new Error("quote window constraint was not enforced");
   }
-  // Quote retention (011): no quote is ever deleted, however old and whether
-  // or not a claim names it, and a claim keeps the quote it was admitted
-  // against.
-  const retained = (byte, issuedAt = "1000") => `INSERT INTO provider_quotes
+  // Quote retention (014): a quote is kept until its validBefore plus the
+  // 30-day first-dispatch bound plus a day (2,678,400 seconds), and while a
+  // claim names it; whoever deletes, only an older quote no claim names
+  // goes. A claim keeps the quote it was admitted against.
+  const retired = "extract(epoch FROM now())::bigint - 2678400";
+  const retained = (byte, validBefore) => `INSERT INTO provider_quotes
       (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
        issued_at,valid_before)
     VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
-      decode(repeat('55',32),'hex'),'10000',NULL,${issuedAt},${issuedAt} + 120)`;
+      decode(repeat('55',32),'hex'),'10000',NULL,${validBefore} - 120,${validBefore})`;
   const deleteQuote = (byte) => `DELETE FROM provider_quotes WHERE quote_hash=decode(repeat('${byte}',32),'hex')`;
-  await client.query(retained("e1"));
+  await client.query(retained("e1", `${retired} + 60`));
   await client.query(retained("e2", "extract(epoch FROM now())::bigint"));
-  await client.query(retained("e4"));
+  await client.query(retained("e3", `${retired} - 60`));
+  await client.query(retained("e4", `${retired} - 60`));
   await client.query(`UPDATE provider_transactions SET provider_quote_hash=decode(repeat('e4',32),'hex')
       WHERE id='task-smoke'`).then(
     () => { throw new Error("a claim's provider quote changed"); },
@@ -183,7 +186,10 @@ try {
     "task-quoted", "now() + interval '5 minutes'", undefined, "decode(repeat('e4',32),'hex')",
   ));
   for (const byte of ["e1", "e2", "e4"]) {
-    if (!await rejects(deleteQuote(byte))) throw new Error(`a provider quote was deleted: ${byte}`);
+    if (!await rejects(deleteQuote(byte))) throw new Error(`a retained provider quote was deleted: ${byte}`);
+  }
+  if ((await client.query(deleteQuote("e3"))).rowCount !== 1) {
+    throw new Error("a quote past the first-dispatch bound that no claim names could not be deleted");
   }
   // The adapter version that sold a quote (010): a reviewed version or none,
   // never changed once recorded, not even on a quote that recorded none.

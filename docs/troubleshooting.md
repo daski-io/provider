@@ -102,16 +102,23 @@ order it would take over (see `docs/configuration.md`):
 | Reason | Fix |
 | --- | --- |
 | `signing key not retained` | Orders of that listing version were admitted under a previous wallet; add its key to `PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`. |
-| `skill_not_installed` | The version has quotes, any of which may still back a first dispatch, but the build no longer installs the service or skill; restore it. |
+| `skill_not_installed` | The version has quotes that may still back a first dispatch (until their `validBefore` plus 31 days), but the build no longer installs the service or skill; restore it until they pass that bound. |
 | `definition_invalid`, `schema_invalid` | The version no longer materializes against this build's global policy or schema compiler; do not edit the catalog, restore the matching configuration. |
 | `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
-| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` while its jobs run or its quotes are kept (every quote is kept). A rollback to a build without the version a newer build sold with is refused the same way; give the rollback build that version in `previousExternalJobAdapters`. |
+| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` while its jobs run or its quotes may still be dispatched (until their `validBefore` plus 31 days). A rollback to a build without the version a newer build sold with is refused the same way; give the rollback build that version in `previousExternalJobAdapters`. |
 | `encryption key <id> not configured` | An unfinished job's stored state names a key this build lacks; restore it (after a rotation, in `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`). |
 | `no active encryption key for unfinished external jobs` | Unfinished jobs may still need a job reference or result candidate sealed, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key (a previous key alone only reads). |
 | `no active encryption key to admit the orders of open external-job quotes` | Quotes an external-job adapter version sold may still be dispatched, and admitting each order seals its input, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key. |
-| `control profile 0x…abcd not retained` | Quotes of that listing version were issued under a control profile this build neither uses nor retains, and their orders' first dispatches still carry it; list it in `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES`. |
+| `control profile 0x…abcd not retained` | Quotes of that listing version were issued under a control profile this build neither uses nor retains, and their orders' first dispatches still carry it; list it in `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES` until those quotes pass the first-dispatch bound. |
 
 Never delete claims or quotes to pass the check.
+
+Boot prunes, as the schema owner, quotes past the first-dispatch bound
+(their `validBefore` plus 31 days) that no claim names, and logs `Pruned
+retired provider quotes`. If it logs `Retired provider quotes could not be
+pruned`, boot continues and the next boot retries; check that the migration
+principal can connect. Pruning never removes a quote that may still back a
+dispatch: the database refuses it, whoever deletes.
 
 If boot refuses with `running instances sell external-job adapter versions
 this build cannot resume: <service>@<version>`, async admission is on and an
@@ -310,7 +317,9 @@ is a reviewed code:
   the order's quote), or the payer is a provider wallet;
 - `quote_window`/`price`: the forwarded `QuoteV1` or the persisted provider
   quote it names does not bind this order (unknown or zero quote hash,
-  different request, payer or window), or the amount differs;
+  different request, payer or window), the dispatch was issued more than 30
+  days after the `QuoteV1` expired (the protocol's first-dispatch bound,
+  which the gateway never exceeds), or the amount differs;
 - `evidence`: chain evidence, settlement timing (judged by the deposit block
   timestamp), sanctions, or evidence already admitted for another order; and
 - `service_unavailable`: provider readiness or the database failed before
@@ -320,7 +329,8 @@ is a reviewed code:
   `encryption_key_missing`). Product readiness never refuses an external-job
   dispatch: the admitted job waits for the product.
 
-Listing capacity, paused sales, and quote age never refuse a funded dispatch.
+Listing capacity and paused sales never refuse a funded dispatch, and quote
+age only past the first-dispatch bound.
 An empty-body `503` is deliberate ambiguity: admission exists, may exist, or
 could not be checked, so the gateway reconciles through status instead of
 sending a new envelope. A JSON `429 rate_limit_exceeded` on dispatch or

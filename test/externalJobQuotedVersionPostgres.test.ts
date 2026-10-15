@@ -19,7 +19,7 @@ import { clearServicesForTests, getAllServices, registerService } from "../src/c
 import type { ServiceModule, ServiceResult } from "../src/core/serviceRegistry/types.js";
 import { canonicalHash } from "../src/core/standardRail/canonical.js";
 import { FIXED_QUOTE_LIFETIME_SECONDS, StandardQuoteService } from "../src/core/standardRail/quote.js";
-import { persistProviderQuote } from "../src/core/standardRail/quoteStore.js";
+import { persistProviderQuote, QUOTE_RETENTION_SECONDS } from "../src/core/standardRail/quoteStore.js";
 import { assertObligationsServiceable, loadListingObligations } from "../src/core/standardRail/retainedObligations.js";
 import type { ProviderOutcomeConfig } from "../src/core/standardRail/types.js";
 import { json } from "./dispatchHarness.js";
@@ -256,11 +256,17 @@ describePostgres("external-job orders run by the adapter version that sold them"
     expect([admitted.state, (await harness.job(taskId)).adapter_version]).toEqual(["submitted", v1Version]);
     await runToPoll(harness, taskId);
     expect(await harness.claim(taskId)).toMatchObject({ state: "completed", result: echoCompleted });
-    // Its job finished, yet the quote still needs v1: only the gateway could
-    // prove no other dispatch will name it (an identical request quoted in
+    // Its job finished, yet the quote still needs v1 within the first-dispatch
+    // bound: another order may still name it (an identical request quoted in
     // the same second shares the quote).
     await expect(takeover([harness.rail.service]))
       .rejects.toThrow(`(external-job adapter dummy@${v1Version} not installed)`);
+    // Past the bound plus a day no new claim can name it, so nothing needs v1.
+    await pool.query(
+      "UPDATE provider_quotes SET issued_at=$2::bigint - 120, valid_before=$2::bigint WHERE quote_hash=$1",
+      [Buffer.from(order.providerQuoteHash.slice(2), "hex"), nowSeconds() - QUOTE_RETENTION_SECONDS - 60],
+    );
+    await expect(takeover([harness.rail.service])).resolves.toBeUndefined();
   });
 
   it("refuses to take over open external-job quotes without an active key to admit their orders", async () => {

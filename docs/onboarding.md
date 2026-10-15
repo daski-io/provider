@@ -291,7 +291,8 @@ restart resubmits nothing. Before rolling one out:
   the current adapter or in `previousExternalJobAdapters` (while async
   admission is on, boot also refuses a build that cannot resume a version a
   running instance sells); a rollback build needs the version the newer
-  build sold with too, since every quote is kept;
+  build sold with too, until the quotes it sold pass the first-dispatch
+  bound (their `validBefore` plus 31 days);
 - keep every encryption key id stored jobs name
   (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`), every previous wallet key
   orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`), every

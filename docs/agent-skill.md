@@ -141,3 +141,16 @@ provider runtime.
 
 When the repository evolves, update authoritative docs first and change the
 skill only when its routing, decision boundary, or hard stops change.
+
+## Evaluate the skill
+
+[Twelve synthetic product briefs](../test/fixtures/skill-evaluations/README.md)
+(S-T01 to S-T12) state the path the skill should select and the plan,
+adapter outline and stopping behavior expected for each: a two-second API,
+an eight-hour audit with a recoverable start, the same audit behind a public
+x402 endpoint only, an unrecoverable start, full-only capabilities, an older
+checkout, a bearer job URL, a generic-proxy request, a deployment while jobs
+are pending, an expired idempotency horizon with an invalid report, and the
+published package itself. Run them against the packaged skill in a clean
+agent session after any routing change and record the selected path, plan and
+outline, not only keyword matches.

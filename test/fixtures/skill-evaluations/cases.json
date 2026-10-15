@@ -1,0 +1,293 @@
+{
+  "schemaVersion": 1,
+  "skill": "daski-provider",
+  "selections": [
+    "lite-synchronous",
+    "lite-external-job",
+    "provider-full",
+    "upstream-gap",
+    "compatible-release-required",
+    "refuse-and-remap",
+    "package-consistent"
+  ],
+  "cases": [
+    {
+      "id": "S-T01",
+      "title": "Fixed-price API answering in two seconds",
+      "checkout": "current",
+      "brief": "Product: Synthetic Tagger, a text-tagging API. Operation: POST https://tagger.example/v1/tag with {\"text\": string up to 5,000 characters}; answers {\"tags\": [{\"label\": string, \"score\": number}]} in about two seconds (p99 five seconds). Read-only: it stores nothing and has no side effects. The provider wants one Daski skill at a fixed 0.10 USDC. Buyers never send follow-ups.",
+      "expected": {
+        "selection": "lite-synchronous",
+        "mustState": [
+          "fixed price and an automated terminal result well inside the 50-second synchronous budget",
+          "read-only operation, so no mutation ambiguity remains when the call ends"
+        ],
+        "plan": [
+          "copy src/services/dummy to a new service folder",
+          "closed input schema with the 5,000-character bound and a resultSchema for the complete completed ServiceResult",
+          "a fixed client on the reviewed outbound helpers with a timeout well below the budget"
+        ],
+        "adapterOutline": [
+          "`execute(context, input)` calls the tag operation with `context.signal` and returns `{status: \"completed\", artifacts}` or a reviewed failure code"
+        ],
+        "mustNot": [
+          "select external-job mode or provider-full",
+          "add polling, a worker or a job reference"
+        ]
+      }
+    },
+    {
+      "id": "S-T02",
+      "title": "Eight-hour audit with an already-paid start, lookup and stable report",
+      "checkout": "current",
+      "brief": "Product: Synthetic Audit, a fixed-price review service. Partner API (authenticated with a provider-held key): POST /internal/audits creates an audit for an order the partner has already been paid for, keyed by a caller-chosen orderKey; repeating the same orderKey within 24 hours returns the same audit. GET /internal/audits?orderKey= is a strongly consistent lookup that returns the audit created for that key or 404 when none was ever created. Each audit answers {jobId, reportUrl}; GET reportUrl returns {state: running | done | rejected} and, when done, a report of a summary and at most 50 findings. Audits take about eight hours (at most ten); reports are kept 90 days. Input is one description of up to 2,000 characters. Fixed price 0.50 USDC. No buyer follow-ups, cancellation or human review.",
+      "expected": {
+        "selection": "lite-external-job",
+        "mustState": [
+          "the product already owns the long-running execution, so duration does not select provider-full",
+          "Daski's verified payment starts the already-paid audit through the partner creation operation keyed by core's stable idempotency key",
+          "a lost start is recoverable: the authoritative lookup by order key, and same-key replay inside the 24-hour retention",
+          "a declared fulfillment window (about 12 hours) covering the maximum runtime, queueing, retries and report retrieval"
+        ],
+        "plan": [
+          "copy src/services/synthetic-audit and compose it in src/providerServices.ts",
+          "resultSchema for the complete completed ServiceResult holding the summary and at most 50 findings",
+          "tests for a lost start response, an expired retention horizon, an invalid report, a late completion and every product state"
+        ],
+        "adapterOutline": [
+          "`mode: \"external-job\"`, a `version`, `idempotencyRetentionSeconds` of 86,400",
+          "`start` posts the audit with `context.idempotencyKey` and returns `{kind: \"accepted\", job, pollAfterSeconds}`",
+          "`recoverStart` looks the audit up by order key; found is `accepted`, an authoritative 404 may be `{kind: \"safe-to-start\", basis: \"authoritative-absence\"}`, otherwise `idempotent-replay` only inside the horizon, else `unknown`",
+          "`poll` maps running to `pending`, done to `terminal` with the mapped report, rejected to a reviewed failure code, and transport faults to `retry`"
+        ],
+        "mustNot": [
+          "edit core or add product-specific code outside the service folder",
+          "build a private polling server, hold a request open, or raise the synchronous budget",
+          "select provider-full because the audit takes hours"
+        ]
+      }
+    },
+    {
+      "id": "S-T03",
+      "title": "Same audit documented only as a public x402 endpoint",
+      "checkout": "current",
+      "brief": "Product: Synthetic Audit (as in S-T02), but the only documentation the provider supplies is a public x402 endpoint, POST https://audit.example/x402/audit, which demands a 0.50 USDC payment per call and answers with a report URL. Nothing else is documented: no partner API, no lookup, no statement of how long reports are kept. The provider asks to list this endpoint on Daski as it is.",
+      "expected": {
+        "selection": "upstream-gap",
+        "mustState": [
+          "an x402 endpoint alone does not prove integration compatibility and Daski does not list arbitrary x402 endpoints",
+          "the product must offer a way to start an audit for an order Daski already admitted, without a second payment",
+          "start recovery after a lost response and report retention are missing facts to obtain from the product"
+        ],
+        "plan": [
+          "write the integration brief with payment mapping, start recovery and retention listed as missing product inputs",
+          "optionally continue local work against a fake client, clearly marked as not production-ready"
+        ],
+        "mustNot": [
+          "pay the x402 endpoint from the adapter or spend a second dollar to test it",
+          "add a public alreadyPaid flag",
+          "promise a direct listing or infer compatibility from S-T02"
+        ]
+      }
+    },
+    {
+      "id": "S-T04",
+      "title": "Start can time out without idempotency or lookup",
+      "checkout": "current",
+      "brief": "Product: Synthetic Render. POST /renders starts a 20-minute render and returns {renderId}; under load the response can time out after the render was already created. The API has no idempotency key, no client reference, and no way to list or search renders; a renderId exists only in that response. Fixed price 2 USDC, no buyer follow-ups.",
+      "expected": {
+        "selection": "upstream-gap",
+        "mustState": [
+          "a timed-out start is ambiguous and cannot be reconciled, so neither starter can make it safe",
+          "the product needs an idempotency key or a lookup by client reference before onboarding",
+          "choosing provider-full does not remove this gap"
+        ],
+        "plan": [
+          "report the upstream integration gap and the product change that would close it"
+        ],
+        "mustNot": [
+          "retry the start blindly or treat the timeout as a definitive refusal",
+          "claim provider-full or a longer timeout solves it"
+        ]
+      }
+    },
+    {
+      "id": "S-T05",
+      "title": "Dynamic price, later corrections, cancellation and an owned resource",
+      "checkout": "current",
+      "brief": "Product: Synthetic Translation Workspace. The price depends on word count and language pair and is quoted per request. After delivery, buyers may submit corrections for 48 hours; they may cancel before work starts. Delivered translations live in a private buyer-owned workspace that the buyer can later delete.",
+      "expected": {
+        "selection": "provider-full",
+        "mustState": [
+          "dynamic pricing",
+          "later buyer input (corrections) and cancellation",
+          "a durable buyer-owned resource with an owner action (deletion)"
+        ],
+        "plan": [
+          "read the full-provider reference and the provider-full repository's AGENTS.md",
+          "model the workspace as an asset with standard actions"
+        ],
+        "mustNot": [
+          "fit it into lite synchronous or external-job mode",
+          "promise recovery after a failed paid order"
+        ]
+      }
+    },
+    {
+      "id": "S-T06",
+      "title": "Admin, email, human review and intentional multi-replica workers",
+      "checkout": "current",
+      "brief": "Product: Synthetic Clearance Check, fixed price 5 USDC. Every order needs an analyst's approval before the result is released. The provider wants buyers notified by email, an admin console for staff, and plans to run three active worker replicas for throughput.",
+      "expected": {
+        "selection": "provider-full",
+        "mustState": [
+          "human review before release",
+          "email and admin",
+          "intentional multi-replica operation"
+        ],
+        "plan": [
+          "read the full-provider reference and follow provider-full's service and worker contracts"
+        ],
+        "mustNot": [
+          "add review, email, admin or a scaled worker pool to lite"
+        ]
+      }
+    },
+    {
+      "id": "S-T07",
+      "title": "New skill, old lite checkout",
+      "checkout": "pre-external-job",
+      "brief": "The agent has daski-provider 0.2.0 installed. The user's fork is daski-io/provider at version 0.1.0: src/core/serviceRegistry/adapterTypes.ts declares only the synchronous FulfillmentAdapter and there is no src/core/externalJobs directory. The product is the S-T02 audit.",
+      "expected": {
+        "selection": "compatible-release-required",
+        "mustState": [
+          "the checkout lacks external-job mode (no ExternalJobAdapter, package 0.1.0 against skill 0.2.0)",
+          "upgrade the fork to a provider release with external-job mode (0.2.0 or later), following its upgrade notes, or report that requirement"
+        ],
+        "plan": [
+          "inspect adapterTypes.ts and package.json before proposing an API",
+          "name the compatible release and the initial cutover it implies"
+        ],
+        "mustNot": [
+          "invent asynchronous methods, a pending state or a custom poller in the old starter",
+          "edit core to add a job API"
+        ]
+      }
+    },
+    {
+      "id": "S-T08",
+      "title": "Product exposes only a bearer job URL",
+      "checkout": "current",
+      "brief": "Product: Synthetic Report, fixed price 1 USDC, reports take three hours. POST /reports (authenticated) creates a report for a paid partner order and answers {jobUrl: \"https://reports.example/j/<random token>\"}; whoever holds the jobUrl can read the report's state and download it. There is no other job identifier. Its documentation says a POST with the same clientRef within 12 hours returns the same jobUrl, and GET /reports?clientRef= returns the jobUrl of an existing report.",
+      "expected": {
+        "selection": "lite-external-job",
+        "mustState": [
+          "the bearer jobUrl is retained state: stored only inside the encrypted job reference, never logged or published as diagnostic data",
+          "recovery must not depend on the lost response: the clientRef lookup (or same-clientRef replay inside 12 hours) finds the job again",
+          "without such a lookup or replay guarantee this would be an upstream gap"
+        ],
+        "plan": [
+          "use core's idempotencyKey as the clientRef",
+          "validate the jobUrl's origin and path against the reviewed endpoint before following it"
+        ],
+        "adapterOutline": [
+          "`start` returns `{kind: \"accepted\", job: {v: 1, jobUrl}}`",
+          "`recoverStart` uses the clientRef lookup and answers `unknown` once the replay window has passed without a lookup result"
+        ],
+        "mustNot": [
+          "log, return or publish the jobUrl",
+          "rely on the URL from a lost response as the recovery method"
+        ]
+      }
+    },
+    {
+      "id": "S-T09",
+      "title": "Buyer-chosen upstream URL, method and credentials",
+      "checkout": "current",
+      "brief": "Product: Synthetic Webhook Relay. The provider proposes one Daski skill whose input is {url, method, headers, bearerToken, body}; the provider would forward the request as given and return the response. Fixed price 0.05 USDC.",
+      "expected": {
+        "selection": "refuse-and-remap",
+        "mustState": [
+          "a buyer-selected URL, method, headers or credential is a generic proxy, which a Daski skill must never expose",
+          "map a reviewed fixed operation instead, with closed fields the provider rebuilds"
+        ],
+        "plan": [
+          "propose a fixed skill such as delivering a bounded message to a destination the provider pre-registers and reviews",
+          "then choose its mode; a quick fixed delivery is lite synchronous"
+        ],
+        "mustNot": [
+          "accept arbitrary URL, method, header or credential fields",
+          "disable SSRF protection"
+        ]
+      }
+    },
+    {
+      "id": "S-T10",
+      "title": "Eight-hour job crossing a deployment",
+      "checkout": "current",
+      "brief": "The S-T02 audit service is live on Testnet. The provider deploys weekly; next week's release changes the report mapping and the job-reference format while audits admitted under the current version are still running, some for eight hours.",
+      "expected": {
+        "selection": "lite-external-job",
+        "mustState": [
+          "a job is resumed by the adapter version that admitted it: give the new adapter a new version and keep the old one in previousExternalJobAdapters until its jobs finish",
+          "keep every encryption key id stored jobs name and the admitted fulfillment deadline of every pending order",
+          "a compatible release may overlap; a release raising the schema epoch is a stop-and-drain cutover instead"
+        ],
+        "plan": [
+          "restart and upgrade tests: a restart in each phase and a pending job resumed by the retained version",
+          "in the handoff, the read-only doctor --database run with RETAINED_OBLIGATIONS passing"
+        ],
+        "adapterOutline": [
+          "`ServiceModule.previousExternalJobAdapters` keyed by the old `version`, beside the new `adapter`"
+        ],
+        "mustNot": [
+          "drain or fail pending audits to deploy",
+          "drop the old adapter while its jobs are unfinished"
+        ]
+      }
+    },
+    {
+      "id": "S-T11",
+      "title": "Key expiry during an outage and a report that violates the schema",
+      "checkout": "current",
+      "brief": "The S-T02 audit service. During a 30-hour product outage, the 24-hour same-key retention expires for an audit whose start was ambiguous. Separately, a finished audit returns a report with 70 findings although the published result schema allows at most 50.",
+      "expected": {
+        "selection": "lite-external-job",
+        "mustState": [
+          "after the horizon recoverStart answers unknown unless the authoritative lookup resolves the original audit; nothing is resubmitted",
+          "the invalid report is not signed as completed and the job stays working; no second audit is started",
+          "repair the mapping (or publish a corrected schema through a new listing version) so the same report is retrieved and completes the job"
+        ],
+        "plan": [
+          "tests for the expired horizon and the invalid terminal report"
+        ],
+        "mustNot": [
+          "blindly resubmit the audit",
+          "truncate or sign an invalid report as completed"
+        ]
+      }
+    },
+    {
+      "id": "S-T12",
+      "title": "Published package and website onboarding",
+      "checkout": "current",
+      "brief": "Check the daski-provider package published from github.com/daski-io/provider and the providers page, which installs it with: npx skills add https://github.com/daski-io/provider --skill daski-provider",
+      "expected": {
+        "selection": "package-consistent",
+        "mustState": [
+          "one skill package, canonical in daski-io/provider",
+          "metadata.version equals package.json and SKILL.md has at most 180 lines",
+          "examples are synthetic (a fake product, no live supplier endpoint)",
+          "the guidance names only released capabilities and the same install command"
+        ],
+        "plan": [
+          "run npm run skill:validate and npm run docs:check"
+        ],
+        "mustNot": [
+          "publish a second copy of the skill",
+          "advertise unreleased support"
+        ]
+      }
+    }
+  ]
+}

@@ -50,8 +50,8 @@ describe("skill and documentation consistency rules", () => {
       '"eventual-search" is not a declared safe-to-start basis',
       '"network" is not a declared call-issue code',
       '"running" is not a declared outcome kind',
-      "BoundedHttpClient is not an exported outbound HTTP helper",
-      "PinnedHttpClient is not an exported outbound HTTP helper",
+      "BoundedHttpClient is not a reviewed outbound HTTP helper",
+      "PinnedHttpClient is not a reviewed outbound HTTP helper",
       "ServiceModule.retryFailedOrder is not a declared member",
       "adapter.cancel is not a declared member",
       "cancel(context, ...) is not a declared adapter hook",
@@ -185,5 +185,32 @@ describe("skill and documentation consistency rules", () => {
       expect(countLines(text(180, eol) + eol + eol), JSON.stringify(eol)).toBe(181);
     }
     expect([countLines(""), countLines("\n"), countLines("one")]).toEqual([0, 1, 1]);
+  });
+
+  it("flags invented outbound helpers however they are called, and accepts the modules' own names", () => {
+    const invented = [
+      "```ts",
+      "const response = await PinnedHttpClient.get(url);",
+      "await PinnedHttpClient.post(url, body);",
+      "BoundedHttpClient.send(request);",
+      "ctx.ReviewedHttpClient(base);",
+      "```",
+      "Or use `PinnedHTTPClient`.",
+    ].join("\n");
+    expect(findUnknownAdapterReferences(invented, api).sort()).toEqual([
+      "BoundedHttpClient is not a reviewed outbound HTTP helper",
+      "PinnedHTTPClient is not a reviewed outbound HTTP helper",
+      "PinnedHttpClient is not a reviewed outbound HTTP helper",
+      "ReviewedHttpClient is not a reviewed outbound HTTP helper",
+    ]);
+    expect(findUnknownAdapterReferences([
+      "The `pinnedHttp` module dials a pre-validated address; `outboundHttp` wraps it.",
+      "```ts",
+      'import { pinnedHttpRequest } from "../../core/security/pinnedHttp.js";',
+      "const answer = await pinnedHttpRequest({ url, pinnedIp, timeoutMs, maxResponseBytes });",
+      "const base = reviewedEndpoint(configured, REVIEWED_BASE);",
+      "```",
+      "See `src/core/security/reviewedEndpoint.ts` and `pinnedHttp.ts`.",
+    ].join("\n"), api)).toEqual([]);
   });
 });

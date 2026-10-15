@@ -44,15 +44,14 @@ export function countLines(text) {
   return normalized === "" ? 0 : normalized.replace(/\n$/, "").split("\n").length;
 }
 
-/** The reviewed outbound HTTP helpers a product client uses instead of `fetch`. */
-const OUTBOUND_MODULES = ["outboundHttp.ts", "pinnedHttp.ts", "reviewedEndpoint.ts"]
-  .map((name) => `src/core/security/${name}`);
+/** The reviewed outbound HTTP modules a product client uses instead of `fetch`. */
+const OUTBOUND_MODULES = ["outboundHttp", "pinnedHttp", "reviewedEndpoint"];
 
 /**
  * The adapter API as `src/core/serviceRegistry/adapterTypes.ts` and
  * `serviceModule.ts` declare it: interface members, adapter modes, outcome
- * kinds, safe-to-start bases and call-issue codes; and the names the reviewed
- * outbound HTTP modules export.
+ * kinds, safe-to-start bases and call-issue codes; and the reviewed outbound
+ * HTTP modules' names and exports.
  */
 export function readAdapterApi(root) {
   const adapterTypes = readFileSync(join(root, "src/core/serviceRegistry/adapterTypes.ts"), "utf8");
@@ -85,8 +84,8 @@ export function readAdapterApi(root) {
     kinds: literals(adapterTypes, /\bkind:\s*"([^"]+)"/g),
     bases: literals(/basis:\s*([^;}]+)/.exec(adapterTypes)?.[1] ?? "", /"([^"]+)"/g),
     issueCodes: literals(callIssue, /"([a-z_]+)"/g),
-    outboundHelpers: new Set(OUTBOUND_MODULES.flatMap((path) => [...literals(
-      readFileSync(join(root, path), "utf8"),
+    outboundHelpers: new Set(OUTBOUND_MODULES.flatMap((name) => [name, ...literals(
+      readFileSync(join(root, `src/core/security/${name}.ts`), "utf8"),
       /^export\s+(?:async\s+)?(?:function|class|interface|type|const)\s+([A-Za-z_][A-Za-z0-9_]*)/gm,
     )])),
   };
@@ -108,9 +107,10 @@ function codeFragments(text) {
 const INVENTED_HOOKS = /\b(cancel|handleInput|resume|resumeJob|startJob|pollJob|getStatus|checkStatus|onWebhook|onComplete|retryFailedOrder|reopen)\s*\(\s*context\b/g;
 // Names shaped like the reviewed outbound helpers (`boundedFetch`,
 // `pinnedHttpRequest`, `reviewedEndpoint`), such as the nonexistent
-// `PinnedHttpClient`, must be one of their exports; module paths and file
-// names (`src/core/security/pinnedHttp.ts`) are not references.
-const OUTBOUND_HELPER = /(?<![\w./-])((?:[Bb]ounded|[Pp]inned|[Rr]eviewed)(?:Http|Fetch|Endpoint|Request|Response|Client|Url|URL)\w*)(?!\w|\.[a-z]{1,4}\b)/g;
+// `PinnedHttpClient` (called, or with a member such as `.get(url)`), must be
+// one of their modules or exports; paths and file names
+// (`src/core/security/pinnedHttp.ts`) are not references.
+const OUTBOUND_HELPER = /(?<![\w/-])((?:[Bb]ounded|[Pp]inned|[Rr]eviewed)(?:Http|HTTP|Fetch|Endpoint|Request|Response|Client|Url|URL)\w*)(?!\w|\.(?:ts|js|mjs|cjs|json|md)\b)/g;
 const ADAPTER_CONTEXT = /\b(?:adapter|ExternalJobAdapter|FulfillmentAdapter|recoverStart|execute\s*\(|start\s*\(|poll\s*\()/;
 const literal = (key) => new RegExp(`["']?\\b${key}["']?\\s*:\\s*["']([a-z]+(?:-[a-z]+)*)["']`, "g");
 
@@ -134,7 +134,7 @@ export function findUnknownAdapterReferences(text, api) {
       problems.push(`${match[1]}(context, ...) is not a declared adapter hook`);
     }
     for (const match of fragment.matchAll(OUTBOUND_HELPER)) {
-      if (!api.outboundHelpers.has(match[1])) problems.push(`${match[1]} is not an exported outbound HTTP helper`);
+      if (!api.outboundHelpers.has(match[1])) problems.push(`${match[1]} is not a reviewed outbound HTTP helper`);
     }
     const checks = [
       [literal("kind"), api.kinds, "outcome kind"],

@@ -72,9 +72,10 @@ gateway, the product or the chain.
   module, invented lifecycle hooks, outcome kinds, bases, adapter modes and
   call-issue codes must match what `src/core/serviceRegistry/adapterTypes.ts`
   and `serviceModule.ts` declare, and names shaped like the reviewed outbound
-  HTTP helpers (`boundedFetch`, `pinnedHttpRequest`, `reviewedEndpoint`)
-  must be exports of `src/core/security/`. Vendored fixtures, buyer-facing
-  service docs and `dist/` copies are not checked.
+  HTTP helpers (`boundedFetch`, `pinnedHttpRequest`, `reviewedEndpoint`),
+  called or with a member, must be those modules in `src/core/security/` or
+  their exports. Vendored fixtures, buyer-facing service docs and `dist/`
+  copies are not checked.
 - `scripts/security/static-gates.mjs` enforces the minimal architecture,
   dependency, migration, entrypoint, and container boundary.
 - `scripts/security/pii-scan.mjs` scans built artifacts for likely protected

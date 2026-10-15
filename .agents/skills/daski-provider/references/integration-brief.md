@@ -38,7 +38,7 @@ Record this for every proposed skill:
 | Buyer outcome | What is definitively complete when fulfillment finishes? |
 | Input | Closed fields, types, required/optional status, bounds, and conditional rules |
 | Result | Bounded schema of the complete completed result, permitted artifact delivery, and stable public failures |
-| Price | Fixed atomic USDC or bounded dynamic quote; identify every input to pricing |
+| Price | Fixed atomic USDC or bounded dynamic quote; identify every input to pricing, and any supplier price an order pays (its spend is bounded by the price reported at quote time plus the configured tolerance) |
 | Product operation | One fixed API method/path, MCP server/transport/tool, SDK method, or internal command, with its service-owned authentication and endpoint configuration |
 | Payment mapping | Whether Daski's verified payment starts an already-paid provider-owned job, or a separately funded upstream purchase would be required (then onboarding is incomplete) |
 | Timing | Normal and maximum runtime, per-call budget, declared fulfillment duration, and capacity |

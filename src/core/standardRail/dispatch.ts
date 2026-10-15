@@ -140,6 +140,7 @@ export class StandardDispatchService {
         payer: dispatch.payer,
         serviceSlug: verified.outcome.serviceSlug,
         skillId: verified.outcome.skillId,
+        supplierCostCeiling: verified.plan.supplierCostCeiling,
       },
       input: parts.request,
       contract: verified.plan.contract,

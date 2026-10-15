@@ -22,6 +22,7 @@ const context = (skillId = "echo") => ({
   payer: "0x1111111111111111111111111111111111111111" as const,
   serviceSlug: "dummy",
   skillId,
+  supplierCostCeiling: null,
   signal: new AbortController().signal,
 });
 

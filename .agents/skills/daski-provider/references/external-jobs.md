@@ -31,17 +31,22 @@ and core's `context.idempotencyKey`). Never add a public `alreadyPaid` flag
 that any caller can assert, and never pay the product's public x402 or other
 paid endpoint again for an admitted order. A design in which each order needs
 a separately funded upstream purchase is outside this pattern: record it as
-an upstream gap.
+an upstream gap. A supplier fee the provider's own account pays is a cost,
+not a second purchase: `requestReadiness` reports its current price as
+`supplierCost`, and `start` checks the planned spend with
+`checkSupplierSpend(context.supplierCostCeiling, planned)` before spending,
+returning the terminal failure `supplier_cost_ceiling_exceeded` when refused.
 
 ## The typed contract
 
 An external-job adapter declares `mode: "external-job"`, a `version` (how its
 job references are read), and, when the product documents one, its
 `idempotencyRetentionSeconds`. Every call receives an `ExternalJobContext`:
-`taskId`, `orderId`, `payer`, `serviceSlug`, `skillId`, `idempotencyKey`,
-`acceptedAt`, `fulfillmentDeadline`, `firstStartAttemptAt`,
-`idempotencyValidBefore`, and a `signal` that bounds this one call, never
-the whole upstream job.
+`taskId`, `orderId`, `payer`, `serviceSlug`, `skillId`,
+`supplierCostCeiling` (the spend ceiling the order's quote recorded, or
+null), `idempotencyKey`, `acceptedAt`, `fulfillmentDeadline`,
+`firstStartAttemptAt`, `idempotencyValidBefore`, and a `signal` that bounds
+this one call, never the whole upstream job.
 
 | Hook | Returns |
 | --- | --- |

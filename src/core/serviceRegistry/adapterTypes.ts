@@ -1,4 +1,5 @@
 import type { Hex } from "viem";
+import type { SupplierCostCeiling } from "./supplierCost.js";
 
 /** A JSON object exchanged with core: buyer input or a bounded job reference. */
 export type JsonRecord = Record<string, unknown>;
@@ -28,6 +29,13 @@ export interface TaskContext {
   payer: Hex;
   serviceSlug: string;
   skillId: string;
+  /**
+   * The spend ceiling bound to this order: the supplier price the service
+   * reported when the order's quote was issued and the tolerance in force
+   * then; null when the quote recorded none. Check every planned supplier
+   * spend with `checkSupplierSpend` before making it.
+   */
+  supplierCostCeiling: SupplierCostCeiling | null;
   /**
    * Aborted when this call's budget ends: the synchronous execution budget,
    * or one external-job call's bounded limit (never the upstream job itself).

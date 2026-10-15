@@ -58,11 +58,12 @@ export function wireQuery(db: WireDatabase) {
       return { rows: [{ enabled: db.asyncAdmission, changed_at: db.asyncAdmission ? new Date(0) : null }] };
     }
     if (sql.includes("INSERT INTO provider_quotes")) {
-      const [hash, outcomeId, listing, request, gross, payer, issuedAt, validBefore, adapterVersion, profile] = params;
+      const [hash, outcomeId, listing, request, gross, payer, issuedAt, validBefore, adapterVersion, profile, ceiling] = params;
       db.quotes.set(hex(hash), {
         outcome_id: outcomeId, listing_manifest_hash: listing, request_hash: request,
         gross_amount: gross, payer, issued_at: String(issuedAt), valid_before: String(validBefore),
         adapter_version: adapterVersion, provider_control_profile_hash: profile,
+        supplier_cost_ceiling: ceiling === null ? null : JSON.parse(String(ceiling)),
       });
       return { rows: [], rowCount: 1 };
     }

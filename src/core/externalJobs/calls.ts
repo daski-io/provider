@@ -18,6 +18,7 @@ export function callContext(
     payer: job.payer,
     serviceSlug: job.serviceSlug,
     skillId: job.skillId,
+    supplierCostCeiling: job.supplierCostCeiling,
     idempotencyKey: job.idempotencyKey,
     acceptedAt: job.acceptedAt,
     fulfillmentDeadline: job.fulfillmentDeadline,

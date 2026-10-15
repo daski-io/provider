@@ -101,6 +101,13 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   gateway's signed readiness quote with that fixed amount; there is no
   dynamic pricing. An optional read-only `requestReadiness` hook may decline
   a request before payment but cannot change the price or start work.
+- A service whose orders pay a supplier reports the supplier's current price
+  as `supplierCost` from `requestReadiness`; core records it with the quote,
+  with `SUPPLIER_PRICE_TOLERANCE_PERCENT`, as the order's immutable spend
+  ceiling. Check every planned spend with
+  `checkSupplierSpend(context.supplierCostCeiling, planned)` before making
+  it; when it is refused, spend nothing and fail with
+  `supplier_cost_ceiling_exceeded`.
 - Validate input both at the rail schema and in the adapter. Reject unknown
   fields and apply explicit size/range limits.
 - A synchronous adapter returns only `completed` or `failed`, honors its

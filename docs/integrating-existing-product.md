@@ -201,7 +201,7 @@ The adapter receives verified context only after rail admission:
 
 ```ts
 {
-  taskId, orderId, payer, serviceSlug, skillId, signal
+  taskId, orderId, payer, serviceSlug, skillId, supplierCostCeiling, signal
 }
 ```
 
@@ -210,9 +210,13 @@ It must:
 1. reject an unexpected skill id;
 2. parse the request again with service-owned validation;
 3. stop promptly when `signal` is aborted;
-4. call exactly one reviewed product operation;
-5. map a known product response to a small terminal result; and
-6. map known definitive errors to stable safe error codes.
+4. when the order pays a supplier, check the planned spend against
+   `supplierCostCeiling` with `checkSupplierSpend` first, and fail with
+   `supplier_cost_ceiling_exceeded` instead of spending when it is refused
+   (`docs/adding-a-service.md`);
+5. call exactly one reviewed product operation;
+6. map a known product response to a small terminal result; and
+7. map known definitive errors to stable safe error codes.
 
 It must not verify payment, accept caller identity from input, modify global
 rail state, leak product details, return a non-terminal state, or continue work

@@ -336,6 +336,22 @@ parse them in `src/services/<slug>/config.ts`. Distinguish public configuration
 from secrets in the service docs. Never add a switch that lets a buyer select
 an endpoint/tool or lets Mainnet use a fake/sandbox dependency.
 
+## Supplier price tolerance
+
+| Variable | Default / rule |
+| --- | --- |
+| `SUPPLIER_PRICE_TOLERANCE_PERCENT` | `10`: a decimal percentage from 0 to 100 with at most two decimals (`12.5` is one, `100.5` is not); anything else refuses boot naming the variable. |
+
+A service whose orders pay a supplier reports the supplier's current price
+when each quote is issued (`docs/adding-a-service.md`). The quote records it,
+with the tolerance in force, as the order's spend ceiling: the adapter may
+spend at most `quotedAmount * (100 + tolerance) / 100` at that supplier and
+in that currency, computed exactly. With `10`, a supplier price rise of up to
+10% is absorbed by the provider; a spend above it is refused before the
+supplier is called and the order fails with `supplier_cost_ceiling_exceeded`.
+A changed tolerance applies to quotes issued after the restart; an admitted
+order keeps the one its quote recorded.
+
 ## Stage summary
 
 | Stage | Required posture |

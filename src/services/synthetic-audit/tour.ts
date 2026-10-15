@@ -43,6 +43,8 @@ export async function runSyntheticAuditTour(description: string): Promise<{
     payer: "0x0000000000000000000000000000000000000001",
     serviceSlug: service.manifest.slug,
     skillId: "audit",
+    // The audit buys nothing from a supplier: its quotes record no ceiling.
+    supplierCostCeiling: null,
     idempotencyKey: "00000000-0000-8000-8000-000000000001",
     acceptedAt: START,
     fulfillmentDeadline: START + AUDIT_FULFILLMENT_SECONDS,

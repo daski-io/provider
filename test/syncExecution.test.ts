@@ -20,6 +20,7 @@ const context = {
   payer: "0x1111111111111111111111111111111111111111" as const,
   serviceSlug: "dummy",
   skillId: "echo",
+  supplierCostCeiling: null,
 };
 const adapter = (execute: FulfillmentAdapter["execute"]): FulfillmentAdapter => ({ execute });
 const returning = (value: unknown) => adapter(async () => value as ServiceResult);

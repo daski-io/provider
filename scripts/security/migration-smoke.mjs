@@ -223,6 +223,37 @@ try {
       throw new Error(`a quote's recorded control profile changed: ${byte} to ${profile}`);
     }
   }
+  // The supplier-cost ceiling a quote records (013): exactly a valid v2
+  // ceiling or none, never changed once recorded, not even on a quote that
+  // recorded none.
+  const ceiling = (fields = {}) => `'${JSON.stringify({
+    kind: "supplier-cost-ceiling-v2", supplier: "example", currency: "USD",
+    quotedAmount: "12.5", tolerancePercent: "10", ...fields,
+  })}'::jsonb`;
+  const ceiled = (byte, value) => `INSERT INTO provider_quotes
+      (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
+       issued_at,valid_before,supplier_cost_ceiling)
+    VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
+      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,${value})`;
+  await client.query(ceiled("c1", ceiling()));
+  await client.query(ceiled("c2", ceiling({ quotedAmount: "0", tolerancePercent: "100.00", currency: "EUR2" })));
+  for (const value of [
+    "'[]'::jsonb", `'"text"'::jsonb`, "'{}'::jsonb", ceiling({ kind: "supplier-cost-ceiling-v1" }),
+    ceiling({ extra: true }), ceiling({ quotedAmount: 12.5 }), ceiling({ quotedAmount: "-1" }),
+    ceiling({ quotedAmount: "01" }), ceiling({ quotedAmount: "1e3" }), ceiling({ quotedAmount: `1.${"0".repeat(19)}` }),
+    ceiling({ tolerancePercent: "100.5" }), ceiling({ tolerancePercent: "100.01" }),
+    ceiling({ tolerancePercent: "10.001" }), ceiling({ tolerancePercent: 10 }), ceiling({ currency: "usd" }),
+    ceiling({ supplier: "-example" }), ceiling({ supplier: "x".repeat(65) }),
+  ]) {
+    if (!await rejects(ceiled("c3", value))) throw new Error(`a malformed supplier-cost ceiling was recorded: ${value}`);
+  }
+  for (const [byte, value] of [["c1", ceiling({ quotedAmount: "13" })], ["c1", "NULL"], ["e1", ceiling()]]) {
+    const change = await client.query(`UPDATE provider_quotes SET supplier_cost_ceiling=${value}
+        WHERE quote_hash=decode(repeat('${byte}',32),'hex')`).then(() => "changed", (error) => error.message);
+    if (change !== "a provider quote keeps the supplier-cost ceiling it was issued with") {
+      throw new Error(`a quote's recorded supplier-cost ceiling changed: ${byte} to ${value}`);
+    }
+  }
 
   // External jobs: a claim in its own pending state commits only with its
   // job; phases follow the reviewed transitions; a queued job fails only

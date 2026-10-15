@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { Hex } from "viem";
 import { pool } from "../db/pool.js";
 import { inTransaction } from "../db/queryable.js";
+import { parseSupplierCostCeiling, type SupplierCostCeiling } from "../serviceRegistry/supplierCost.js";
 import type { SealedField } from "./jobCodec.js";
 import type { ActiveJobPhase } from "./phases.js";
 
@@ -32,6 +33,13 @@ export interface ClaimedJob {
   fulfillmentDeadline: number;
   firstStartAttemptAt: number | null;
   idempotencyValidBefore: number | null;
+  /**
+   * The supplier-cost ceiling of the provider quote the claim was admitted
+   * against; null when it recorded none. The database admits only a valid
+   * ceiling (migration 013); a value this reader refused would authorize no
+   * supplier spend.
+   */
+  supplierCostCeiling: SupplierCostCeiling | null;
   /** Past its fulfillment deadline (overdue), and whether this claim is the first to see it. */
   overdue: boolean;
   firstOverdue: boolean;
@@ -96,6 +104,8 @@ export async function claimDueJobs(args: {
          FROM due, provider_transactions t
         WHERE j.task_id=due.task_id AND t.id=j.task_id
        RETURNING j.*, t.order_id, t.payer, t.service_slug, t.skill_id, t.listing_manifest_hash,
+         (SELECT q.supplier_cost_ceiling FROM provider_quotes q
+           WHERE q.quote_hash=t.provider_quote_hash) AS supplier_cost_ceiling,
          ${epoch("j.accepted_at")} AS accepted_epoch, ${epoch("j.fulfillment_deadline")} AS deadline_epoch,
          ${epoch("j.first_start_attempt_at")} AS first_start_epoch,
          ${epoch("j.idempotency_valid_before")} AS horizon_epoch, ${epoch("now()")} AS now_epoch,
@@ -132,6 +142,7 @@ function claimedJob(row: Record<string, unknown>, leaseValidUntil: number): Clai
     fulfillmentDeadline: seconds(row.deadline_epoch)!,
     firstStartAttemptAt: seconds(row.first_start_epoch),
     idempotencyValidBefore: seconds(row.horizon_epoch),
+    supplierCostCeiling: parseSupplierCostCeiling(row.supplier_cost_ceiling),
     overdue: row.past_deadline === true || row.overdue_at !== null,
     firstOverdue: row.past_deadline === true && row.overdue_at === null,
     failureCount: Number(row.failure_count),

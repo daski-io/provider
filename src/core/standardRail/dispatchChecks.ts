@@ -8,7 +8,7 @@ import {
 import type { ExternalJobRuntime } from "../externalJobs/runtime.js";
 import { logWarn } from "../logger.js";
 import { getAdmittingAdapter, getSkill } from "../serviceRegistry/registry.js";
-import type { ExternalJobAdapter } from "../serviceRegistry/types.js";
+import type { ExternalJobAdapter, SupplierCostCeiling } from "../serviceRegistry/types.js";
 import { assertExactKeys } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { DispatchRejectedError, withDispatchRejection } from "./dispatchErrors.js";
@@ -39,9 +39,13 @@ export interface DispatchRequest {
   evidenceBundle: StandardEvidenceBundleV2;
 }
 
-/** How a new claim executes, decided before it is admitted. */
+/**
+ * How a new claim executes, decided before it is admitted. A synchronous
+ * execution carries the supplier-cost ceiling of the provider quote the
+ * claim binds; an external job's worker reads it from the claim's quote.
+ */
 export type AdmissionPlan =
-  | { kind: "sync"; contract: ResultContract }
+  | { kind: "sync"; contract: ResultContract; supplierCostCeiling: SupplierCostCeiling | null }
   | { kind: "external-job"; job: ExternalJobAdmission };
 
 /** What the pre-admission checks read: configuration, evidence, readiness and contracts. */
@@ -161,7 +165,7 @@ export async function verifyNewDispatch(
       if (!(await checks.ready().catch(() => false))) {
         throw new DispatchRejectedError("service_unavailable");
       }
-      plan = { kind: "sync", contract };
+      plan = { kind: "sync", contract, supplierCostCeiling: providerQuote.supplierCostCeiling };
     }
     const verified = await withDispatchRejection("evidence", () => checks.evidence.verify({
       dispatch,

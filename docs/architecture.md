@@ -28,6 +28,14 @@ service readiness hook, persists the quote, and signs the listing's fixed
 price for that request and payer. A later dispatch must bind to that
 persisted quote. Intake discovery shares the quote URL and creates nothing.
 
+When the readiness hook reports the supplier's current price for the request,
+the quote also records it, with the configured supplier price tolerance, as
+the order's supplier-cost ceiling (local metadata, never signed). The
+order's adapter receives that ceiling in its context, in either mode, and
+refuses a planned supplier spend above `quotedAmount * (100 +
+tolerancePercent) / 100` before calling the supplier, failing the order with
+core's `supplier_cost_ceiling_exceeded` (`docs/adding-a-service.md`).
+
 It excludes dynamic quoting, provider-owned workflows, later input,
 cancellation, durable assets, owner actions, email, admin UI/API, direct A2A,
 and intentional multi-replica operation; its one background loop is the
@@ -344,10 +352,11 @@ the snapshot's fulfillment window, and nothing bounds when that observation
 comes. Every quote is therefore kept, and a trigger refuses any quote
 deletion, whoever attempts it (migration 011), until a verified gateway
 obligation inventory can retire quotes. Each quote records the external-job
-adapter version that sold it (migration 010) and the control profile it was
-issued under (migration 012), neither of which ever changes, and every claim
-records the provider quote it was admitted against. Claims, terminal results
-and their reads are never deleted either.
+adapter version that sold it (migration 010), the control profile it was
+issued under (migration 012) and its supplier-cost ceiling (migration 013,
+which admits only a valid ceiling), none of which ever changes, and every
+claim records the provider quote it was admitted against. Claims, terminal
+results and their reads are never deleted either.
 
 ## Upgrade compatibility barrier
 

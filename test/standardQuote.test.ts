@@ -70,6 +70,8 @@ describe("signed fixed readiness quote", () => {
     expect(params[8]).toBeNull();
     // Its order's first dispatch carries the control profile it was issued under.
     expect(`0x${(params[9] as Buffer).toString("hex")}`).toBe(railConfig().providerControlProfileHash);
+    // The service reported no supplier price: its order may spend nothing.
+    expect(params[10]).toBeNull();
   });
 
   it("echoes a null payer literally and binds it as unbound", async () => {
@@ -268,8 +270,36 @@ describe("request readiness hook", () => {
     expect(insertedQuotes()).toHaveLength(0);
   });
 
+  it("records a reported supplier price as the order's spend ceiling, with the tolerance in force", async () => {
+    const supplierCost = { supplier: "example", currency: "USD", amount: "4.25" };
+    withHook(async () => ({ ready: true, supplierCost }));
+    const recorded = async (service: StandardQuoteService) => {
+      const body = await service.quote(await gatewayQuoteRequest({ listing, request, payer }));
+      // The signed quote is unchanged: the ceiling is local metadata.
+      await expect(acceptQuoteAsGateway({ listing, body, request, payer })).resolves.toBeDefined();
+      return JSON.parse(String((insertedQuotes().at(-1) as unknown as [string, unknown[]])[1][10]));
+    };
+    await expect(recorded(quotes())).resolves.toEqual({
+      kind: "supplier-cost-ceiling-v2", supplier: "example", currency: "USD", quotedAmount: "4.25",
+      tolerancePercent: "10",
+    });
+    const tighter = new StandardQuoteService(railConfig(), 84532, { supplierPriceTolerancePercent: "2.5" });
+    await expect(recorded(tighter)).resolves.toMatchObject({ quotedAmount: "4.25", tolerancePercent: "2.5" });
+    expect(() => new StandardQuoteService(railConfig(), 84532, { supplierPriceTolerancePercent: "100.5" }))
+      .toThrow("SUPPLIER_PRICE_TOLERANCE_PERCENT");
+  });
+
   it("cannot change the price or smuggle unreviewed output", async () => {
+    const cost = { supplier: "example", currency: "USD", amount: "4.25" };
     for (const result of [
+      { ready: true, supplierCost: { ...cost, amount: "-1" } },
+      { ready: true, supplierCost: { ...cost, amount: 4.25 } },
+      { ready: true, supplierCost: { ...cost, fee: "1" } },
+      { ready: true, supplierCost: { supplier: "example", amount: "4.25" } },
+      { ready: true, supplierCost: null },
+      { ready: true, supplierCost: undefined },
+      { ready: true, supplierCost: cost, grossAmount: "1" },
+      { ready: false, fieldErrors: [{ path: "message", rule: "x", message: "y" }], supplierCost: cost },
       { ready: true, grossAmount: "1" },
       { ready: false, fieldErrors: [] },
       { ready: false, fieldErrors: [{ path: "message", rule: "Bad Rule", message: "x" }] },

@@ -19,7 +19,8 @@ describe("synthetic audit external-job example", () => {
   const service = () => createSyntheticAuditService({ chainId: 84532, clock: () => now, upstream });
   const context = (overrides: Partial<ExternalJobContext> = {}): ExternalJobContext => ({
     taskId: "task-1", orderId: "ord-1", payer: "0x0000000000000000000000000000000000000001",
-    serviceSlug: "synthetic-audit", skillId: "audit", idempotencyKey: "00000000-0000-8000-8000-0000000000a1",
+    serviceSlug: "synthetic-audit", skillId: "audit", supplierCostCeiling: null,
+    idempotencyKey: "00000000-0000-8000-8000-0000000000a1",
     acceptedAt: START, fulfillmentDeadline: START + 43_200, firstStartAttemptAt: START,
     idempotencyValidBefore: START + AUDIT_IDEMPOTENCY_RETENTION_SECONDS, signal: new AbortController().signal,
     ...overrides,

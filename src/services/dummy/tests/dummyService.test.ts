@@ -9,6 +9,7 @@ const context = {
   payer: "0x1111111111111111111111111111111111111111" as const,
   serviceSlug: "dummy",
   skillId: "echo",
+  supplierCostCeiling: null,
   signal: new AbortController().signal,
 };
 

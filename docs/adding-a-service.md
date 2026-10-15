@@ -120,13 +120,28 @@ false; already-admitted orders stay readable.
 
 The optional `requestReadiness` hook checks one schema-valid request before
 each new quote. It receives `{skillId, input, payer, signal}` (`payer` is the
-lowercase quote payer or `null`) and returns `{ready: true}` or `{ready:
+lowercase quote payer or `null`) and returns `{ready: true}` (with
+`supplierCost`, below, when the order will pay a supplier) or `{ready:
 false, fieldErrors: [{path, rule, message, allowedValues?}]}` with reviewed
 messages. Decline an unbound `null` payer if the product needs to know who
 pays. It must stay read-only: it cannot change the fixed price and must never
 start work, reserve capacity, or purchase anything. A throw, a timeout after
 three seconds, or any other result shape stops the quote without a refusal
 reason reaching the buyer. Funded dispatches never re-run it.
+
+A service whose order pays a supplier (a registry fee, a per-call API price)
+reports the supplier's current price for this exact request, whether that
+price is fixed or changes: `{ready: true, supplierCost: {supplier, currency,
+amount}}`. `supplier` is 1 to 64 of `A-Z a-z 0-9 . _ : -` starting with a
+letter or digit, `currency` an upper-case code such as `USD`, and `amount` a
+non-negative decimal string such as `"12.5"` (no sign, exponent or leading
+zeros; at most 30 integer and 18 fraction digits). Core records it with the
+quote, together with the configured `SUPPLIER_PRICE_TOLERANCE_PERCENT`
+(default 10), as the order's spend ceiling (`supplier-cost-ceiling-v2`),
+which never changes; an invalid `supplierCost` stops the quote like any
+other unreviewed result. The buyer's fixed price is unaffected. Omit
+`supplierCost` when the service spends nothing at a supplier: its orders then
+carry no ceiling, which allows no spend.
 
 ## 3. Define the public contract
 
@@ -223,6 +238,21 @@ responses, secrets, internal ids that grant access, or unbounded data. Core
 caps the encoded service result at 1 MB, but service-specific limits should be
 far smaller where practical.
 
+Check every planned supplier spend before making it.
+`checkSupplierSpend(context.supplierCostCeiling, {supplier, currency,
+amount})` (exported with the types from
+`src/core/serviceRegistry/types.ts`) returns `{ok: true}` only for the
+ceiling's supplier and currency and an amount at most `quotedAmount * (100 +
+tolerancePercent) / 100`, computed exactly; with a 10% tolerance a 4.25 USD
+quote allows up to 4.675 USD. `supplierCostLimit(ceiling)` gives that limit
+as a decimal string for a product API that takes a maximum price. Otherwise
+it returns `{ok: false, reason}` (`ceiling_missing` when the order's quote
+recorded no ceiling, `ceiling_mismatch`, `ceiling_exceeded`): spend nothing
+and return `{status: "failed", errorCode: "supplier_cost_ceiling_exceeded"}`,
+core's own code, which needs no entry in `failureCodes`. An external-job
+`start` returns it as `{kind: "terminal", result}`; it never throws for it,
+because a throw from `start` is ambiguous.
+
 Map anticipated failures to stable provider error codes and list every code
 the adapter may return in the module's `failureCodes` (lowercase, `a-z`, `0-9`
 and `_`). Core attests a failure as exactly `{status: "failed", errorCode}`:
@@ -296,7 +326,9 @@ validation.ts
 
 Tests should cover exact boundaries, unknown fields, Unicode/byte limits,
 skill mismatch, abort/timeout, safe product-error mapping, idempotency and
-ambiguity when mutations exist, artifact bounds, and both terminal states.
+ambiguity when mutations exist, a supplier spend at and just above the
+order's ceiling when the service pays one, artifact bounds, and both
+terminal states.
 Use a fake product client; unit tests must never call a live API/MCP server.
 
 ## 9. Verify and remove dummy
@@ -332,8 +364,9 @@ signed status and artifact reads; the service supplies:
    `src/core/serviceRegistry/adapterTypes.ts`;
 5. an optional read-only `requestReadiness` that declines unacceptable
    requests before payment (a later product outage delays the admitted job;
-   it never refuses a funded one), the bounded `readiness` probe, and the
-   reviewed `failureCodes`;
+   it never refuses a funded one) and reports the supplier's price when the
+   job pays one, the bounded `readiness` probe, and the reviewed
+   `failureCodes`;
 6. previous adapters in `previousExternalJobAdapters` while jobs they admitted
    are unfinished or quotes they sold may still be dispatched (a new `version`
    whenever the reference format or the result contract it maps to changes),

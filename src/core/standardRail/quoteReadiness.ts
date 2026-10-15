@@ -1,12 +1,13 @@
 import type { Hex } from "viem";
 import { logWarn } from "../logger.js";
+import { parseSupplierCost, type SupplierCost } from "../serviceRegistry/supplierCost.js";
 import type { RequestFieldError, ServiceModule } from "../serviceRegistry/types.js";
 import { reviewedFieldErrors } from "./quoteFieldErrors.js";
 
 export const REQUEST_READINESS_TIMEOUT_MS = 3_000;
 
 export type QuoteReadinessVerdict =
-  | { kind: "ready" }
+  | { kind: "ready"; supplierCost?: SupplierCost }
   | { kind: "declined"; fieldErrors: RequestFieldError[] }
   | { kind: "unavailable" };
 
@@ -14,6 +15,8 @@ export type QuoteReadinessVerdict =
  * Run a service's optional read-only request-readiness hook under a bounded
  * signal. A throw, timeout, or any result outside the reviewed shape is a
  * fault: no quote is issued, and nothing the hook returns can alter price.
+ * A supplier price it reports must be exactly a valid `SupplierCost`; any
+ * other value is the same fault, so no quote records an unreviewed ceiling.
  */
 export async function checkRequestReadiness(
   service: ServiceModule,
@@ -42,6 +45,10 @@ export async function checkRequestReadiness(
       : {};
     const keys = Object.keys(verdict).sort().join(",");
     if (verdict.ready === true && keys === "ready") return { kind: "ready" };
+    if (verdict.ready === true && keys === "ready,supplierCost") {
+      const supplierCost = parseSupplierCost(verdict.supplierCost);
+      if (supplierCost) return { kind: "ready", supplierCost };
+    }
     if (verdict.ready === false && keys === "fieldErrors,ready") {
       const fieldErrors = reviewedFieldErrors(verdict.fieldErrors);
       if (fieldErrors) return { kind: "declined", fieldErrors };

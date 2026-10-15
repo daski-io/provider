@@ -124,7 +124,9 @@ Both lite modes: register the service only in `src/providerServices.ts`, test
 with a fake client in `src/services/<slug>/tests/`, make no product-specific
 core edits, keep PostgreSQL as the paid-state ledger, remove the examples
 before Mainnet, and change contracts or prices only through a new Daski
-runtime bundle.
+runtime bundle. An order that pays a supplier may spend at most the price
+`requestReadiness` reported as `supplierCost` plus the configured tolerance:
+check each spend with `checkSupplierSpend(context.supplierCostCeiling, ...)`.
 
 Full: read [Full-provider workflow](references/provider-full.md), then follow
 that repository's `AGENTS.md` and service guides. Do not apply lite contracts

@@ -5,6 +5,7 @@ import {
   BASE_MAINNET_EXTERNAL_CONTRACTS,
 } from "./chain/reviewedDeployments.js";
 import { parseFieldEncryptionKeys } from "./security/fieldEncryption.js";
+import { isSupplierPriceTolerance } from "./serviceRegistry/supplierCost.js";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
@@ -150,6 +151,13 @@ const envSchema = z.object({
   EXTERNAL_JOB_MAX_CONCURRENT_CALLS: z.coerce.number().int().min(1).max(64).default(4),
   EXTERNAL_JOB_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(86_400).default(60),
   EXTERNAL_JOB_OVERDUE_POLL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(300),
+  // How far above the supplier price reported at quote time an order may
+  // still spend (src/core/serviceRegistry/supplierCost.ts); each quote
+  // records the tolerance in force when it is issued.
+  SUPPLIER_PRICE_TOLERANCE_PERCENT: z.string().trim().default("10").refine(
+    isSupplierPriceTolerance,
+    "must be a decimal percentage from 0 to 100 with at most two decimals",
+  ),
 
   RATE_LIMIT_HASH_KEY: z.string().min(32).refine(
     (value) => new Set(value).size >= 8 && !/replace/i.test(value),

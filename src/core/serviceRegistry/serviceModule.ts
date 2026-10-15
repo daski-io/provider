@@ -26,9 +26,11 @@ export interface ServiceModule {
   /**
    * Optional read-only check of one schema-valid request, run before each new
    * quote. Decline with reviewed field errors; a service that needs an
-   * identified payer declines an unbound (null) payer. It cannot change the
-   * fixed price and must never start work, reserve capacity, or purchase.
-   * Funded dispatches never re-run it.
+   * identified payer declines an unbound (null) payer. A service that pays a
+   * supplier reports its current price as `supplierCost`, which bounds what
+   * the order may spend there. It cannot change the fixed price and must
+   * never start work, reserve capacity, or purchase. Funded dispatches never
+   * re-run it.
    */
   requestReadiness?(context: RequestReadinessContext): Promise<RequestReadiness>;
   /**
@@ -37,8 +39,9 @@ export interface ServiceModule {
    * against this one list whichever version admitted it. Keep a code listed
    * while any installed adapter version can still return it. A failed result
    * is attested as exactly `{status: "failed", errorCode}`: its message is
-   * dropped and any code not listed here (or core's own) becomes
-   * `service_execution_failed`, so failure evidence never carries free text.
+   * dropped and any code not listed here (or core's own, such as
+   * `supplier_cost_ceiling_exceeded`) becomes `service_execution_failed`, so
+   * failure evidence never carries free text.
    */
   failureCodes?: readonly string[];
   docs: {

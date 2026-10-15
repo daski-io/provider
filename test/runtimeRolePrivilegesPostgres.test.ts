@@ -120,12 +120,25 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
       issuedAt: 1_000,
       validBefore: 1_120,
     };
-    const quoteHash = await modules.quotes.persistProviderQuote(quote, { adapterVersion: null, controlProfileHash: hash("9") });
-    await expect(modules.quotes.loadProviderQuote(quoteHash)).resolves.toEqual({ ...quote, adapterVersion: null });
-    // An external-job sale records the adapter version that sold it.
+    const quoteHash = await modules.quotes.persistProviderQuote(quote, {
+      adapterVersion: null, controlProfileHash: hash("9"), supplierCostCeiling: null,
+    });
+    await expect(modules.quotes.loadProviderQuote(quoteHash)).resolves.toEqual({
+      ...quote, adapterVersion: null, supplierCostCeiling: null,
+    });
+    // An external-job sale records the adapter version that sold it, and a
+    // reported supplier price its spend ceiling.
     const sold = { ...quote, requestHash: hash("8") };
-    const soldHash = await modules.quotes.persistProviderQuote(sold, { adapterVersion: "v1", controlProfileHash: hash("9") });
-    await expect(modules.quotes.loadProviderQuote(soldHash)).resolves.toEqual({ ...sold, adapterVersion: "v1" });
+    const ceiling = {
+      kind: "supplier-cost-ceiling-v2" as const, supplier: "example", currency: "USD",
+      quotedAmount: "4.25", tolerancePercent: "10",
+    };
+    const soldHash = await modules.quotes.persistProviderQuote(sold, {
+      adapterVersion: "v1", controlProfileHash: hash("9"), supplierCostCeiling: ceiling,
+    });
+    await expect(modules.quotes.loadProviderQuote(soldHash)).resolves.toEqual({
+      ...sold, adapterVersion: "v1", supplierCostCeiling: ceiling,
+    });
     await expect(modules.quotes.countOpenObligations(hash("3"))).resolves.toBe(0);
     const claimed = await modules.transactions.claimTransaction({
       gatewayAudience: ORIGIN,
@@ -250,6 +263,7 @@ describePostgres("runtime role against a separately migrated PostgreSQL schema",
     await denied("UPDATE provider_quotes SET gross_amount='1'");
     await denied("UPDATE provider_quotes SET adapter_version='v2'");
     await denied("UPDATE provider_quotes SET provider_control_profile_hash=NULL");
+    await denied("UPDATE provider_quotes SET supplier_cost_ceiling=NULL");
     await denied("DELETE FROM provider_quotes");
     await expect(modules.catalog.promoteRuntimeListingVersions(ORIGIN, hash("1"), [{
       listingId: "00000000-0000-4000-8000-000000000002",

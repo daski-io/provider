@@ -1,11 +1,13 @@
 import type { ValidateFunction } from "ajv";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { config as coreConfig } from "../config.js";
 import { pool } from "../db/pool.js";
 import { jobInputFits } from "../externalJobs/jobCodec.js";
 import { defaultExternalJobRuntime, type ExternalJobRuntime } from "../externalJobs/runtime.js";
 import { externalJobSalesStop } from "../externalJobs/sales.js";
 import { getService, getSkill } from "../serviceRegistry/registry.js";
+import { isSupplierPriceTolerance, recordedSupplierCostCeiling } from "../serviceRegistry/supplierCost.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { describeIntake } from "./intake.js";
 import { QuoteRefusal, QuoteUnavailable } from "./quoteErrors.js";
@@ -48,13 +50,23 @@ export class StandardQuoteService {
   private readonly validators = new Map<string, ValidateFunction>();
   private readonly sign: ProviderDigestSigner;
   private readonly externalJobs: ExternalJobRuntime;
+  private readonly tolerancePercent: string;
 
   constructor(
     private readonly config: ProviderStandardRailConfig,
     private readonly chainId: number,
-    options: { sign?: ProviderDigestSigner; externalJobs?: ExternalJobRuntime } = {},
+    options: {
+      sign?: ProviderDigestSigner;
+      externalJobs?: ExternalJobRuntime;
+      /** The supplier price tolerance new quotes record; SUPPLIER_PRICE_TOLERANCE_PERCENT by default. */
+      supplierPriceTolerancePercent?: string;
+    } = {},
   ) {
     this.externalJobs = options.externalJobs ?? defaultExternalJobRuntime(config);
+    this.tolerancePercent = options.supplierPriceTolerancePercent ?? coreConfig.SUPPLIER_PRICE_TOLERANCE_PERCENT;
+    if (!isSupplierPriceTolerance(this.tolerancePercent)) {
+      throw new Error("SUPPLIER_PRICE_TOLERANCE_PERCENT must be a decimal percentage from 0 to 100");
+    }
     for (const outcome of config.outcomes.values()) {
       this.validators.set(
         outcome.listingManifestHash,
@@ -159,10 +171,15 @@ export class StandardQuoteService {
     };
     // The adapter version selling this quote is the one that runs its order,
     // whatever new sales use by the time it is dispatched; its order carries
-    // the control profile it is issued under, whatever the provider uses then.
+    // the control profile it is issued under, whatever the provider uses then,
+    // and may spend at its supplier at most the price reported now plus the
+    // tolerance in force now, whatever either is when it runs.
     const quoteHash = await persistProviderQuote(payload, {
       adapterVersion: service.adapter.mode === "external-job" ? service.adapter.version : null,
       controlProfileHash: outcome.providerControlProfileHash,
+      supplierCostCeiling: readiness.supplierCost
+        ? recordedSupplierCostCeiling(readiness.supplierCost, this.tolerancePercent)
+        : null,
     });
     return { ...payload, signature: await this.sign(quoteHash) };
   }

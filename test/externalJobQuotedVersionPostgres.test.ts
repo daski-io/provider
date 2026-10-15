@@ -161,7 +161,7 @@ describePostgres("external-job orders run by the adapter version that sold them"
       validBefore: issuedAt + FIXED_QUOTE_LIFETIME_SECONDS,
     };
     const quoteHash = await persistProviderQuote(payload, {
-      adapterVersion: null, controlProfileHash: listing.providerControlProfileHash,
+      adapterVersion: null, controlProfileHash: listing.providerControlProfileHash, supplierCostCeiling: null,
     });
     const signature = await privateKeyToAccount(providerKey).signMessage({ message: { raw: quoteHash } });
     const quotes = { quote: async () => ({ ...payload, signature }) } as unknown as StandardQuoteService;

@@ -1,5 +1,5 @@
 import type { ValidateFunction } from "ajv";
-import { isPassiveOutput, type ServiceResult } from "../serviceRegistry/types.js";
+import { isPassiveOutput, SUPPLIER_COST_CEILING_EXCEEDED, type ServiceResult } from "../serviceRegistry/types.js";
 import { canonicalHash } from "./canonical.js";
 import { assertBoundedJsonValue, RESPONSE_JSON_BUDGET } from "./jsonBounds.js";
 
@@ -19,10 +19,14 @@ export const SYNC_EXECUTION_ABANDONED = "provider_execution_abandoned";
  * attempted: provably never started, so it may fail.
  */
 export const EXTERNAL_JOB_NOT_STARTED = "provider_job_not_started";
-/** Codes core may always attest; services add their own reviewed codes. */
+/**
+ * Codes core may always attest; services add their own reviewed codes. An
+ * adapter that refuses a spend above its order's supplier-cost ceiling
+ * returns `supplier_cost_ceiling_exceeded` without listing it.
+ */
 export const CORE_FAILURE_CODES: ReadonlySet<string> = new Set([
   SERVICE_EXECUTION_FAILED, SERVICE_RESULT_INVALID, PROVIDER_RESTARTED_DURING_EXECUTION,
-  SYNC_EXECUTION_ABANDONED, EXTERNAL_JOB_NOT_STARTED,
+  SYNC_EXECUTION_ABANDONED, EXTERNAL_JOB_NOT_STARTED, SUPPLIER_COST_CEILING_EXCEEDED,
 ]);
 export const FAILURE_CODE_PATTERN = /^[a-z][a-z0-9_]{1,63}$/;
 export const MAX_RESULT_BYTES = 1_000_000;

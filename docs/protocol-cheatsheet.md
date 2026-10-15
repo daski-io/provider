@@ -38,7 +38,9 @@ literally, the quote lives 120 seconds, and `signature` is the provider
 authority's EIP-191 signature of the raw `canonicalHash` of the other seven
 fields. That hash is persisted before signing; the gateway carries it in
 `QuoteV1.providerQuoteHash`. A quote never starts, reserves, or purchases
-product work.
+product work. A supplier price the readiness hook reports (`supplierCost`)
+is recorded with the persisted quote as the order's supplier-cost ceiling,
+with the configured tolerance; it is never signed or sent to the gateway.
 
 | Refusal | Meaning |
 | --- | --- |

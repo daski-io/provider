@@ -19,16 +19,22 @@ Start on Testnet. Mainnet is separately whitelisted through the
 | Gateway | Daski entrypoint that admits payment and signs provider calls |
 | Signed binding | Daski-issued/reviewed runtime listing, signer, audience, contract, and evidence configuration |
 
-## Choose the repository before review
+## Choose the repository and mode before review
 
-Use this minimal repository only for fixed-price, fully automated, one-shot
-operations that terminally complete or fail within 50 seconds. Use
-[provider-full](https://github.com/daski-io/provider-full) for dynamic pricing,
-jobs, later input, assets/actions, human review, email, admin, direct A2A,
-multi-replica execution, or ambiguity that must reconcile after restart.
+Use this repository for fixed-price, fully automated operations in one of two
+modes: synchronous (a terminal result within the 50-second synchronous
+budget) or external job (the product already runs the paid work as its own
+job; core admits it durably, starts it under a stable key, recovers a lost
+start by that key and polls it until its report, within the declared
+fulfillment window). Use
+[provider-full](https://github.com/daski-io/provider-full) for dynamic
+pricing, provider-owned multi-step workflows, later input, cancellation,
+assets/actions, human review, email, admin, direct A2A, or multi-replica
+execution. A long runtime alone does not require `provider-full`, and
+neither repository can make a start safe that the product cannot reconcile.
 
-Changing starters after artifact issuance changes the fulfillment contract and
-requires renewed review.
+Changing starters or a service's mode after artifact issuance changes the
+fulfillment contract and requires renewed review.
 
 ## Who supplies what
 
@@ -59,11 +65,17 @@ Send a concise versioned packet containing:
    that buyer input cannot select them;
 7. product fake/sandbox/Testnet/live separation and every possible Testnet
    side effect or upstream charge;
-8. timeout, response-size, concurrency, idempotency, ambiguity, and immediate
+8. timeout, response-size, concurrency, idempotency, ambiguity, and
    authoritative reconciliation behavior;
-9. data sent to the product, retention, redaction, and support evidence;
-10. provider wallet/identity/payee and other provider-controlled wallets; and
-11. commit/image identifier and local gate results.
+9. for an external job: how Daski's verified payment starts an already-paid
+   product job (never a second purchase), the product's idempotency
+   retention, its lookup by order key after a lost response, its states and
+   poll limits, normal and maximum runtime, the declared fulfillment window,
+   report retention and the adapter version;
+10. data sent to the product, retention, redaction, and support evidence;
+11. provider wallet/identity/payee and other provider-controlled wallets; and
+12. commit/image identifier, the tested gateway revision and local gate
+    results.
 
 The checked-in service docs, schemas, and tests are the packet's technical
 source. Do not maintain a second private specification that can drift.
@@ -77,8 +89,10 @@ fake product client in unit tests and a separately configured product sandbox
 for Testnet. If the sandbox can create real records or charges, document and
 strictly bound the campaign before connecting it.
 
-Run every local gate. Do not proceed when a product ambiguity, timeout, or
-result can outlive the 50-second synchronous window.
+Run every local gate. In synchronous mode, do not proceed when a product
+ambiguity, timeout, or result can outlive the 50-second synchronous budget;
+move such a product job to external-job mode once its start can be
+recovered by the order key.
 
 ### 2. Establish identity and public origin
 
@@ -155,8 +169,13 @@ Through the Daski gateway, test at least:
 9. process crash with an active request, verifying it fails terminally once
    its execution lease expires (`provider_execution_abandoned`) and is not
    blindly re-executed, and that a restart does not fail another process's
-   live call; and
-10. readiness failure/recovery for database, identity, rail, and product.
+   live call;
+10. readiness failure/recovery for database, identity, rail, and product;
+    and
+11. for an external job: the funded dispatch answered `submitted` before any
+    product call, a restart while the job is pending (no second start), a
+    lost start answer recovered by the order key, and the report read
+    through status and artifact after it completes.
 
 Do not call the provider dispatch endpoint directly with invented envelopes as
 a substitute. A valid journey includes the real gateway and reviewed Base
@@ -174,7 +193,7 @@ raw product responses, or database dumps.
 - Clean-clone install and every CI/release gate pass.
 - No dummy or provider-specific secret/example remains in the real path.
 - Deployed readiness and discovery match the packet.
-- The product operation stays inside the minimal-starter fit.
+- The product operation stays inside its mode's fit.
 - Paid success, replay, failure, outage, and restart cases pass.
 - Daski confirms Testnet review completion.
 
@@ -235,6 +254,47 @@ whenever it boots. Hand this sequence to the operator:
 
 The pre-R1 image is not a rollback target afterwards: a rollback is a tested
 compatible R1 image on the same schema, or R1 servicing with new sales off.
+
+### Enabling external jobs
+
+The cutover leaves async admission off, and no migration, import or boot
+turns it on. To sell an external-job service after the cutover:
+
+1. Generate `PROVIDER_DATA_ENCRYPTION_KEY` (32 random bytes, `0x` hex) in the
+   secret manager and give every replica the same key and key id.
+2. Install the service's newly issued runtime bundle and start the build on
+   every replica; each process runs the external-job worker.
+3. Run `npm run daski:async-admission` and review its read-only checks
+   (barrier, no pre-R1 execution left, retained obligations, compatible
+   running workers, an active key, adapter versions), then
+   `npm run daski:async-admission -- --activate`.
+4. Check that `/health/ready` reports `admission` open, then quote through
+   the Daski Testnet gateway.
+
+`--deactivate` stops new external-job sales only; admitted jobs keep being
+serviced and read.
+
+### Later compatible upgrades
+
+After the cutover, compatible releases at the same schema epoch may overlap
+the running one briefly; leases and fences keep each call single and a
+restart resubmits nothing. Before rolling one out:
+
+- keep every adapter version an unfinished job needs, as the current adapter
+  or in `previousExternalJobAdapters` (while async admission is on, boot
+  also refuses a build that cannot resume a version a running instance
+  sells);
+- keep every encryption key id stored jobs name
+  (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`), every previous wallet key
+  orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`) and every
+  old audience still routed (`STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES`);
+- run `npm run doctor -- --stage=testnet --database` with the new build's
+  configuration: `RETAINED_OBLIGATIONS` must pass; and
+- read the release notes: a release that raises the schema epoch is a new
+  stop-and-drain cutover, not an overlap.
+
+Boot and the importer refuse a build that cannot service an obligation
+(`docs/configuration.md`), so an incompatible build cannot take over.
 
 ## Changes requiring renewed coordination
 

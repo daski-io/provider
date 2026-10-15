@@ -282,8 +282,9 @@ exactly as ambiguous as it was. An abandoned synchronous execution is never
 resumed or taken over.
 
 This makes restarts and short overlaps safe; it is not a horizontally scaled
-worker platform. Operate one active replica. Use `provider-full` when
-execution must resume after restarts or scale across workers.
+worker platform. Operate one active replica. A product job that must outlive
+a call belongs in external-job mode, whose worker resumes it after restarts;
+use `provider-full` when provider-owned execution must scale across workers.
 
 Rows a pre-R1 process left `executing` have no lease. Nothing resolves them
 automatically: the operator's stop-and-drain cutover
@@ -364,7 +365,12 @@ exactly its own, that every table it owns carries the enabled barrier
 trigger, that the ledger forces its policy, and that runtime sessions carry
 an admitted marker. A compatible additive migration keeps the epoch, so
 compatible builds may overlap; an incompatible schema raises it, which the
-database then enforces against every older process at once.
+database then enforces against every older process at once. A later release
+whose migration adds a table or changes a guarded write path raises the
+epoch: an older build would not know the new obligations or guards. Builds
+that share an epoch cannot be told apart by the barrier, so an intermediate
+development build must never run against a database a later build migrated
+(`docs/releasing.md`).
 
 Async admission is a separate database switch (migration 008), off through
 migrations, the importer and boot; only `npm run daski:async-admission --

@@ -14,15 +14,19 @@ status/artifact lifecycle calls over the standard Exact-EVM rail.
 Use this repository only when every paid operation is fixed-price and
 automated, needs no later buyer input, cancellation, asset or operator
 workflow, and either returns a terminal result within the 50-second
-synchronous budget or is a product-owned asynchronous job that core can
-start, recover by its stable key and poll (external-job mode). For dynamic
-quotes, provider-owned multi-step workflows, human input, assets/actions,
-admin, email, direct A2A, or intentional multi-replica workers, use
-`https://github.com/daski-io/provider-full`.
+synchronous budget (synchronous mode) or is a product-owned asynchronous job
+that core can start, recover by its stable key and poll (external-job mode).
+For dynamic quotes, provider-owned multi-step workflows, human input,
+assets/actions, admin, email, direct A2A, or intentional multi-replica
+workers, use `https://github.com/daski-io/provider-full`. Duration alone does
+not select `provider-full`, and selecting it never replaces a missing
+product guarantee (safe start, lookup after a lost response).
 
 The only installed service is `src/services/dummy`, a Testnet-only paid echo
-reference. A provider fork replaces it with its product service. Do not copy
-provider-specific services or retired payment rails into this repository.
+reference. `src/services/synthetic-audit` is the Testnet-only external-job
+example; it is not composed and refuses Base Mainnet. A provider fork
+replaces them with its product service. Do not copy provider-specific
+services or retired payment rails into this repository.
 
 ## Architecture boundary
 
@@ -76,8 +80,9 @@ boot until Daski supplies the reviewed Testnet artifacts.
 
 ## Change workflow
 
-1. Decide whether the operation still fits this minimal starter. Stop and
-   recommend `provider-full` if it does not.
+1. Decide which path the operation fits: synchronous mode, external-job
+   mode, or `provider-full` (see `README.md`). Stop and recommend
+   `provider-full` when a required capability is full-only.
 2. Inspect the closest types, implementation, docs, and tests.
 3. Make the smallest cohesive change; update contract, validation, adapter,
    docs, composition, catalog expectations, and tests together.
@@ -125,8 +130,17 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   age, and never cache a signed response.
 - For a non-convergent product mutation, journal intent before the call and
   reconcile authoritative product state after ambiguity. If reconciliation
-  cannot complete synchronously, use `provider-full`; never guess or blindly
-  retry.
+  cannot complete within the synchronous call, run the product's own job in
+  external-job mode (core journals the start and reconciles it by the stable
+  key) or use `provider-full` for provider-owned workflows; never guess or
+  blindly retry. An adapter never journals its own external-job start.
+- Daski's verified payment is the purchase. An external-job `start` uses a
+  provider-owned creation operation tied to the verified order; never pay a
+  public x402 or other paid endpoint again, and never accept a caller-asserted
+  "already paid" flag.
+- External-job input, job references and invalid-result candidates are
+  stored only encrypted (`PROVIDER_DATA_ENCRYPTION_KEY`). Never log or
+  publish a bearer job URL, and keep every key id an unfinished job names.
 - A buyer-authorized payer comes only from the verified dispatch. Request
   fields, order ids, artifact ids, and caller metadata are not credentials.
 - Use `boundedFetch`, `PinnedHttpClient`, or `reviewedEndpoint` for product
@@ -136,9 +150,11 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
 - Applied migrations are immutable and checksummed. New migrations are
   append-only, listed in the static-gate allowlist with the tables they
   create, and every new table needs a reviewed runtime-role grant and the
-  statement-level `provider_runtime_epoch_barrier()` trigger. Raise
-  `RUNTIME_SCHEMA_EPOCH` and the `provider_schema_epoch` row only for a schema
-  change older runtimes cannot use safely.
+  statement-level `provider_runtime_epoch_barrier()` trigger. A later
+  release whose migration adds a table or changes a guarded write path must
+  raise `RUNTIME_SCHEMA_EPOCH` and the `provider_schema_epoch` row together;
+  a purely additive change no older runtime path can misuse (an index, say)
+  may keep it (`docs/releasing.md`).
 - The async-admission switch changes only through `npm run
   daski:async-admission`; migrations, the importer and boot never enable it.
 - Treat published contract hashes and fixed-price changes as coordinated Daski
@@ -158,7 +174,11 @@ process never fails a live call, and only an expired lease is failed
 External jobs are durable: their worker finds due and abandoned work in
 PostgreSQL after a restart and resumes it in its persisted phase without
 resubmitting. The first upgrade from a pre-R1 image is the stop-and-drain
-cutover in `docs/onboarding.md` (`npm run daski:cutover`).
+cutover in `docs/onboarding.md` (`npm run daski:cutover`); later compatible
+releases may overlap while each keeps the adapter versions, keys and URLs
+unfinished orders need. `/health/ready` is the routing signal (read
+serviceability); its `admission` part reports new-sale readiness. This
+release requires the companion gateway revision in `docs/releasing.md`.
 
 Testnet is the normal first target. Mainnet requires production configuration,
 canonical reviewed contracts, separate runtime/migration database roles,

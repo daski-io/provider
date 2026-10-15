@@ -14,9 +14,14 @@ full boot.
 | Testnet | Public provider, Daski gateway, Base Sepolia paid order | HTTPS origin, wallet, Daski-issued policy and runtime bundle |
 | Mainnet | Reviewed production listing on Base | Successful Testnet and Daski whitelist |
 
-Before starting, confirm every operation is fixed-price, automated, one-shot,
-and terminal within 50 seconds. Otherwise use
-[provider-full](https://github.com/daski-io/provider-full).
+Before starting, confirm every operation is fixed-price and automated, and
+choose its mode: synchronous (a terminal result within the 50-second
+synchronous budget) or external job (the product already runs the paid work
+as its own job, which core starts, recovers by its stable key and polls).
+Dynamic pricing, later buyer input, cancellation, assets, operator review or
+multi-replica workers need
+[provider-full](https://github.com/daski-io/provider-full); duration alone
+does not.
 
 ## Prerequisites
 
@@ -51,7 +56,10 @@ npm run try-skill -- dummy echo "hello daski"
 
 The result should contain a terminal `completed` result and an `echo_result`
 artifact. This command invokes the adapter directly and is deliberately fenced
-to `dummy`. It uses no database, wallet, gateway, chain, or payment.
+to the two examples. It uses no database, wallet, gateway, chain, or payment.
+`npm run try-skill -- synthetic-audit audit` tours the external-job example
+the same way: a lost start answer, recovery by the order key, eight fake
+hours of pending polls and the report checked against its result schema.
 
 Run the local quality gates:
 
@@ -142,26 +150,33 @@ particular, identify:
 - the exact input schema and fixed atomic-USDC price;
 - the hard-coded API endpoint or MCP tool for each skill;
 - upstream timeout, response-size, and concurrency limits;
-- native idempotency and authoritative reconciliation behavior; and
+- native idempotency and authoritative reconciliation behavior;
+- for a product job: its start operation tied to the verified order, its
+  lookup by order key, its states, poll limits, runtime and report
+  retention; and
 - safe terminal artifacts and error codes.
 
-If the product can remain pending, require later input, create a durable object,
-or return an ambiguous mutation that cannot be resolved within the request,
-stop and migrate the work to `provider-full`.
+A product job that stays pending for a long time fits external-job mode when
+its start can be recovered safely. If the product needs later buyer input,
+creates a durable owned object, or needs operator review, use
+`provider-full`. If a lost start cannot be reconciled at all, record that
+upstream gap; neither starter can make that safe.
 
 ## 7. Replace the dummy
 
 Follow [Adding a service](adding-a-service.md):
 
-1. copy `src/services/dummy` to `src/services/<your-slug>`;
+1. copy `src/services/dummy` (synchronous) or `src/services/synthetic-audit`
+   (external job) to `src/services/<your-slug>`;
 2. replace its manifest, schema, validation, adapter, docs, and tests;
 3. add product-specific configuration/client modules in that folder;
 4. install the module in `src/providerServices.ts`;
 5. verify its published v2 AgentCard contract and fixed price; and
 6. remove the dummy before Mainnet.
 
-`npm run try-skill` remains intentionally dummy-only. Add product unit tests
-with a fake client instead of changing it into a payment bypass.
+`npm run try-skill` remains intentionally limited to the two examples. Add
+product unit tests with a fake client instead of changing it into a payment
+bypass.
 
 ## 8. Prepare Testnet
 
@@ -209,7 +224,14 @@ service contract, both trusted signers, runtime commitment, price, and splitter
 provenance before an atomic promotion; an identical retry is a no-op. It does
 not register identity, call the gateway/product, or send a chain transaction.
 
-Run doctor again, boot the image, and inspect:
+An external-job service also needs `PROVIDER_DATA_ENCRYPTION_KEY` on every
+replica and, once compatible workers run, the operator's explicit
+`npm run daski:async-admission -- --activate` (see
+[Configuration](configuration.md#async-admission-switch)); until then its
+quotes answer `external_jobs_unavailable`.
+
+Run doctor again (with `--database` for the read-only database checks), boot
+the image, and inspect:
 
 ```text
 /health/live
@@ -224,8 +246,9 @@ Run doctor again, boot the image, and inspect:
 
 Then use the Daski Testnet gateway for discovery, invalid-input, successful
 purchase, duplicate dispatch, changed replay, terminal status, product outage,
-and restart tests. A direct POST assembled by hand is not an end-to-end payment
-test.
+and restart tests; for an external job, also a restart while it is pending
+and a late report read through status and artifact. A direct POST assembled
+by hand is not an end-to-end payment test.
 
 ## Local gateway and contracts development
 
@@ -253,7 +276,8 @@ This preserves data. The starter includes no destructive reset command.
 ## Completion checklist
 
 - Node 24, `npm ci`, the offline example, and all local gates pass.
-- The product operation fits the minimal starter and is explicitly mapped.
+- The product operation fits the chosen mode (synchronous or external job)
+  and is explicitly mapped.
 - PostgreSQL is durable and unreachable from the public internet.
 - No dummy, secret, customer data, raw product response, or local `.env` is
   present in the release diff.

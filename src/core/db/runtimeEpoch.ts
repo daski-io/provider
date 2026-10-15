@@ -1,9 +1,12 @@
 import type { Queryable } from "./queryable.js";
 
 /**
- * The newest database schema epoch this build understands. Raise it only for
- * a schema change older runtimes cannot use safely; a compatible additive
- * migration keeps the epoch, so compatible builds may overlap.
+ * The newest database schema epoch this build understands. Raise it, with
+ * the provider_schema_epoch row, for any later migration that adds a table
+ * or changes a guarded write path, since older runtimes cannot use such a
+ * schema safely; a purely additive change no older path can misuse keeps
+ * it, so compatible builds may overlap. Builds sharing an epoch are not told
+ * apart: never run an intermediate build against a later build's database.
  */
 export const RUNTIME_SCHEMA_EPOCH = 1;
 /** Session setting every connection of this build carries (migration 005). */

@@ -25,6 +25,9 @@ Core verifies the gateway signer, environment, chain, audiences, expiry,
 service/outcome bindings, request hashes, payer, quote, payment evidence,
 release evidence, sanctions state, and replay state before invoking a service.
 The service adapter must not duplicate or bypass that admission decision.
+Daski's verified payment is the purchase: an adapter never charges the buyer
+again by paying an upstream x402 or other paid endpoint, and never trusts a
+caller-asserted "already paid" flag.
 
 The provider still trusts its own:
 
@@ -49,7 +52,13 @@ legal, compliance, custody, incident-response, or business-continuity program.
 - Use stable idempotency keys and journal intent before non-convergent external
   mutations. Reconcile authoritative product state after ambiguity.
 - If an operation cannot reconcile and finish inside the synchronous budget,
-  use `provider-full` rather than weakening terminal or restart guarantees.
+  run it as an external job when the product's own job can be started under
+  core's stable key and found again by it, or use `provider-full`; never
+  weaken terminal or restart guarantees.
+- External-job input and job references are stored only as authenticated
+  envelopes under `PROVIDER_DATA_ENCRYPTION_KEY`. Keep that key and every
+  previous key an unfinished job names in the secret manager; never log or
+  publish a bearer job URL.
 - Store credentials only in an approved runtime secret manager. `.env` is for
   local development and must never be committed.
 
@@ -60,7 +69,8 @@ legal, compliance, custody, incident-response, or business-continuity program.
   and runtime principals.
 - Expose stable HTTPS through a reviewed reverse proxy and edge rate limiter.
 - Keep one active application replica for this minimal runtime and route
-  traffic only while `/health/ready` passes.
+  traffic only while `/health/ready` passes (read serviceability; new sales
+  stop in-process when its `admission` part is not `open`).
 - Separate Testnet and Mainnet wallets, databases, origins, product accounts,
   and Daski-issued artifacts.
 - Run the documented type, lint, architecture, docs, skill, test, audit, build,

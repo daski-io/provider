@@ -4,24 +4,36 @@ Most providers already have a working product. This repository is a controlled
 adapter between Daski's paid-order protocol and one small, reviewed part of
 that product. It should not replace or publicly proxy the product.
 
-## First: choose the starter
+## First: choose the starter and mode
 
-| Product behavior | Minimal `provider` | `provider-full` |
-| --- | --- | --- |
-| Fixed price known before purchase | Required | Supported |
-| Automated terminal response in at most 50 seconds | Required | Supported |
-| One-shot JSON/text/public artifact | Supported | Supported |
-| Product job continues after HTTP response | Not supported | Supported |
-| Dynamic price depends on buyer input/product lookup | Not supported | Supported |
-| Later buyer input, approval, or cancellation | Not supported | Supported |
-| Durable private asset and owner-only actions | Not supported | Supported |
-| Human review, email, admin, or protected-data workflow | Not supported | Supported |
-| Ambiguous mutation reconciled after restart | Not supported | Supported |
-| Multiple active execution replicas/workers | Not supported | Supported |
+| Product behavior | `provider`, synchronous | `provider`, external job | `provider-full` |
+| --- | --- | --- | --- |
+| Fixed price known before purchase | Required | Required | Supported |
+| Automated terminal response in at most 50 seconds | Required | Not needed | Supported |
+| Product runs the paid work as its own job (start, lookup by order key, poll) | Not applicable | Required | Supported through its own jobs |
+| Product job continues after the HTTP response | Not supported | Supported: core polls it for the fulfillment window | Supported |
+| One-shot JSON/text/public artifact | Supported | Supported (the report) | Supported |
+| Dynamic price depends on buyer input/product lookup | Not supported | Not supported | Supported |
+| Later buyer input, approval, or cancellation | Not supported | Not supported | Supported |
+| Durable private asset and owner-only actions | Not supported | Not supported | Supported |
+| Human review, email, admin, or protected-data workflow | Not supported | Not supported | Supported |
+| Ambiguous mutation reconciled after restart | Not supported | Supported for the job's start: core journals it and reconciles through `recoverStart` | Supported |
+| Multiple active execution replicas/workers | Not supported: one active replica; restarts and short compatible overlaps are safe | Not supported: same; the worker is fenced, not a scaled platform | Supported |
 
-Use [provider-full](https://github.com/daski-io/provider-full) if any
-not-supported row is part of the product contract. Do not simulate a lifecycle
-by returning `completed` while work is still running.
+Use [provider-full](https://github.com/daski-io/provider-full) if a row the
+chosen mode does not support is part of the product contract. Do not simulate
+a lifecycle by returning `completed` while work is still running: a product
+job belongs in external-job mode, where status reads report `working` until
+the report exists. Duration alone does not select `provider-full`.
+
+External-job mode has two prerequisites the product itself must provide.
+First, Daski's verified payment must be able to start an already-paid job
+through a provider-owned creation operation tied to the order, never a second
+purchase through a public paid endpoint. Second, after a lost start response,
+the job must be found again, by an authoritative lookup on the order key or a
+same-key replay inside a documented idempotency retention window. If either is
+missing, onboarding stops at that upstream gap; `provider-full` cannot supply
+it.
 
 ## Vocabulary
 
@@ -46,16 +58,21 @@ Record the answers in the service's tracked docs and tests:
 | Input | Field names, types, required/optional status, bounds, and conditional rules |
 | Product operation | One configured API endpoint/method or MCP server/tool |
 | Authentication | Provider-held credential source; never buyer supplied |
-| Execution bound | Product timeout safely below 50 seconds |
-| Idempotency | Stable product key derived from verified task/order context |
-| Ambiguity | Authoritative read that proves happened/did-not-happen immediately |
+| Execution bound | Synchronous: product timeout safely below 50 seconds. External job: normal and maximum runtime, per-call budget, declared fulfillment window |
+| Payment mapping | External job: how the verified Daski order starts an already-paid product job |
+| Idempotency | Stable product key derived from verified task/order context; for a job, the product's documented replay retention |
+| Ambiguity | Synchronous: an authoritative read within the call. External job: lookup by order key after timeout, crash or key expiry |
+| Job | External job: stable reference, exact product states, poll limits and rate limits, report retention |
 | Output | Small stable artifact schema and safe public message |
 | Failure | Stable error codes and what is definitive versus ambiguous |
 | Readiness | What proves the product dependency can accept work |
 | Environments | Separate fake/sandbox/Testnet/live credentials and side effects |
 
-If there is no immediate authoritative ambiguity check for a mutating
-operation, the fit test fails even when the normal response is fast.
+If there is no authoritative ambiguity check for a mutating operation, the
+fit test fails even when the normal response is fast. The gateway does not
+keep the report for you: an external job's result is frozen in this
+provider's database when it completes, and a report larger than the result
+schema allows needs a durable delivery the product keeps.
 
 ## API integration pattern
 
@@ -174,7 +191,8 @@ boundary:
 For remote MCP, apply the same reviewed HTTPS origin and SSRF rules as an API.
 For a local stdio server, pin the executable/arguments at deployment and do not
 construct shell commands from buyer input. If the MCP tool starts an async job
-or requires sampling/elicitation later, use `provider-full`.
+that can be found again by an order key and polled, use external-job mode; if
+it requires sampling/elicitation later, use `provider-full`.
 
 ## Adapter responsibilities
 
@@ -198,6 +216,24 @@ It must:
 It must not verify payment, accept caller identity from input, modify global
 rail state, leak product details, return a non-terminal state, or continue work
 after returning.
+
+An external-job adapter (`mode: "external-job"`) is called by the worker
+instead, never by the dispatch handler, with an `ExternalJobContext` that adds
+core's stable `idempotencyKey`, the persisted `acceptedAt`,
+`fulfillmentDeadline`, `firstStartAttemptAt` and `idempotencyValidBefore`,
+and a per-call `signal`:
+
+- `start` submits the job under `idempotencyKey` and returns `accepted` (a
+  bounded job reference of at most 16 KiB, never a credential bundle or the
+  upstream body), `terminal`, or `ambiguous`; any throw, abort or invalid
+  return counts as ambiguous;
+- `recoverStart` is read-only: it returns the original job or result, a
+  `safe-to-start` verdict on `authoritative-absence` or `idempotent-replay`
+  basis, or `unknown`; an empty eventually consistent search is `unknown`;
+- `poll` is read-only: `pending`, `terminal`, or `retry` with a typed issue.
+
+Only core schedules a start, and only core's reviewed codes and hints leave
+the adapter. Copy `src/services/synthetic-audit` for the full pattern.
 
 Implement `ServiceModule.readiness(signal)` as a bounded, read-only product
 probe. It must return false (without leaking the cause) when the configured
@@ -230,7 +266,10 @@ core journals it and reconciles it through `recoverStart`
 
 Prefer small JSON/text results. A URL artifact must be public and
 non-sensitive; do not return bearer-token URLs or treat an unprotected URL as
-ownership. If results are private, retained, re-downloadable, mutable, or need
+ownership. A bearer report URL a product hands back for a job may be kept in
+the job reference, which core stores encrypted and never logs, but it is not
+a recovery method on its own: if the start response carrying it is lost, the
+job must still be found by the order key. If results are private, retained, re-downloadable, mutable, or need
 owner-only operations, model them as assets in `provider-full`.
 
 This starter does not persist request bodies, but your product still receives
@@ -249,8 +288,12 @@ Use a fake client and cover:
 6. safe error and log redaction;
 7. duplicate execution/idempotency;
 8. definitive failure versus ambiguous result;
-9. authoritative reconciliation, if mutating; and
-10. completed and failed terminal artifacts.
+9. authoritative reconciliation, if mutating;
+10. completed and failed terminal artifacts; and
+11. for an external job: a lost start response recovered without a second
+    job, an idempotency horizon that has expired, a terminal report that
+    fails the result schema, a late completion after the deadline, and the
+    exact mapping of every product state.
 
 Then run one deliberately bounded Testnet journey through the real Daski
 gateway and the product sandbox. Record only safe evidence: commit/image

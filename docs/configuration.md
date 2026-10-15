@@ -279,7 +279,7 @@ the importer once per service; an identical commitment is an idempotent no-op.
 | `HTTP_MAX_CONCURRENCY` | Global in-process concurrency, default `200`. |
 | `HTTP_MAX_CONCURRENCY_PER_IP` | Per-client concurrency, default `20`, never above global. |
 | `HTTP_HEADERS_TIMEOUT_MS` | Header timeout, default `15000`, never above request timeout. |
-| `HTTP_REQUEST_TIMEOUT_MS` | Request timeout, default `60000`. Keep above the 50-second adapter budget. |
+| `HTTP_REQUEST_TIMEOUT_MS` | Request timeout, default `60000`. Keep above the 50-second synchronous adapter budget. |
 | `HTTP_KEEP_ALIVE_TIMEOUT_MS` | Keep-alive timeout, default `5000`. |
 | `HEALTH_READINESS_CACHE_MS` | Readiness cache, default `5000`. |
 | `READINESS_MAX_AGE_SECONDS` | Maximum age of chain/identity readiness evidence, default `180`. |
@@ -326,5 +326,5 @@ an endpoint/tool or lets Mainnet use a fake/sandbox dependency.
 | --- | --- |
 | Offline | No `.env`, database, wallet, or network required. |
 | Local | Loopback `BASE_URL`, optional `CHAIN_MODE=mock`, local PostgreSQL; full paid boot still needs artifacts. |
-| Testnet | Base Sepolia, dedicated wallet/product sandbox, stable HTTPS, reviewed Testnet artifact set. |
+| Testnet | Base Sepolia, dedicated wallet/product sandbox, stable HTTPS, reviewed Testnet artifact set; external-job services also need `PROVIDER_DATA_ENCRYPTION_KEY` and the explicit async-admission activation. |
 | Mainnet | Base, `production`, canonical contracts/USDC, distinct DB roles, verify-full TLS, reviewed proxy/edge, live product, dummy removed, Daski whitelist. |

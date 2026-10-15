@@ -1,7 +1,9 @@
 # Adding a service
 
 The dummy is a complete copy-from example for one fixed-price synchronous
-operation. Keep all product-specific behavior with the service that owns it.
+operation; `src/services/synthetic-audit` is the copy-from example for an
+external job. Keep all product-specific behavior with the service that owns
+it.
 
 ## 1. Confirm fit
 
@@ -9,11 +11,16 @@ Use this starter only when the operation:
 
 - has one reviewed fixed price in atomic USDC;
 - is fully automated and needs no later input;
-- completes or fails within 50 seconds;
 - creates no durable buyer-owned object or later owner action; and
-- can resolve external ambiguity within the same execution window.
+- either completes or fails within the 50-second synchronous budget and
+  resolves external ambiguity within that call (synchronous mode), or is a
+  job the product already runs, which core can start under a stable key,
+  find again by it after a lost response and poll until its report
+  (external-job mode; see "Adding an external-job service" at the end).
 
 Otherwise use [provider-full](https://github.com/daski-io/provider-full).
+Duration alone does not decide; a product that cannot reconcile a lost start
+is an upstream gap in either starter.
 
 ## 2. Copy the reference
 
@@ -84,7 +91,8 @@ execute(
 ```
 
 Honor `context.signal`. Do not add pending/working/input-required states to this
-contract; selecting those states means selecting `provider-full`.
+contract: a product job that stays pending belongs in external-job mode, and
+later buyer input means `provider-full`.
 
 `readiness` is a read-only product check and must honor its signal. Return
 `false` when the configured API/MCP dependency cannot accept paid work. Core
@@ -110,7 +118,10 @@ for buyer agents rather than internal staff. Each skill must declare:
 - what outcome is purchased;
 - required input fields and meaningful limits;
 - the fixed atomic-USDC price;
-- realistic turnaround within the 50-second ceiling; and
+- realistic turnaround: within the 50-second synchronous budget, or for an
+  external job the product's normal runtime under a declared
+  `deadlines.fulfillmentSeconds` that covers runtime, queueing, retries and
+  report retrieval; and
 - examples that can be sent without hidden context.
 
 Use `categoryFamily`, coordinated `serviceType`, and jurisdictions honestly.
@@ -178,8 +189,9 @@ strict response parsing, and redacted errors.
 If a product mutation is non-convergent, use the supplier operation journal
 with a stable key derived from the verified order/task—not from mutable buyer
 text. Prefer an upstream idempotency key. After timeout or disconnect, query the
-product's authoritative state before retrying. Use `provider-full` if that
-cannot be completed synchronously.
+product's authoritative state before retrying. If that cannot be completed
+within the synchronous call, the operation is an external job (core journals
+its start) or needs `provider-full`; never retry it blindly.
 
 ## 6. Validate and execute
 
@@ -269,9 +281,52 @@ Use a fake product client; unit tests must never call a live API/MCP server.
 
 Run the gates in `README.md`, then search the release diff for `dummy`, test
 credentials, product account data, and raw captured output. The Mainnet doctor
-fails while `src/services/dummy` exists.
+fails while `src/services/dummy` exists or the synthetic audit is composed.
 
 Submit the checked-in manifest, schemas, docs, tests, fixed price, and operation
 mapping as the technical portion of the onboarding packet. Treat later changes
 to ids, schema, price, deadline, capacity, origin, payee, or behavior as a
 coordinated contract and runtime-bundle revision.
+
+## Adding an external-job service
+
+Copy `src/services/synthetic-audit` when the product already runs each paid
+operation as its own asynchronous job. The runtime supplies persistence,
+the stable operation key, leases, polling, restart recovery, retained
+adapter versions, encrypted job state and signed status and artifact reads;
+the service supplies only:
+
+1. a manifest and skills with closed input schemas, a fixed price and an
+   explicit `deadlines.fulfillmentSeconds` (at least `dispatchSeconds + 180`)
+   covering the product's maximum runtime, queueing, retries and report
+   retrieval;
+2. strict input validation, repeated in the adapter, and a `resultSchema`
+   describing the complete completed `ServiceResult` the report maps to;
+3. strictly parsed configuration and a fixed product client on the reviewed
+   outbound helpers;
+4. the adapter: `mode: "external-job"`, a `version`, the product's documented
+   `idempotencyRetentionSeconds` when it has one, and `start`, read-only
+   `recoverStart` and read-only `poll` returning only the typed outcomes in
+   `src/core/serviceRegistry/adapterTypes.ts`;
+5. an optional read-only `requestReadiness` that declines unacceptable
+   requests before payment (a later product outage delays the admitted job;
+   it never refuses a funded one); and
+6. docs and co-located tests with a fake product.
+
+Map every product state exactly: a pending job is `pending` (it never spends
+the failure budget), a definitive product failure is `terminal` with a
+reviewed failure code, and anything uncertain is `ambiguous`, `unknown` or
+`retry`. The fulfillment deadline is an overdue threshold, not proof that
+the product failed: started work stays `working` and a late valid report
+still completes once. A terminal report that fails the result schema leaves
+the job `working` and stops new quotes for that mapping until a repaired
+mapper recovers it. Never build a private polling loop, hold a request open
+for the job, raise the synchronous budget, or copy provider-full's operator or
+asset subsystems.
+
+Test at least: a lost start response recovered by the order key without a
+second job, a same-key replay refused once the retention horizon has passed,
+an invalid terminal report, a late completion after the deadline, the exact
+upstream-state mapping, and a restart in each phase. Before Testnet, set
+`PROVIDER_DATA_ENCRYPTION_KEY` and plan the activation described in
+`docs/onboarding.md`.

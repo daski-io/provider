@@ -331,7 +331,7 @@ database failure, or signing failure is never this answer.
 | Answer | Cause and fix |
 | --- | --- |
 | `409 artifact_unavailable` | The task is not `completed`; read `status`. Failed tasks never have an artifact. |
-| `409 unsupported_action` | `input`, `cancel` and `support` are not implemented by this starter; nothing happened. Use `provider-full` for them. |
+| `409 unsupported_action` | `input`, `cancel` and `support` are not implemented by this starter; nothing happened. Use `provider-full` for them. The buyer sees this refusal by name only through the companion gateway revision (`docs/releasing.md`); an older gateway reports it as a provider error. |
 | `503 lifecycle_unavailable` | Database, signing or contract-account RPC failure, a busy or rate-limited servicing call, or a stored result that no longer matches its frozen hash (logged as `terminal_identity_unverifiable`). Retry; a payer-signed retry needs a fresh authorization. |
 | `401 lifecycle_rejected` / `grant` or `signature` | The grant is not a current `ProviderLifecycleGrantV1` for this provider audience signed by `STANDARD_RAIL_GATEWAY_SIGNER` as `gateway-lifecycle`. Check the environment, chain, audiences and signer. |
 | `403 lifecycle_rejected` / `binding` or `authorization` | The grant does not bind this call, a read capability was used for another action or scope, or the payer signature is invalid for the order's payer (contract accounts need `PAYER_ACCOUNT_TYPES=eoa,contract`). |
@@ -339,14 +339,19 @@ database failure, or signing failure is never this answer.
 
 ## Product call times out or is ambiguous
 
-The adapter has a hard 50-second budget and should set a smaller product
-timeout. A known definitive product rejection can map to a stable failed result.
-A disconnect/timeout after a mutation may have landed is ambiguous.
+A synchronous adapter has a hard 50-second budget and should set a smaller
+product timeout. A known definitive product rejection can map to a stable
+failed result. A disconnect/timeout after a mutation may have landed is
+ambiguous.
 
 Use the product's idempotency key and authoritative read to reconcile before
-retrying. If that cannot be completed during the dispatch, this operation does
-not fit the minimal starter; move it to `provider-full`. Never label an unknown
-outcome successful or blindly repeat the mutation.
+retrying. If that cannot be completed during the dispatch, the operation does
+not fit synchronous mode: run the product's own job in external-job mode,
+where core journals the start and reconciles it through `recoverStart`, or
+use `provider-full` for provider-owned workflows. Never label an unknown
+outcome successful or blindly repeat the mutation. An external-job start that
+throws or times out is always reconciled with the original key; nothing
+starts it again until `recoverStart` proves that safe.
 
 ## Same order returns a different result or is rejected
 
@@ -363,7 +368,9 @@ last renewal), then any running process fails it with
 `provider_execution_abandoned`. A restart never fails another process's live
 call. The supplier journal is left as it was, so reconcile a possibly applied
 product mutation before retrying it. The minimal runtime must have one active
-replica. If transparent resumption is required, use `provider-full`.
+replica. A synchronous call is never resumed; when the work must survive a
+restart, it is a product job for external-job mode (its worker resumes it
+from PostgreSQL) or a provider-owned workflow for `provider-full`.
 
 If boot warns `Pre-R1 executions await the stop-and-drain cutover`, rows a
 pre-R1 image left executing are still open: they have no lease, show

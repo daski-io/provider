@@ -150,6 +150,22 @@ never the no-claim answer. Status reads are one indexed claim read plus the
 abuse guard's read-only bucket lookup: no product call, no write, no
 request-charged rate limit, and no product-readiness gate.
 
+## Call time and fulfillment time
+
+Every call into the provider is short: a quote is read-only, a dispatch
+answers once its claim commits (an external job, `submitted`, before any
+product call) or after the synchronous call (at most 50 seconds), and status
+and lifecycle reads are one indexed read. Fulfillment time is separate: the
+listing's `deadlines.fulfillmentSeconds`, counted by the provider from durable
+acceptance (its overdue threshold) and by the gateway from dispatch
+resolution (its deadline). Polls pause neither clock. Past the threshold, a
+job that never started fails (`provider_job_not_started`); started or
+ambiguous work stays `working`, starts nothing new and keeps reading the
+original job, so a late valid report still completes once. The gateway may
+report its own deadline failure until it is explicitly revived; nothing
+refunds or renews payment automatically, and lite never reopens a terminal
+task.
+
 ## Buyer lifecycle
 
 A buyer reads an order through the gateway, which proxies the call to
@@ -216,6 +232,14 @@ signature}` by the terminal attestation key, carrying the same `taskId`,
 
 A read capability is retried as is; a payer-signed retry needs a fresh
 authorization because the gateway consumed the first one.
+
+The named refusals need the companion gateway revision
+([releasing](releasing.md#gateway-compatibility)), which relays
+`artifact_unavailable`, `unsupported_action` and `lifecycle_unavailable` to
+the buyer by name. Its third named refusal, `409 action_conflict`, belongs to
+providers with lifecycle mutations; lite never sends it. An older gateway
+reports any provider refusal other than `artifact_unavailable` as a provider
+error.
 
 ## Service result
 

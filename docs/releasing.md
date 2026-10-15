@@ -25,6 +25,43 @@ The initial stable release is `v1.0.0`; version `0.x` remains pre-release.
 Changing a reviewed public contract after approval requires a new candidate and
 usually a new Daski artifact set.
 
+## Gateway compatibility
+
+A release names the gateway revision it was qualified against. This
+repository's tested revision is the `daski-io/gateway` commit recorded in
+`test/fixtures/provider-wire.source.json`, whose canonical fixtures the
+suite replays (below). The release requires a gateway with two companion
+changes that no provider-side check can substitute for:
+
+- named lifecycle refusals: the gateway relays a provider's
+  `409 unsupported_action`, `409 action_conflict` and
+  `503 lifecycle_unavailable` to the buyer by name, where an older gateway
+  answered `500`; and
+- deadline protection: a paid order's fulfillment deadline is never shorter
+  than its checkout snapshot or a recorded extension, and is still enforced
+  while sales are paused or a listing is unavailable.
+
+Do not claim compatibility with a deployed gateway older than that revision.
+Record the deployed gateway revision with the release evidence.
+
+## Schema epoch and upgrade guards
+
+This release's migrations 005 to 009 ship together at schema epoch 1 (no
+intermediate build of them was released), so its upgrade from the pre-R1
+image is the one stop-and-drain cutover in `docs/onboarding.md`. Rules for
+every later release:
+
+- a migration that adds a table or changes a guarded write path must raise
+  `RUNTIME_SCHEMA_EPOCH` and, in the same migration, the
+  `provider_schema_epoch` row: older builds cannot use such a schema safely,
+  and the database then excludes them all at once, which makes that upgrade
+  another stop-and-drain cutover;
+- a purely additive change that no older runtime path can misuse (an index,
+  say) keeps the epoch, so compatible releases may overlap; and
+- builds that share an epoch cannot be told apart by the barrier, so an
+  intermediate development build must never run against a database that a
+  later build migrated; use a disposable database per build.
+
 ## Gateway wire fixtures
 
 `test/fixtures/provider-wire/` is the gateway's canonical synthetic

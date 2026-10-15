@@ -20,7 +20,8 @@ Mainnet automation.
   unless `--database` is given: then `src/doctorDatabase.ts` (run through tsx
   in a child process) reads PostgreSQL with `DATABASE_URL` in one `READ ONLY`
   snapshot that is rolled back, and never migrates, imports, activates or
-  writes. Offline, database checks are reported as not performed (`skip`).
+  writes. Offline, database checks are reported as not performed (`skip`),
+  and `scripts/doctor-summary.mjs` never summarizes such a run as ready.
 - `npm run dev:db:up` starts loopback-only PostgreSQL 16 for development.
   `npm run dev:db:stop` stops it and preserves the named volume.
 - `npm run copy-assets` copies service documentation to `dist`; `npm run build`

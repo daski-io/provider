@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { doctorSummary } from "../scripts/doctor-summary.mjs";
 
 const secret = "doctor-secret-that-must-never-be-printed";
 const environment = {
@@ -61,6 +62,23 @@ describe("doctor", () => {
     expect(report.checks.find((item) => item.code === "DATABASE_DIAGNOSTICS")?.status).toBe("skip");
     expect(report.checks.map((item) => item.code)).not.toContain("DATABASE_SCHEMA_EPOCH");
     expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
+  });
+
+  it("never summarizes an offline run as ready", () => {
+    const passed = [{ status: "pass" }, { status: "skip" }];
+    expect(doctorSummary(passed, "not_performed")).toBe(
+      "Result: offline checks passed; database checks were not performed (add --database).",
+    );
+    expect(doctorSummary(passed, "performed")).toBe("Result: ready for the next documented step.");
+    expect(doctorSummary([...passed, { status: "fail" }], "not_performed"))
+      .toBe("Result: 1 blocking check(s).");
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/doctor.mjs", "--stage=testnet"],
+      { cwd: process.cwd(), env: environment, encoding: "utf8" },
+    );
+    expect(result.stdout).toContain("[SKIP] DATABASE_DIAGNOSTICS");
+    expect(result.stdout).not.toContain("Result: ready");
   });
 
   it("documents the opt-in database mode", () => {

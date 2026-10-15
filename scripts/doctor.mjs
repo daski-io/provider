@@ -1,6 +1,7 @@
 import { fork } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { doctorSummary } from "./doctor-summary.mjs";
 
 const stages = new Set(["local", "testnet", "mainnet"]);
 const statuses = new Set(["pass", "warn", "fail", "skip"]);
@@ -206,16 +207,13 @@ function validDatabaseReport(report) {
       && typeof item.message === "string");
 }
 
-function human(stage, checks) {
+function human(stage, checks, database) {
   const lines = [`Daski provider doctor (${stage})`, ""];
   for (const item of checks) {
     lines.push(`[${item.status.toUpperCase()}] ${item.code}: ${item.message}`);
     if (item.remedy && item.status !== "pass") lines.push(`  ${item.remedy}`);
   }
-  const failed = checks.filter((item) => item.status === "fail").length;
-  lines.push("", failed === 0
-    ? "Result: ready for the next documented step."
-    : `Result: ${failed} blocking check(s).`);
+  lines.push("", doctorSummary(checks, database));
   return `${lines.join("\n")}\n`;
 }
 
@@ -250,7 +248,7 @@ try {
     };
     process.stdout.write(options.json
       ? `${JSON.stringify(report, null, 2)}\n`
-      : human(options.stage, checks));
+      : human(options.stage, checks, database));
     if (!report.ok) process.exitCode = 1;
   }
 } catch (error) {

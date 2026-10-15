@@ -4,6 +4,7 @@ export interface AdapterApi {
   kinds: Set<string>;
   bases: Set<string>;
   issueCodes: Set<string>;
+  outboundHelpers: Set<string>;
 }
 
 export function readAdapterApi(root: string): AdapterApi;

@@ -150,7 +150,7 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   publish a bearer job URL, and keep every key id an unfinished job names.
 - A buyer-authorized payer comes only from the verified dispatch. Request
   fields, order ids, artifact ids, and caller metadata are not credentials.
-- Use `boundedFetch`, `PinnedHttpClient`, or `reviewedEndpoint` for product
+- Use `boundedFetch`, `pinnedHttpRequest`, or `reviewedEndpoint` for product
   HTTP. Do not call `fetch` directly from a service.
 - Never log request/product payloads, credentials, private keys, or signed
   authorization material. Public errors are stable and generic.

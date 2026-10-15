@@ -4,8 +4,9 @@ import { join } from "node:path";
 // Consistency rules shared by the skill validator and the documentation
 // check: routing statements must not contradict the three integration paths
 // (lite synchronous, lite external job, provider-full), and code-like
-// references to the adapter API must name members and outcomes the
-// checked-out source actually declares.
+// references to the adapter API and the reviewed outbound HTTP helpers must
+// name members, outcomes and exports the checked-out source actually
+// declares.
 
 /** The body of `interface <name> ... { ... }`, braces matched. */
 function interfaceBody(source, name) {
@@ -30,10 +31,15 @@ function memberNames(body) {
 
 const literals = (source, pattern) => new Set([...source.matchAll(pattern)].map((match) => match[1]));
 
+/** The reviewed outbound HTTP helpers a product client uses instead of `fetch`. */
+const OUTBOUND_MODULES = ["outboundHttp.ts", "pinnedHttp.ts", "reviewedEndpoint.ts"]
+  .map((name) => `src/core/security/${name}`);
+
 /**
  * The adapter API as `src/core/serviceRegistry/adapterTypes.ts` and
  * `serviceModule.ts` declare it: interface members, adapter modes, outcome
- * kinds, safe-to-start bases and call-issue codes.
+ * kinds, safe-to-start bases and call-issue codes; and the names the reviewed
+ * outbound HTTP modules export.
  */
 export function readAdapterApi(root) {
   const adapterTypes = readFileSync(join(root, "src/core/serviceRegistry/adapterTypes.ts"), "utf8");
@@ -66,6 +72,10 @@ export function readAdapterApi(root) {
     kinds: literals(adapterTypes, /\bkind:\s*"([^"]+)"/g),
     bases: literals(/basis:\s*([^;}]+)/.exec(adapterTypes)?.[1] ?? "", /"([^"]+)"/g),
     issueCodes: literals(callIssue, /"([a-z_]+)"/g),
+    outboundHelpers: new Set(OUTBOUND_MODULES.flatMap((path) => [...literals(
+      readFileSync(join(root, path), "utf8"),
+      /^export\s+(?:async\s+)?(?:function|class|interface|type|const)\s+([A-Za-z_][A-Za-z0-9_]*)/gm,
+    )])),
   };
 }
 
@@ -83,15 +93,21 @@ function codeFragments(text) {
 
 // Hook-like calls an agent might invent for lifecycle work lite does not have.
 const INVENTED_HOOKS = /\b(cancel|handleInput|resume|resumeJob|startJob|pollJob|getStatus|checkStatus|onWebhook|onComplete|retryFailedOrder|reopen)\s*\(\s*context\b/g;
+// Names shaped like the reviewed outbound helpers (`boundedFetch`,
+// `pinnedHttpRequest`, `reviewedEndpoint`), such as the nonexistent
+// `PinnedHttpClient`, must be one of their exports; module paths and file
+// names (`src/core/security/pinnedHttp.ts`) are not references.
+const OUTBOUND_HELPER = /(?<![\w./-])((?:[Bb]ounded|[Pp]inned|[Rr]eviewed)(?:Http|Fetch|Endpoint|Request|Response|Client|Url|URL)\w*)(?!\w|\.[a-z]{1,4}\b)/g;
 const ADAPTER_CONTEXT = /\b(?:adapter|ExternalJobAdapter|FulfillmentAdapter|recoverStart|execute\s*\(|start\s*\(|poll\s*\()/;
 const literal = (key) => new RegExp(`["']?\\b${key}["']?\\s*:\\s*["']([a-z]+(?:-[a-z]+)*)["']`, "g");
 
 /**
  * Code-like references to adapter members (`context.x`, `adapter.x`,
- * `ServiceModule.x`, ...), invented lifecycle hooks, and outcome literals
+ * `ServiceModule.x`, ...), invented lifecycle hooks, outcome literals
  * (`kind: "x"`, `basis: "x"`, an adapter's `mode: "x"`, an issue's
- * `code: "x"`) that the API does not declare. Paths and file names
- * (`tests/adapter.test.ts`, `context.json`) are not references.
+ * `code: "x"`) and outbound helper names that the source does not declare.
+ * Paths and file names (`tests/adapter.test.ts`, `context.json`) are not
+ * references.
  */
 export function findUnknownAdapterReferences(text, api) {
   const problems = [];
@@ -103,6 +119,9 @@ export function findUnknownAdapterReferences(text, api) {
     }
     for (const match of fragment.matchAll(INVENTED_HOOKS)) {
       problems.push(`${match[1]}(context, ...) is not a declared adapter hook`);
+    }
+    for (const match of fragment.matchAll(OUTBOUND_HELPER)) {
+      if (!api.outboundHelpers.has(match[1])) problems.push(`${match[1]} is not an exported outbound HTTP helper`);
     }
     const checks = [
       [literal("kind"), api.kinds, "outcome kind"],

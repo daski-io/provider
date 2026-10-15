@@ -23,6 +23,10 @@ describe("skill and documentation consistency rules", () => {
     expect([...api.members.get("adapter")!]).toEqual(expect.arrayContaining(["execute", "start", "recoverStart", "poll"]));
     expect(api.members.get("module")!.has("previousExternalJobAdapters")).toBe(true);
     expect(api.members.get("context")!.has("idempotencyValidBefore")).toBe(true);
+    expect([...api.outboundHelpers]).toEqual(
+      expect.arrayContaining(["boundedFetch", "pinnedHttpRequest", "reviewedEndpoint", "appendReviewedOperation"]),
+    );
+    expect(api.outboundHelpers.has("PinnedHttpClient")).toBe(false);
   });
 
   it("flags references to members and outcomes the API does not declare", () => {
@@ -34,13 +38,17 @@ describe("skill and documentation consistency rules", () => {
       'const adapter = { mode: "async" };',
       'return { kind: "retry", issue: { code: "network" } };',
       "ServiceModule.retryFailedOrder();",
+      "const client = new BoundedHttpClient();",
       "```",
+      "Use `boundedFetch`, `PinnedHttpClient`, or `reviewedEndpoint` for product HTTP.",
     ].join("\n");
     expect(findUnknownAdapterReferences(text, api).sort()).toEqual([
       '"async" is not a declared adapter mode',
       '"eventual-search" is not a declared safe-to-start basis',
       '"network" is not a declared call-issue code',
       '"running" is not a declared outcome kind',
+      "BoundedHttpClient is not an exported outbound HTTP helper",
+      "PinnedHttpClient is not an exported outbound HTTP helper",
       "ServiceModule.retryFailedOrder is not a declared member",
       "adapter.cancel is not a declared member",
       "cancel(context, ...) is not a declared adapter hook",
@@ -57,7 +65,10 @@ describe("skill and documentation consistency rules", () => {
       'return { kind: "safe-to-start", basis: "idempotent-replay" };',
       'return { kind: "retry", issue: { code: "rate_limited", retryAfterSeconds: 30 } };',
       'const adapter = { mode: "external-job", version: "v1" };',
+      "const response = await boundedFetch(reviewedEndpoint(base, REVIEWED).toString(), init);",
       "```",
+      "Use `boundedFetch`, `pinnedHttpRequest`, or `reviewedEndpoint` for product HTTP",
+      "(`src/core/security/pinnedHttp.ts`, `reviewedEndpoint.ts`, `PinnedHttpResponse`).",
     ].join("\n");
     expect(findUnknownAdapterReferences(text, api)).toEqual([]);
   });

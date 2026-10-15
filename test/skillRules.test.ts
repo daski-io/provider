@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  countLines,
   findEvaluationReferences,
   findRoutingContradictions,
   findUnknownAdapterReferences,
   readAdapterApi,
+  SKILL_MAX_LINES,
 } from "../scripts/skill-rules.mjs";
 
 const api = readAdapterApi(process.cwd());
@@ -168,5 +170,20 @@ describe("skill and documentation consistency rules", () => {
       "Never make readiness or admission permissive to unblock a fixture or deploy.",
       "The tested revision is recorded in `test/fixtures/provider-wire.source.json`.",
     ].join("\n"))).toEqual([]);
+  });
+
+  it("counts lines so the 180-line entrypoint cap is exact", () => {
+    const text = (count: number, eol = "\n") => Array.from({ length: count }, (_, index) => `line ${index + 1}`).join(eol);
+    expect(SKILL_MAX_LINES).toBe(180);
+    for (const eol of ["\n", "\r\n", "\r"]) {
+      // One final line break ends the last line; it does not start another.
+      expect(countLines(text(180, eol) + eol), JSON.stringify(eol)).toBe(180);
+      expect(countLines(text(180, eol)), JSON.stringify(eol)).toBe(180);
+      expect(countLines(text(181, eol) + eol), JSON.stringify(eol)).toBe(181);
+      expect(countLines(text(181, eol)), JSON.stringify(eol)).toBe(181);
+      // A blank line before the final break is a line of its own.
+      expect(countLines(text(180, eol) + eol + eol), JSON.stringify(eol)).toBe(181);
+    }
+    expect([countLines(""), countLines("\n"), countLines("one")]).toEqual([0, 1, 1]);
   });
 });

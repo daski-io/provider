@@ -1,9 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  countLines,
   findEvaluationReferences,
   findRoutingContradictions,
   findUnknownAdapterReferences,
   readAdapterApi,
+  SKILL_MAX_LINES,
 } from "./skill-rules.mjs";
 
 const path = ".agents/skills/daski-provider/SKILL.md";
@@ -27,8 +29,8 @@ const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 if (!frontmatter?.includes(`version: "${packageVersion}"`)) {
   failures.push("skill version must equal package.json version");
 }
-if (source.split("\n").length > 180) {
-  failures.push("SKILL.md should remain a concise router; move conditional detail to references");
+if (countLines(source) > SKILL_MAX_LINES) {
+  failures.push(`SKILL.md should remain a concise router of at most ${SKILL_MAX_LINES} lines; move conditional detail to references`);
 }
 let packagedSource = source;
 const requiredReferences = [

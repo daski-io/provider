@@ -31,6 +31,19 @@ function memberNames(body) {
 
 const literals = (source, pattern) => new Set([...source.matchAll(pattern)].map((match) => match[1]));
 
+/** The documented cap on the skill entrypoint, `SKILL.md`, in lines. */
+export const SKILL_MAX_LINES = 180;
+
+/**
+ * Lines in a text file as an editor counts them: LF, CRLF and CR each end a
+ * line, and one final line break ends the last line rather than starting
+ * another, so a newline-terminated 180-line file has 180 lines.
+ */
+export function countLines(text) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  return normalized === "" ? 0 : normalized.replace(/\n$/, "").split("\n").length;
+}
+
 /** The reviewed outbound HTTP helpers a product client uses instead of `fetch`. */
 const OUTBOUND_MODULES = ["outboundHttp.ts", "pinnedHttp.ts", "reviewedEndpoint.ts"]
   .map((name) => `src/core/security/${name}`);

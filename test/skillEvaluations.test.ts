@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { findUnknownAdapterReferences, readAdapterApi } from "../scripts/skill-rules.mjs";
+import { countLines, findUnknownAdapterReferences, readAdapterApi, SKILL_MAX_LINES } from "../scripts/skill-rules.mjs";
 
 interface EvaluationCase {
   id: string;
@@ -70,7 +70,7 @@ describe("provider skill evaluation briefs", () => {
     const skill = readFileSync(".agents/skills/daski-provider/SKILL.md", "utf8").replaceAll("\r\n", "\n");
     const version = /^ {2}version: "([^"]+)"$/m.exec(skill)?.[1];
     expect(version).toBe((JSON.parse(readFileSync("package.json", "utf8")) as { version: string }).version);
-    expect(skill.split("\n").length).toBeLessThanOrEqual(180);
+    expect(countLines(skill)).toBeLessThanOrEqual(SKILL_MAX_LINES);
     expect(existsSync("src/services/synthetic-audit/upstream.ts")).toBe(true);
     expect(readFileSync("src/services/synthetic-audit/config.ts", "utf8")).toMatch(/https:\/\/[a-z.]+\.example\//);
   });

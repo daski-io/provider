@@ -7,6 +7,8 @@ export interface AdapterApi {
   outboundHelpers: Set<string>;
 }
 
+export const SKILL_MAX_LINES: number;
+export function countLines(text: string): number;
 export function readAdapterApi(root: string): AdapterApi;
 export function findUnknownAdapterReferences(text: string, api: AdapterApi): string[];
 export function findRoutingContradictions(text: string): string[];

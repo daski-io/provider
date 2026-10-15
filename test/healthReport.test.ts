@@ -29,8 +29,10 @@ import {
 } from "../src/core/health.js";
 import { clearSalesStopsForTests, stopNewSales } from "../src/core/standardRail/salesStops.js";
 
-const syncService = (ready = true) => ({ adapter: {}, readiness: async () => ready });
-const jobService = () => ({ adapter: { mode: "external-job" }, readiness: async () => true });
+const syncService = (ready = true, skills: Array<Record<string, unknown>> = [{}]) => ({
+  adapter: {}, skills, readiness: async () => ready,
+});
+const jobService = () => ({ adapter: { mode: "external-job" }, skills: [{}], readiness: async () => true });
 
 // The provider's own state as the three health reads see it.
 function answer(sql: string) {
@@ -43,16 +45,18 @@ function answer(sql: string) {
   throw new Error(`unexpected health query: ${sql}`);
 }
 
-async function getReady(): Promise<{ status: number; body: Record<string, any> }> {
+async function getHealth(path = "ready"): Promise<{ status: number; body: Record<string, any>; ms: number }> {
   const server = express().use("/health", healthRouter).listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
-    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/health/ready`);
-    return { status: response.status, body: await response.json() as Record<string, any> };
+    const started = Date.now();
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/health/${path}`);
+    return { status: response.status, body: await response.json() as Record<string, any>, ms: Date.now() - started };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
+const getReady = () => getHealth("ready");
 
 // C05: routing follows read serviceability; new-sale readiness and the
 // worker's servicing health are reported beside it and never take funded
@@ -152,6 +156,51 @@ describe("/health/ready separates reads, admission and servicing", () => {
       status: "degraded",
       codes: ["external_job_overdue", "legacy_executions_pending"],
     });
+  });
+
+  it("answers routing quickly while a product readiness probe hangs", async () => {
+    mocks.getAllServices.mockReturnValue([{ adapter: {}, skills: [{}], readiness: () => new Promise(() => undefined) }]);
+    const { status, body, ms } = await getReady();
+    expect(status).toBe(200);
+    expect(ms).toBeLessThan(2_000);
+    expect(body.reads.status).toBe("ok");
+    expect(body.admission).toEqual({ status: "stopped", codes: ["readiness_pending"] });
+  });
+
+  it("reports the probe's result once it completes, never a stale generation's", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getAllServices.mockReturnValue([{ adapter: {}, skills: [{}], readiness: () => new Promise(() => undefined) }]);
+      const first = healthReport();
+      await vi.advanceTimersByTimeAsync(300);
+      expect((await first).admission.codes).toEqual(["readiness_pending"]);
+      // The bounded product probe gives up after three seconds: not ready.
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect((await healthReport()).admission).toEqual({ status: "stopped", codes: ["service_unready"] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps routing on the last known epoch through a transient read error, and opens /health/admission only when open", async () => {
+    expect((await getHealth("admission")).status).toBe(200);
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM provider_schema_epoch")) throw new Error("statement timeout");
+      return answer(sql);
+    });
+    const later = await healthReport(Date.now() + 60_000);
+    expect(later.reads).toEqual({ status: "ok", codes: [] });
+
+    resetHealthCachesForTests();
+    mocks.getAllServices.mockReturnValue([syncService(true, [{ acceptingNewOrders: false }, {}])]);
+    mocks.query.mockImplementation(async (sql: string) => answer(sql));
+    const paused = await getHealth("admission");
+    expect(paused.status).toBe(503);
+    expect(paused.body.admission).toEqual({ status: "limited", codes: ["sales_paused"] });
+    // Never read successfully: the database cannot be judged.
+    resetHealthCachesForTests();
+    mocks.query.mockRejectedValue(new Error("statement timeout"));
+    expect((await healthReport()).reads).toEqual({ status: "unavailable", codes: ["database_unavailable"] });
   });
 
   it("issues only reads of the provider's own state", async () => {

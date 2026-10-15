@@ -47,7 +47,8 @@ describe("doctor database mode without a usable database", () => {
     expect(report.database).toBe("unavailable");
     expect(diagnostics).toMatchObject({ status: "fail" });
     expect(diagnostics?.message).toContain("not performed");
-    expect(diagnostics?.message).toContain("ECONNREFUSED");
+    // Refused on most hosts; a host that drops the packet times out instead.
+    expect(diagnostics?.message).toMatch(/could not be read \((?:ECONNREFUSED|ETIMEDOUT|unknown)\)/);
     expect(report.checks.map((item) => item.code)).not.toContain("DATABASE_SCHEMA_EPOCH");
     for (const value of [password, secret, "127.0.0.1:1"]) {
       expect(`${result.stdout}${result.stderr}`).not.toContain(value);

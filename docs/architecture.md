@@ -404,9 +404,15 @@ and for external-job services the async-admission switch, the encryption
 key and this process's worker); the quote route and new synchronous
 dispatches refuse in-process while it is stopped. `servicing` reports the
 worker's codes and pre-R1 executions awaiting the cutover. All three come
-from cached reads of in-process state and three SELECTs; none calls a
-product. `/health/live` has no dependency, so a slow upstream job never
-restarts the process.
+from cached in-process state and a few SELECTs, and the answer never waits
+on a product: a sales-readiness probe still running after a quarter second
+(it may wait up to three seconds on a product) is reported from its last
+completed result while it finishes. Concurrent readiness checks share one
+probe, and a probe that began before an identity or rail change is never
+cached. `/health/admission` repeats the report with a status code for new
+sales (200 only while admission is open) for alerting and release gating.
+`/health/live` has no dependency, so a slow upstream job never restarts the
+process.
 
 `npm run doctor` is offline by default. `--database` runs the same build's
 checks against PostgreSQL in one `READ ONLY` snapshot that is rolled back:
@@ -456,7 +462,7 @@ user. Hosting configuration is intentionally left to the provider fork.
 
 ## Public surfaces
 
-- `/health`, `/health/live`, `/health/ready`
+- `/health`, `/health/live`, `/health/ready`, `/health/admission`
 - `/.well-known/agent.json`
 - `/.well-known/agent-registration.json`
 - `/agent-cards/<slug>.json`

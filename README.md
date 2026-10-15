@@ -217,6 +217,8 @@ process exists. `/health/ready` passes while funded orders' status and
 artifact reads can be served; its `admission` part says whether new sales are
 taken and its `servicing` part reports owed work
 ([Troubleshooting](docs/troubleshooting.md#reading-healthready)).
+`/health/admission` answers 200 only while new sales are open: alert on it,
+and gate a release's promotion on it when its sales were already open.
 
 This minimal starter does not self-register or submit chain transactions.
 Daski onboarding supplies a reviewed runtime bundle and matching global policy.

@@ -69,8 +69,9 @@ legal, compliance, custody, incident-response, or business-continuity program.
   and runtime principals.
 - Expose stable HTTPS through a reviewed reverse proxy and edge rate limiter.
 - Keep one active application replica for this minimal runtime and route
-  traffic only while `/health/ready` passes (read serviceability; new sales
-  stop in-process when its `admission` part is not `open`).
+  traffic only while `/health/ready` passes (read serviceability). New
+  sales stop in-process: all of them while its `admission` part is
+  `stopped`, the named listings or modes while it is `limited`.
 - Separate Testnet and Mainnet wallets, databases, origins, product accounts,
   and Daski-issued artifacts.
 - Run the documented type, lint, architecture, docs, skill, test, audit, build,

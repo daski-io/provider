@@ -206,8 +206,18 @@ answers in three parts, and only the first decides its status code:
 - `admission` (`open`, `limited` or `stopped`): whether new sales are
   taken. The process refuses new quotes itself while admission is stopped,
   so a product, chain or worker outage never takes reads off the network.
+  It covers process-wide prerequisites, paused skills and drifted listings;
+  a listing at capacity or with an invalid result mapping refuses quotes
+  with that `reason` without changing it.
 - `servicing` (`ok` or `degraded`): owed work that needs attention (see the
   next section). It never changes the status code.
+
+`/health/ready` never waits on a product: if a readiness probe is still
+running after a quarter second, admission reports the last completed probe
+(`readiness_pending` before the first). `/health/admission` returns the same
+report with 200 only while admission is `open`; use it for alerting and to
+gate promotion of a release whose sales were already open, never for routing
+(the first async-admission activation needs the new build running first).
 
 | Part | Code | Meaning and fix |
 | --- | --- | --- |
@@ -216,10 +226,12 @@ answers in three parts, and only the first decides its status code:
 | admission | `identity_unverified` | The provider wallet/ERC-8004 binding check is failing or stale (`READINESS_MAX_AGE_SECONDS`): RPC reachability, wallet and agent id. |
 | admission | `rail_unverified` | Standard-rail chain/evidence verification is failing or stale: RPC, reviewed code hashes, contract coordinates, finality. |
 | admission | `no_services` | No service is registered in `src/providerServices.ts`. |
+| admission | `readiness_pending` | The first readiness probe has not finished yet (a product check can take up to three seconds); retry. |
 | admission | `service_unready` | A service's bounded `readiness` check returned false, threw or timed out: the product dependency. |
+| admission | `sales_paused` | A skill declares `acceptingNewOrders: false`; its quotes answer `sales_paused`. |
 | admission | `contract_drift` | Some listing versions stopped for drift (see "Global policy or runtime bundle is rejected"). |
-| admission | `async_admission_off` | An external-job service is installed but the switch is off (`npm run daski:async-admission`). |
-| admission | `encryption_key_missing` | An external-job service is installed but `PROVIDER_DATA_ENCRYPTION_KEY` is not set. |
+| admission | `async_admission_off` | An external-job service is installed but the switch is off (`npm run daski:async-admission`). Funded external-job dispatches not yet admitted are refused too (retryably). |
+| admission | `encryption_key_missing` | An external-job service is installed but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; as for the switch, unadmitted funded external-job dispatches are refused. |
 | admission | `external_job_worker_stopped` | This process's external-job worker is not claiming work; external-job sales stop. |
 
 `admission.status` is `stopped` when nothing can be sold (complete

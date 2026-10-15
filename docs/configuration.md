@@ -80,6 +80,15 @@ recreated after the data. Managed snapshots and superuser dumps are
 unaffected. Never set the marker at role or database level
 (`ALTER ROLE/DATABASE ... SET`): that would admit pre-R1 processes too.
 
+`npm run doctor -- --database` is an opt-in, read-only diagnostic session:
+it connects with `DATABASE_URL`, its startup options carry the epoch marker
+and `default_transaction_read_only=on`, and every check runs in one
+`REPEATABLE READ READ ONLY` transaction that is rolled back, so PostgreSQL
+itself refuses any write. Run it with the deployment's configuration (it
+judges handlers and keys against it). The runtime principal is enough for
+every check except the migration-ledger comparison, which it reports as not
+performed (`docs/troubleshooting.md`).
+
 ## Chain and identity
 
 | Variable | Purpose and rule |

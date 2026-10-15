@@ -16,7 +16,7 @@ import { ExternalJobWorker } from "./core/externalJobs/worker.js";
 import { BUILD_CAPABILITIES, registerRuntimeInstance, RUNTIME_INSTANCE_ID } from "./core/runtimeInstance.js";
 import { errorExtra, logError, logInfo, logWarn } from "./core/logger.js";
 import { stopSalesOnCommitmentDrift } from "./core/gatewayRegistration/commitmentDriftBoot.js";
-import { setServicingHealthSource } from "./core/health.js";
+import { setExternalJobSalesSource, setServicingHealthSource } from "./core/health.js";
 import { startServer, stopServer } from "./core/server.js";
 import { registerService } from "./core/serviceRegistry/registry.js";
 import {
@@ -108,6 +108,7 @@ async function main(): Promise<void> {
   worker.start();
   const running = worker;
   setServicingHealthSource(() => running.health());
+  setExternalJobSalesSource(() => ({ activeKey: jobKeys.activeKeyId !== null, workerRunning: running.running() }));
   await startServer(standard, worker.runtime(config.PROVIDER_AGENT_ID.toString()));
 
   process.on("SIGTERM", () => void shutdown("SIGTERM", 0));

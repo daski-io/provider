@@ -44,9 +44,10 @@ describe("doctor", () => {
     const report = JSON.parse(result.stdout) as {
       schemaVersion: number;
       stage: string;
-      checks: Array<{ code: string }>;
+      database: string;
+      checks: Array<{ code: string; status: string }>;
     };
-    expect(report.schemaVersion).toBe(1);
+    expect(report.schemaVersion).toBe(2);
     expect(report.stage).toBe("testnet");
     expect(report.checks.map((item) => item.code)).toEqual(expect.arrayContaining([
       "NODE_VERSION",
@@ -55,7 +56,39 @@ describe("doctor", () => {
       "STANDARD_RAIL_ARTIFACTS",
       "DEPENDENCIES_INSTALLED",
     ]));
+    // L-T20: offline, database checks are reported as not performed, never as passed.
+    expect(report.database).toBe("not_performed");
+    expect(report.checks.find((item) => item.code === "DATABASE_DIAGNOSTICS")?.status).toBe("skip");
+    expect(report.checks.map((item) => item.code)).not.toContain("DATABASE_SCHEMA_EPOCH");
     expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
+  });
+
+  it("documents the opt-in database mode", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/doctor.mjs", "--help"],
+      { cwd: process.cwd(), env: environment, encoding: "utf8" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("--database");
+    expect(result.stdout).toContain("read-only");
+  });
+
+  it("flags Mainnet blockers, including a composed synthetic example", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/doctor.mjs", "--stage=mainnet", "--json"],
+      { cwd: process.cwd(), env: environment, encoding: "utf8" },
+    );
+    expect(result.status).toBe(1);
+    const checks = new Map((JSON.parse(result.stdout) as {
+      checks: Array<{ code: string; status: string }>;
+    }).checks.map((item) => [item.code, item.status]));
+    expect(checks.get("DUMMY_SERVICE_REMOVED")).toBe("fail");
+    // The synthetic audit is a Testnet example; this checkout does not compose it.
+    expect(checks.get("SYNTHETIC_EXAMPLE_NOT_COMPOSED")).toBe("pass");
+    expect(checks.get("MAINNET_WHITELIST_REQUIRED")).toBe("warn");
+    expect(result.stdout).not.toContain(secret);
   });
 
   it("rejects an unknown stage with usage-error status", () => {

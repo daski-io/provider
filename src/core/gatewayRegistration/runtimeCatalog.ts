@@ -2,6 +2,7 @@ import type { Address, Hex } from "viem";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { pool } from "../db/pool.js";
+import type { Queryable } from "../db/queryable.js";
 import type { RuntimeListingCommitmentV1 } from "./runtimeCommitment.js";
 import type {
   PreparedListing,
@@ -168,7 +169,7 @@ export async function loadRuntimeListingHeads(
  */
 export async function loadRuntimeListingVersions(
   gatewayOrigin?: string,
-  database: Pick<Pool, "query"> = pool,
+  database: Queryable = pool,
 ): Promise<RuntimeListingVersion[]> {
   const result = await database.query<{
     gateway_origin: string;

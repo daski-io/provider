@@ -260,6 +260,7 @@ const queue = [
   "src/installRuntimeBundle.ts",
   "src/upgradeCutover.ts",
   "src/activateAsyncAdmission.ts",
+  "src/doctorDatabase.ts",
   "src/core/security/outboundHttp.ts",
   "src/core/security/reviewedEndpoint.ts",
   "src/core/suppliers/operationJournal.ts",
@@ -296,6 +297,29 @@ for (const file of sourceFiles) {
     path !== "src/core/standardRail/asyncAdmissionActivation.ts"
     && /UPDATE\s+provider_async_admission/i.test(source)
   ) failures.push(`${path} must not write the async-admission switch`);
+}
+
+// The doctor's database mode (L08) is read-only: it runs in a READ ONLY
+// snapshot, and neither it nor its checks reach the migration runner, the
+// bundle importer, the cutover resolution or the activation, or name a
+// writing statement.
+const DIAGNOSTIC_SOURCES = [
+  "src/doctorDatabase.ts",
+  ...files(join(root, "src/core/diagnostics")).map(projectPath),
+];
+for (const path of DIAGNOSTIC_SOURCES) {
+  // Judge code, not its prose: comments may describe what PostgreSQL refuses.
+  const source = read(path).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  if (/\b(?:runMigrations|prepareProviderDatabase|configureRuntimePrivileges|resolveLegacyExecutions|installRuntimeBundle|activateAsyncAdmission|deactivateAsyncAdmission|promoteRuntime\w*)\b/.test(source)) {
+    failures.push(`${path} must not reach a migration, import, cutover or activation step`);
+  }
+  if (/\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|TRUNCATE|CREATE\s+(?:TABLE|INDEX|FUNCTION|TRIGGER)|ALTER\s+(?:TABLE|ROLE|DATABASE|SCHEMA)|DROP\s+|GRANT\s|REVOKE\s)/i.test(source)) {
+    failures.push(`${path} must issue reads only`);
+  }
+}
+if (!/READ ONLY/.test(read("src/core/diagnostics/readOnlySession.ts"))
+  || !/default_transaction_read_only=on/.test(read("src/core/diagnostics/readOnlySession.ts"))) {
+  failures.push("the doctor's database session must be read-only");
 }
 
 if (!/^\* text=auto eol=lf\s*$/m.test(read(".gitattributes"))) {

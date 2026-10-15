@@ -76,6 +76,28 @@ const bytes32 = (value: string, name: string, nonzero = false): Hex => {
   return normalized as Hex;
 };
 
+/**
+ * The gateway origin that scopes the runtime catalog and the gateway
+ * audience every claim is keyed by: STANDARD_RAIL_GATEWAY_ORIGIN (else
+ * GATEWAY_BASE_URL) and STANDARD_RAIL_GATEWAY_AUDIENCE (else that origin).
+ */
+export function resolveGatewayIdentity(env: NodeJS.ProcessEnv): {
+  gatewayOrigin: string;
+  gatewayAudience: string;
+} {
+  const parsed = new URL(
+    env.STANDARD_RAIL_GATEWAY_ORIGIN?.trim() || need(env, "GATEWAY_BASE_URL"),
+  );
+  if (
+    parsed.protocol !== "https:" || parsed.username || parsed.password ||
+    parsed.pathname !== "/" || parsed.search || parsed.hash
+  ) throw new Error("STANDARD_RAIL_GATEWAY_ORIGIN must be a credential-free HTTPS origin");
+  return {
+    gatewayOrigin: parsed.origin,
+    gatewayAudience: env.STANDARD_RAIL_GATEWAY_AUDIENCE?.trim() || parsed.origin,
+  };
+}
+
 export async function loadProviderStandardRailConfig(
   launchPolicy: ProviderOutcomeLaunchPolicy,
   env: NodeJS.ProcessEnv = process.env,
@@ -106,17 +128,7 @@ export async function loadProviderStandardRailConfig(
   const environment =
     env.STANDARD_RAIL_ENVIRONMENT?.trim() || (chainId === 8453 ? "mainnet" : "testnet");
   const gatewaySigner = getAddress(need(env, "STANDARD_RAIL_GATEWAY_SIGNER"));
-  const gatewayOrigin = (() => {
-    const parsed = new URL(
-      env.STANDARD_RAIL_GATEWAY_ORIGIN?.trim() || need(env, "GATEWAY_BASE_URL"),
-    );
-    if (
-      parsed.protocol !== "https:" || parsed.username || parsed.password ||
-      parsed.pathname !== "/" || parsed.search || parsed.hash
-    ) throw new Error("STANDARD_RAIL_GATEWAY_ORIGIN must be a credential-free HTTPS origin");
-    return parsed.origin;
-  })();
-  const gatewayAudience = env.STANDARD_RAIL_GATEWAY_AUDIENCE?.trim() || gatewayOrigin;
+  const { gatewayOrigin, gatewayAudience } = resolveGatewayIdentity(env);
   const reviewedPaidSkills = new Set(launchPolicy.paidSkills.map((skill) =>
     `${skill.serviceSlug}:${skill.skillId}`));
   if (reviewedPaidSkills.size !== launchPolicy.paidSkills.length) {

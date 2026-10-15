@@ -17,6 +17,11 @@ export function salesStopFor(listingManifestHash: Hex): SalesStopReason | null {
   return stops.get(listingManifestHash.toLowerCase()) ?? null;
 }
 
+/** The distinct reasons some listing's new sales are stopped (health reports them). */
+export function activeSalesStopReasons(): SalesStopReason[] {
+  return [...new Set(stops.values())].sort();
+}
+
 export function clearSalesStopsForTests(): void {
   stops.clear();
 }

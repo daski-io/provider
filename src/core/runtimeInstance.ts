@@ -30,6 +30,12 @@ export const BUILD_CAPABILITIES: Readonly<RuntimeCapabilities> = {
 export const INSTANCE_HEARTBEAT_MS = 15_000;
 /** An instance whose heartbeat is older than this is not counted as running. */
 export const INSTANCE_LIVENESS_SECONDS = 45;
+/**
+ * A running instance's external-job worker records its own heartbeat about
+ * every 15 seconds (worker.ts); one silent for longer than this (counted
+ * from the instance's start before its first) has stopped claiming work.
+ */
+export const WORKER_HEARTBEAT_MAX_AGE_SECONDS = 60;
 
 export interface LiveRuntimeInstance {
   instanceId: string;

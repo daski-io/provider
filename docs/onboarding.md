@@ -125,11 +125,16 @@ bundle from Daski, not a local edit.
 
 ```bash
 npm run doctor -- --stage=testnet
+npm run doctor -- --stage=testnet --database
 ```
 
-Fix every failure. Then boot the deployed provider and verify
-`/health/ready`, discovery documents, public legal/support fields, installed
-service/skill ids, and `/standard-rail/outcomes` against the reviewed packet.
+Fix every failure. The `--database` run reads the deployment database
+read-only: the schema epoch, the installed runtime catalog against the
+installed paid skills, retained obligations and, for external jobs, the
+async-admission switch and running workers. Then boot the deployed provider
+and verify that `/health/ready` reports `reads` ok and `admission` open,
+discovery documents, public legal/support fields, installed service/skill
+ids, and `/standard-rail/outcomes` against the reviewed packet.
 
 Doctor is local and read-only. It does not prove the external listing,
 whitelist, wallet balance, public reachability, or a paid journey.

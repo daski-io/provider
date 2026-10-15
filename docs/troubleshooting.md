@@ -5,9 +5,23 @@ Start with a redacted diagnostic report:
 ```bash
 npm run doctor -- --stage=testnet
 npm run doctor -- --stage=testnet --json
+npm run doctor -- --stage=testnet --database --json
 ```
 
-Doctor performs no mutations or network calls. Do not paste `.env` to support.
+Doctor performs no mutations and no network calls. By default it is offline
+and reports `DATABASE_DIAGNOSTICS` as `skip`: database checks were not
+performed, which is never a pass. With `--database` it also connects with
+`DATABASE_URL` and runs this build's checks in one `READ ONLY` snapshot that
+is rolled back; it never migrates, imports a bundle, activates async
+admission or writes a row, and it reports counts and opaque references
+(task and instance ids), never inputs, job references, URLs or key values.
+The JSON report (`schemaVersion: 2`) carries `database`: `not_performed`,
+`performed` or `unavailable`, and each check's status is `pass`, `warn`,
+`fail` or `skip`. The database checks judge the database against the
+configuration the doctor runs with, so run them with the deployment's
+environment. Inside the production image, which ships no `scripts/`, `node
+dist/doctorDatabase.js` prints the same database report. Do not paste `.env`
+to support.
 
 ## Doctor codes
 
@@ -17,11 +31,23 @@ Doctor performs no mutations or network calls. Do not paste `.env` to support.
 | `ENV_FILE` | `.env` is absent. | Copy `.env.example` to `.env`; never commit it. |
 | `CONFIG_REQUIRED` | Required common variables are missing or obvious placeholders. | Use `docs/configuration.md` and fill only provider-owned values; obtain Daski-owned values through onboarding. |
 | `STANDARD_RAIL_ARTIFACTS` | A Testnet/Mainnet rail binding is missing. | Install one complete reviewed Daski set; do not invent or mix values. |
-| `RUNTIME_BUNDLE_REQUIRED` | Doctor deliberately does not inspect or mutate the runtime catalog. | Install each Daski-issued service bundle with `npm run daski:install-runtime -- --file <path>`. |
+| `RUNTIME_BUNDLE_REQUIRED` | Doctor never installs a bundle; only `--database` reads the catalog (`RUNTIME_CATALOG`). | Install each Daski-issued service bundle with `npm run daski:install-runtime -- --file <path>`. |
 | `DEPENDENCIES_INSTALLED` | `node_modules` is absent. | Run `npm ci` with Node 24. |
 | `MAINNET_RUNTIME` | Mainnet production, chain, database TLS/roles, proxy, or edge posture is incomplete. | Complete the Mainnet checklist in `docs/onboarding.md`. |
 | `DUMMY_SERVICE_REMOVED` | The Testnet-only dummy is still present. | Replace and remove it before Mainnet. |
+| `SYNTHETIC_EXAMPLE_NOT_COMPOSED` | `src/providerServices.ts` composes the Testnet-only synthetic audit. | Compose your own external-job service; the example has a fake product and refuses Base Mainnet. |
 | `MAINNET_WHITELIST_REQUIRED` | Manual Daski approval cannot be checked locally. | Request whitelisting through Discord after Testnet completion. |
+| `DATABASE_DIAGNOSTICS` | `skip`: offline run, database checks not performed. `pass`: the read-only snapshot ran. `fail`: they could not run (invalid configuration, named by variable only; unreachable database, named by its error code). | Add `--database`; fix the configuration or `DATABASE_URL` reachability, credentials and TLS. |
+| `DATABASE_SCHEMA_EPOCH` | The database's schema epoch is not this build's (0 is the pre-R1 schema), or the legacy-process barrier is incomplete. | Follow the cutover in `docs/onboarding.md`, or run a build that supports the epoch; restore a damaged barrier from migration 005. |
+| `DATABASE_MIGRATIONS` | Migrations are pending (`warn`; boot or the cutover applies them), the ledger names one this build does not ship or a changed checksum (`fail`), or the role cannot read the ledger (`skip`; the runtime principal never can). | Roll forward; never edit an applied migration. Run as the schema owner to compare checksums. |
+| `ASYNC_ADMISSION` | The switch is off while an external-job service is installed (`warn`). | Activate it after the cutover (`npm run daski:async-admission -- --activate`). |
+| `RUNTIME_INSTANCES` | A running instance is at another schema epoch or has no external-job worker, or its worker heartbeat is older than 60 seconds. | Stop older processes; restart a stalled one. |
+| `LEGACY_EXECUTIONS` | Pre-R1 executions are still `executing` without a lease (task ids listed). | Reconcile their product mutations, then `npm run daski:cutover -- --resolve-legacy --old-processes-stopped`. |
+| `SYNC_EXECUTION_LEASES` | Synchronous executions hold expired leases (`warn`); a running process fails them as `provider_execution_abandoned`. | Start a compatible process if none runs; reconcile before retrying a mutation. |
+| `SUPPLIER_OPERATIONS` | Supplier-journal entries are still `intent` or `ambiguous`. | Reconcile against the product's authoritative state; never repeat a mutation blindly. |
+| `EXTERNAL_JOBS` | Unfinished external jobs raise the servicing codes below (`fail` for a missing handler or key or an invalid result, `warn` otherwise); without a heartbeating worker they also raise `external_job_worker_stopped`. | See "External-job servicing health". |
+| `RUNTIME_CATALOG` | An installed paid skill has no promoted runtime listing yet (`warn`), or the catalog or standard-rail configuration does not load (`fail`). | Install the Daski-issued bundle; never edit catalog rows. |
+| `RETAINED_OBLIGATIONS` | This build could not service an obligation it would take over (same reasons as the boot refusal below), or the check was not performed for missing standard-rail values (`skip`). | See the reasons table below; never delete claims or quotes. |
 
 Warnings are not permissions. `MAINNET_WHITELIST_REQUIRED` remains a manual
 release gate even when every machine check passes.
@@ -159,36 +185,67 @@ off unless every check in its JSON report passes:
 | `compatibility barrier is incomplete` | A barrier trigger was disabled or dropped, or `_migrations` lost its forced row security. Restore it from migration 005; never boot with it removed. |
 | `database sessions do not carry this build's runtime-epoch marker` | The runtime connections lost the marker (see `docs/configuration.md`). |
 
-## `/health/live` passes but `/health/ready` fails
+## Reading `/health/ready`
 
-Liveness only proves the process exists. Readiness fails closed when the
-database, provider identity, or standard-rail chain/evidence posture is stale
-or invalid. Check structured application logs by event/error class, then verify:
+Liveness (`/health/live`) only proves the process exists. `/health/ready`
+answers in three parts, and only the first decides its status code:
 
-- PostgreSQL connectivity;
-- chain/RPC network and reviewed code hashes;
-- provider wallet/agent ownership binding;
-- runtime-listing/evidence coordinates and finality;
-- public origin/audience agreement; and
-- product readiness if your service adds a dependency check.
+```json
+{
+  "status": "ready",
+  "checkedAt": "<ISO time>",
+  "reads": { "status": "ok", "codes": [] },
+  "admission": { "status": "open", "codes": [] },
+  "servicing": { "status": "ok", "codes": [] }
+}
+```
 
-Do not route paid traffic based on liveness.
+- `reads` (the status code: 200 `ready`, else 503 `not_ready`): whether this
+  process can serve funded orders' persisted status and artifact reads and
+  their dispatch reconciliation. Route traffic on it.
+- `admission` (`open`, `limited` or `stopped`): whether new sales are
+  taken. The process refuses new quotes itself while admission is stopped,
+  so a product, chain or worker outage never takes reads off the network.
+- `servicing` (`ok` or `degraded`): owed work that needs attention (see the
+  next section). It never changes the status code.
+
+| Part | Code | Meaning and fix |
+| --- | --- | --- |
+| reads, admission | `database_unavailable` | PostgreSQL does not answer; see "PostgreSQL is unreachable". |
+| reads, admission | `schema_epoch_unsupported` | The database's schema epoch is not this build's (a newer incompatible build migrated it). Run a build that supports it; never lower the epoch. |
+| admission | `identity_unverified` | The provider wallet/ERC-8004 binding check is failing or stale (`READINESS_MAX_AGE_SECONDS`): RPC reachability, wallet and agent id. |
+| admission | `rail_unverified` | Standard-rail chain/evidence verification is failing or stale: RPC, reviewed code hashes, contract coordinates, finality. |
+| admission | `no_services` | No service is registered in `src/providerServices.ts`. |
+| admission | `service_unready` | A service's bounded `readiness` check returned false, threw or timed out: the product dependency. |
+| admission | `contract_drift` | Some listing versions stopped for drift (see "Global policy or runtime bundle is rejected"). |
+| admission | `async_admission_off` | An external-job service is installed but the switch is off (`npm run daski:async-admission`). |
+| admission | `encryption_key_missing` | An external-job service is installed but `PROVIDER_DATA_ENCRYPTION_KEY` is not set. |
+| admission | `external_job_worker_stopped` | This process's external-job worker is not claiming work; external-job sales stop. |
+
+`admission.status` is `stopped` when nothing can be sold (complete
+readiness failed, or every installed service is an external-job service
+whose sales stopped), `limited` when only some listings or modes stopped,
+and `open` otherwise. Check structured application logs by event/error
+class for the cause; do not route paid traffic based on liveness.
 
 ## External-job servicing health
 
-`/health/ready` also reports `servicing: {status: "ok" | "degraded", codes}`
-for the external-job worker of this process and the unfinished jobs it
-inspects every 15 seconds (SELECT only; counts appear in the log line
-`External-job servicing health changed`, never inputs, references or keys).
-Servicing health never changes the readiness status code: a stopped worker
-stops new external-job quotes (`external_jobs_unavailable`) but persisted
-status and artifact reads stay routable, and a slow upstream job is never a
-reason to restart the process. A worker waiting hours on a pending job,
-heartbeating (`provider_runtime_instances.worker_heartbeat_at`) with the
-job's next poll scheduled, reports no code.
+`/health/ready` reports `servicing: {status: "ok" | "degraded", codes}` for
+the external-job worker of this process and the unfinished jobs it inspects
+every 15 seconds (SELECT only; counts appear in the log line `External-job
+servicing health changed`, never inputs, references or keys), plus
+`legacy_executions_pending`. Servicing health never changes the readiness
+status code: a stopped worker stops new external-job quotes
+(`external_jobs_unavailable`) but persisted status and artifact reads stay
+routable, and a slow upstream job is never a reason to restart the process.
+A worker waiting hours on a pending job, heartbeating
+(`provider_runtime_instances.worker_heartbeat_at`) with the job's next poll
+scheduled, reports no code. `npm run doctor -- --database` reports the same
+conditions for the whole database (see the doctor codes above).
 
 | Code | Meaning | Remedy |
 | --- | --- | --- |
+| `legacy_executions_pending` | Rows a pre-R1 image left executing await the stop-and-drain cutover; they show `working`. | Follow `docs/onboarding.md` (`npm run daski:cutover`). |
 | `external_job_worker_stopped` | This process's worker has not completed a claim round for a minute (typically the database is unreachable) or was stopped. | Restore the database or restart the process; due work resumes from PostgreSQL. |
 | `external_job_lease_stale` | A job lease expired more than one lease length ago and nobody reclaimed it. | Check that a compatible worker runs and can resume the job's adapter version (see the next codes). |
 | `external_job_overdue` | Unfinished work is past its fulfillment deadline. It stays `working` and keeps polling or reconciling at the overdue cadence; nothing new is started. | Check the product for the original jobs. Lite cannot close or refund them. |

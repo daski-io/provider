@@ -51,6 +51,7 @@ contains only core and cross-service tests.
 npm run try-skill -- dummy echo "hello"
 npm run dev:db:up
 npm run doctor -- --stage=testnet
+npm run doctor -- --stage=testnet --database
 npm run dev
 npm run typecheck
 npm run typecheck:test
@@ -69,8 +70,9 @@ npm start
 
 Node 24 and PostgreSQL 16+ are required for a running paid provider. The
 offline dummy and unit suite need no database, wallet, RPC, gateway, or product.
-`doctor` is read-only and redacted. A copied `.env.example` cannot boot until
-Daski supplies the reviewed Testnet artifacts.
+`doctor` is read-only and redacted; it is offline unless `--database` asks it
+to read PostgreSQL in a `READ ONLY` snapshot. A copied `.env.example` cannot
+boot until Daski supplies the reviewed Testnet artifacts.
 
 ## Change workflow
 

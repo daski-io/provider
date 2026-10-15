@@ -123,7 +123,11 @@ npm run doctor -- --stage=testnet --json
 Doctor is read-only. It checks the Node release, `.env`, installed dependencies,
 required variable names/placeholders, stage-specific bindings, and Mainnet
 posture. It never migrates, signs, registers, funds, deploys, calls the product,
-or prints configured secret values.
+or prints configured secret values. It is offline unless you add
+`--database`, which also inspects PostgreSQL in a read-only snapshot (schema
+epoch, admission switch, workers, unfinished jobs, catalog and retained
+obligations); without it the report says database checks were not
+performed.
 
 Before onboarding, failures naming `STANDARD_RAIL_*` or contract bindings are
 expected and actionable. See [Troubleshooting](troubleshooting.md).

@@ -91,9 +91,10 @@ npm run doctor -- --stage=testnet
 ```
 
 `doctor` is read-only, emits stable check codes, and never prints secret
-values. A copied `.env.example` is intentionally not bootable: Daski supplies
-a mutually consistent Testnet runtime bundle plus signer, contract, policy,
-and evidence bindings during onboarding.
+values; `--database` adds read-only database diagnostics. A copied
+`.env.example` is intentionally not bootable: Daski supplies a mutually
+consistent Testnet runtime bundle plus signer, contract, policy, and evidence
+bindings during onboarding.
 
 ## How an order reaches your product
 
@@ -185,7 +186,10 @@ does not prescribe a hosting vendor. A deployment needs a
 stable public HTTPS `BASE_URL`, PostgreSQL 16+, runtime-injected secrets,
 outbound Base RPC/product access, and one active application replica. Route
 traffic only when `/health/ready` passes; `/health/live` proves only that the
-process exists.
+process exists. `/health/ready` passes while funded orders' status and
+artifact reads can be served; its `admission` part says whether new sales are
+taken and its `servicing` part reports owed work
+([Troubleshooting](docs/troubleshooting.md#reading-healthready)).
 
 This minimal starter does not self-register or submit chain transactions.
 Daski onboarding supplies a reviewed runtime bundle and matching global policy.

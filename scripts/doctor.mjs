@@ -1,12 +1,17 @@
+import { fork } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const stages = new Set(["local", "testnet", "mainnet"]);
+const statuses = new Set(["pass", "warn", "fail", "skip"]);
+const DATABASE_TIMEOUT_MS = 60_000;
 
 function parseArgs(args) {
-  const options = { stage: "local", json: false, help: false };
+  const options = { stage: "local", json: false, help: false, database: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
+    else if (arg === "--database") options.database = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--stage") options.stage = args[++index];
     else if (arg.startsWith("--stage=")) options.stage = arg.slice(8);
@@ -80,7 +85,7 @@ function diagnostics(stage) {
     checks.push(check(
       "RUNTIME_BUNDLE_REQUIRED",
       "warn",
-      "Doctor does not mutate or inspect the runtime catalog.",
+      "Doctor never installs a runtime bundle; only --database reads the catalog (RUNTIME_CATALOG).",
       "Install the Daski-issued bundle with npm run daski:install-runtime -- --file <path>.",
     ));
   }
@@ -114,6 +119,18 @@ function diagnostics(stage) {
         : "The dummy service is absent.",
       "Replace dummy with the reviewed product service before Mainnet.",
     ));
+    const composition = existsSync("src/providerServices.ts")
+      ? readFileSync("src/providerServices.ts", "utf8")
+      : "";
+    const syntheticComposed = /services\/synthetic-audit/.test(composition);
+    checks.push(check(
+      "SYNTHETIC_EXAMPLE_NOT_COMPOSED",
+      syntheticComposed ? "fail" : "pass",
+      syntheticComposed
+        ? "The Testnet-only synthetic audit example is composed in src/providerServices.ts."
+        : "The synthetic audit example is not composed.",
+      "Compose your own external-job service; the example has a fake product and refuses Base Mainnet.",
+    ));
     checks.push(check(
       "MAINNET_WHITELIST_REQUIRED",
       "warn",
@@ -122,6 +139,71 @@ function diagnostics(stage) {
     ));
   }
   return checks;
+}
+
+/**
+ * The read-only database mode runs src/doctorDatabase.ts in a child process
+ * (TypeScript through tsx, reusing this build's own checks) and receives its
+ * report over IPC; the child's own output is discarded, so nothing it
+ * prints can reach this report.
+ */
+function databaseDiagnostics() {
+  const unavailable = (message, remedy) => ({
+    database: "unavailable",
+    checks: [check("DATABASE_DIAGNOSTICS", "fail", message, remedy)],
+  });
+  let loader;
+  try {
+    loader = import.meta.resolve("tsx");
+  } catch {
+    return Promise.resolve(unavailable(
+      "Database diagnostics were not performed: tsx is not installed.",
+      "Run npm ci in this checkout.",
+    ));
+  }
+  const entry = fileURLToPath(new URL("../src/doctorDatabase.ts", import.meta.url));
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (report) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(report);
+    };
+    const child = fork(entry, [], {
+      execArgv: ["--import", loader],
+      env: process.env,
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(unavailable(
+        `Database diagnostics were not performed: no report within ${DATABASE_TIMEOUT_MS / 1_000} seconds.`,
+        "Check DATABASE_URL reachability and DATABASE_STATEMENT_TIMEOUT_MS.",
+      ));
+    }, DATABASE_TIMEOUT_MS);
+    child.once("message", (message) => finish(validDatabaseReport(message) ? message : unavailable(
+      "Database diagnostics returned an unreadable report.",
+      "Run npm ci, then retry.",
+    )));
+    child.once("error", () => finish(unavailable(
+      "Database diagnostics were not performed: the diagnostic process could not start.",
+      "Run npm ci with Node 24, then retry.",
+    )));
+    child.once("close", () => finish(unavailable(
+      "Database diagnostics were not performed: the diagnostic process stopped before reporting.",
+      "Run npm run typecheck; a build that does not load cannot be diagnosed.",
+    )));
+  });
+}
+
+function validDatabaseReport(report) {
+  return Boolean(report) && typeof report === "object"
+    && (report.database === "performed" || report.database === "unavailable")
+    && Array.isArray(report.checks) && report.checks.length > 0
+    && report.checks.every((item) => item && typeof item.code === "string"
+      && /^[A-Z][A-Z0-9_]{2,63}$/.test(item.code) && statuses.has(item.status)
+      && typeof item.message === "string");
 }
 
 function human(stage, checks) {
@@ -141,13 +223,28 @@ try {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     process.stdout.write(
-      "Usage: npm run doctor -- [--stage local|testnet|mainnet] [--json]\n",
+      "Usage: npm run doctor -- [--stage local|testnet|mainnet] [--database] [--json]\n"
+      + "  --database  also run read-only database diagnostics with DATABASE_URL\n",
     );
   } else {
     const checks = diagnostics(options.stage);
+    let database = "not_performed";
+    if (options.database) {
+      const result = await databaseDiagnostics();
+      database = result.database;
+      checks.push(...result.checks);
+    } else {
+      checks.push(check(
+        "DATABASE_DIAGNOSTICS",
+        "skip",
+        "Database checks were not performed: the doctor ran offline.",
+        "Add --database for read-only database diagnostics with DATABASE_URL.",
+      ));
+    }
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       stage: options.stage,
+      database,
       ok: checks.every((item) => item.status !== "fail"),
       checks,
     };

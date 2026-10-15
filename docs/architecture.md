@@ -387,6 +387,29 @@ meanwhile. Its next boot restores the reviewed grants, except that a reset
 run by a superuser also takes over the schema, which the operator must hand
 back first (`docs/troubleshooting.md`).
 
+## Health and diagnostics
+
+`/health/ready` separates three questions. Its status code is read
+serviceability, the routing signal: PostgreSQL answers and its schema epoch
+is this build's, so funded orders' status, artifact and reconciliation
+calls can be served. `admission` reports why new sales stop (database,
+epoch, identity or rail verification, product readiness, contract drift,
+and for external-job services the async-admission switch, the encryption
+key and this process's worker); the quote route and new synchronous
+dispatches refuse in-process while it is stopped. `servicing` reports the
+worker's codes and pre-R1 executions awaiting the cutover. All three come
+from cached reads of in-process state and three SELECTs; none calls a
+product. `/health/live` has no dependency, so a slow upstream job never
+restarts the process.
+
+`npm run doctor` is offline by default. `--database` runs the same build's
+checks against PostgreSQL in one `READ ONLY` snapshot that is rolled back:
+schema epoch and barrier, migration ledger, async admission, running
+instances and their workers, pre-R1 executions, synchronous leases,
+unresolved supplier mutations, unfinished external jobs, the runtime catalog
+and retained obligations, as counts and opaque references
+(`docs/troubleshooting.md`).
+
 ## Network and process boundary
 
 The server accepts JSON only on the paid POST routes, rejects compressed bodies,

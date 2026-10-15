@@ -1,10 +1,7 @@
-import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { config } from "../config.js";
 import { logError, logInfo } from "../logger.js";
+import { buildMigrations } from "./migrationFiles.js";
 import { withRuntimeEpochMarker } from "./runtimeEpoch.js";
 import { applyRuntimePrivileges } from "./runtimePrivileges.js";
 import { withSessionAdvisoryLock } from "./sessionAdvisoryLock.js";
@@ -56,8 +53,7 @@ export async function checkDatabase(): Promise<boolean> {
 }
 
 export async function runMigrations(): Promise<void> {
-  const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
-  const files = readdirSync(migrationsDir).filter((file) => file.endsWith(".sql")).sort();
+  const migrations = buildMigrations();
   const result = await withSessionAdvisoryLock({
     connect: () => migrationPool.connect(),
     async acquire(client) {
@@ -84,9 +80,7 @@ export async function runMigrations(): Promise<void> {
         "SELECT name, checksum FROM _migrations",
       );
       const checksums = new Map(applied.rows.map((row) => [row.name, row.checksum]));
-      for (const file of files) {
-        const sql = readFileSync(join(migrationsDir, file), "utf8");
-        const checksum = createHash("sha256").update(sql).digest("hex");
+      for (const { name: file, sql, checksum } of migrations) {
         if (checksums.has(file)) {
           if (checksums.get(file) !== checksum) {
             throw new Error(`Applied migration checksum changed: ${file}`);

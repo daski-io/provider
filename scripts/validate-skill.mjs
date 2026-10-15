@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  findEvaluationReferences,
   findRoutingContradictions,
   findUnknownAdapterReferences,
   readAdapterApi,
@@ -69,7 +70,8 @@ for (const forbidden of ["TODO", "TBD", "Documentation unavailable"]) {
 
 // One routing rule (the three paths), stated in the entrypoint and never
 // contradicted anywhere in the package; examples name only adapter members
-// and outcomes the checked-out source declares; no live endpoint.
+// and outcomes the checked-out source declares; nothing points at the
+// evaluation briefs an installed copy lacks; no live endpoint.
 for (const path of ["Lite synchronous", "Lite external job", "Full"]) {
   if (!new RegExp(`^\\| ${path} \\(`, "m").test(source)) failures.push(`SKILL.md path table is missing: ${path}`);
 }
@@ -83,6 +85,7 @@ for (const file of packaged) {
   const text = readFileSync(file, "utf8").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   for (const problem of findRoutingContradictions(text)) failures.push(`${file}: contradictory routing: ${problem}`);
   for (const problem of findUnknownAdapterReferences(text, api)) failures.push(`${file}: ${problem}`);
+  for (const problem of findEvaluationReferences(text)) failures.push(`${file}: ${problem}`);
   for (const match of text.matchAll(/https?:\/\/[^\s)`>"']+/g)) {
     if (!/^https:\/\/(?:github\.com\/daski-io\/(?:provider|provider-full)(?:\.git)?|discord\.gg\/uyeMp7Q2HW|daski\.io|<[a-z-]+)(?:[/#?]|$)/.test(match[0])) {
       failures.push(`${file}: links outside Daski's public repositories and channels: ${match[0]}`);

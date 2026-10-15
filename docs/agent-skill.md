@@ -128,18 +128,18 @@ npm run skill:validate
 npm run docs:check
 ```
 
-The validator normalizes LF/CRLF, checks required frontmatter, reference routes,
-and package contents, keeps the entrypoint concise (at most 180 lines), and
-requires its version to match `package.json`. It also requires the three-path
-table and the published install command, refuses the retired routing
-phrasings that contradict the three paths and code-like references to
-adapter members, outcomes or outbound HTTP helpers the checked-out source
-does not declare (the same heuristic rules `docs:check` applies to the
-repository guides), and
-allows links only to Daski's two public starter repositories, its site and
-its Discord invite. Release CI archives the entire
-skill directory so partners receive the references without copying the
-provider runtime.
+The validator normalizes LF/CRLF, checks required frontmatter, reference
+routes, and package contents, keeps the entrypoint concise (at most 180
+lines), and requires its version to match `package.json`. It also requires the
+three-path table and the published install command, refuses the retired
+routing phrasings that contradict the three paths and code-like references to
+adapter members, outcomes or outbound HTTP helpers the checked-out source does
+not declare (the same heuristic rules `docs:check` applies to the repository
+guides), refuses references to the evaluation briefs an installed copy does
+not include, and allows links only to Daski's two public starter repositories,
+its site and its Discord invite. Release CI archives the entire skill
+directory so partners receive the references without copying the provider
+runtime.
 
 When the repository evolves, update authoritative docs first and change the
 skill only when its routing, decision boundary, or hard stops change.

@@ -58,8 +58,9 @@ gateway, the product or the chain.
   commands, and the consistency rules below in the repository's guides.
 - `scripts/validate-skill.mjs` validates portable skill frontmatter, version,
   size, CRLF handling, routes, the three-path table, the install command, the
-  consistency rules, and that the package links only Daski's public
-  repositories and channels.
+  consistency rules, that the package links only Daski's public repositories
+  and channels, and that it never points at the evaluation briefs (or a
+  "second fixture") an installed copy does not include.
 - `scripts/skill-rules.mjs` holds the shared consistency rules, a heuristic
   list of the retired routing phrasings rather than a parser: a 50-second
   limit not scoped to the synchronous mode, duration or asynchrony as the

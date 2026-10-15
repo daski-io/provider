@@ -10,3 +10,4 @@ export interface AdapterApi {
 export function readAdapterApi(root: string): AdapterApi;
 export function findUnknownAdapterReferences(text: string, api: AdapterApi): string[];
 export function findRoutingContradictions(text: string): string[];
+export function findEvaluationReferences(text: string): string[];

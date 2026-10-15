@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findEvaluationReferences,
   findRoutingContradictions,
   findUnknownAdapterReferences,
   readAdapterApi,
@@ -147,5 +148,25 @@ describe("skill and documentation consistency rules", () => {
       "2. Drain: wait at least 50 seconds (the synchronous budget) plus margin.",
     ].join("\n");
     expect(findRoutingContradictions(text)).toEqual([]);
+  });
+
+  it("flags evaluation fixtures an installed skill cannot see, and accepts the scenario wording", () => {
+    const retired = [
+      "A second fixture: the same audit documented only as a public x402 endpoint.",
+      "Report those gaps; do not infer compatibility from the first fixture.",
+      "Compare with test/fixtures/skill-evaluations/cases.json (case S-T03).",
+    ].join("\n");
+    expect(findEvaluationReferences(retired).sort()).toEqual([
+      'refers to an evaluation fixture an installed skill does not include: "S-T03"',
+      'refers to an evaluation fixture an installed skill does not include: "first fixture"',
+      'refers to an evaluation fixture an installed skill does not include: "second fixture"',
+      'refers to an evaluation fixture an installed skill does not include: "skill-evaluations"',
+    ]);
+    expect(findEvaluationReferences([
+      "Counter-example: the same audit documented only as a public x402 endpoint.",
+      "Do not infer compatibility from the walkthrough above.",
+      "Never make readiness or admission permissive to unblock a fixture or deploy.",
+      "The tested revision is recorded in `test/fixtures/provider-wire.source.json`.",
+    ].join("\n"))).toEqual([]);
   });
 });

@@ -147,12 +147,13 @@ fake audit product with no real endpoint or secret
 6. After about eight hours the report is validated, frozen, and delivered
    through ordinary signed status and artifact reads.
 
-A second fixture: the same audit documented only as a public x402 endpoint.
-It names no way to start work against an already-paid order, no lookup after
-a lost response, and no report retention. Report those gaps; do not infer
-compatibility from the first fixture, promise a direct listing, or spend a
-second payment to probe it. A fake-backed adapter never establishes
-production readiness on its own.
+Counter-example: the same audit documented only as a public x402 endpoint.
+That documentation names no way to start work against an already-paid order,
+no lookup after a lost response, and no report retention. Identify and report
+those payment and recovery gaps; do not infer compatibility from the
+walkthrough above, promise a direct listing, or spend a second payment to
+probe it. A fake-backed adapter never establishes production readiness on its
+own.
 
 ## Tests the implementation needs
 

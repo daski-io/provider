@@ -231,3 +231,17 @@ export function findRoutingContradictions(text) {
   }
   return [...new Set(problems)];
 }
+
+/**
+ * References an installed copy of the skill cannot follow: the evaluation
+ * briefs the package is judged by (their directory or case ids) and test
+ * fixtures named as if the reader had them ("the second fixture"). The
+ * installed package is all its reader has, so such a case is described as a
+ * scenario instead. Only the packaged skill is held to this; the
+ * repository's own guides may link the briefs.
+ */
+export function findEvaluationReferences(text) {
+  const pattern = /skill-evaluations|\bS-T\d{2}\b|\b(?:first|second|third|fourth|another|other|previous|next)\s+fixtures?\b/gi;
+  return [...new Set([...text.matchAll(pattern)].map((match) =>
+    `refers to an evaluation fixture an installed skill does not include: "${match[0]}"`))];
+}

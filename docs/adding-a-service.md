@@ -57,7 +57,8 @@ version (1 to 64 letters, digits, `.`, `_`, `-`), its optional
 their own version, and an explicit `deadlines.fulfillmentSeconds` of at least
 `dispatchSeconds + 180` on every skill. While async admission is active
 (`docs/configuration.md`), a funded external-job dispatch is admitted as one
-queued job and answered `submitted` before any product call; product
+queued job and answered `submitted` (or a later state the worker already
+persisted); the dispatch handler never calls the product, and product
 readiness is not consulted for it (the job waits for the product instead).
 New external-job quotes need the switch on, an active encryption key and a
 running worker in the process; otherwise they answer `503 quote_unavailable`
@@ -292,9 +293,9 @@ coordinated contract and runtime-bundle revision.
 
 Copy `src/services/synthetic-audit` when the product already runs each paid
 operation as its own asynchronous job. The runtime supplies persistence,
-the stable operation key, leases, polling, restart recovery, retained
-adapter versions, encrypted job state and signed status and artifact reads;
-the service supplies only:
+the stable operation key, leases, polling, restart recovery, resumption of
+each job by the adapter version that admitted it, encrypted job state and
+signed status and artifact reads; the service supplies:
 
 1. a manifest and skills with closed input schemas, a fixed price and an
    explicit `deadlines.fulfillmentSeconds` (at least `dispatchSeconds + 180`)
@@ -310,8 +311,12 @@ the service supplies only:
    `src/core/serviceRegistry/adapterTypes.ts`;
 5. an optional read-only `requestReadiness` that declines unacceptable
    requests before payment (a later product outage delays the admitted job;
-   it never refuses a funded one); and
-6. docs and co-located tests with a fake product.
+   it never refuses a funded one), the bounded `readiness` probe, and the
+   reviewed `failureCodes`;
+6. previous adapters in `previousExternalJobAdapters` while jobs they
+   admitted are unfinished (a new `version` whenever the reference format
+   changes); and
+7. docs and co-located tests with a fake product.
 
 Map every product state exactly: a pending job is `pending` (it never spends
 the failure budget), a definitive product failure is `terminal` with a

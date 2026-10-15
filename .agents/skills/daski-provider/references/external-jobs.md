@@ -11,12 +11,12 @@ before relying on anything here, and follow its `docs/adding-a-service.md`.
 | Core runtime (do not rebuild it) | The service adapter (write it) |
 | --- | --- |
 | Verifies the signed dispatch, quote, payer, and payment evidence | Validates the buyer input again |
-| Commits the claim, the queued job, and the encrypted input in one transaction, then answers `submitted` before any product call | `start`: submits the job to the product under core's key |
+| Commits the claim, the queued job, and the encrypted input in one transaction and answers `submitted` (or a later persisted state); the dispatch handler never calls the product | `start`: submits the job to the product under core's key |
 | Derives one stable idempotency key per order and persists it before any call | `recoverStart`: read-only lookup of the original job after an uncertain start |
 | Records the start intent and the replay horizon before the first call | `poll`: read-only look at the original job |
 | Leases, fencing, scheduling, backoff, restart recovery, overdue handling | Maps product states and the report to typed outcomes |
 | Validates and freezes the result; signs status and artifact reads | Pins the product endpoints and validates any URL it stores |
-| Retains adapter versions, encryption keys, and admitted contracts | Declares its `version` and the product's replay retention |
+| Resumes each job with the adapter version, keys, and contract that admitted it | Declares its `version` and replay retention, and keeps old adapters in `previousExternalJobAdapters` while their jobs run |
 
 Never build a private polling server, hold an HTTP request open for the job,
 raise the 50-second synchronous budget, sleep inside an adapter call, or copy
@@ -88,18 +88,19 @@ fulfillment deadline, and never once the start is known to have executed.
 
 ## Pending, overdue, and polling
 
-- `pending` reschedules the next poll after `pollAfterSeconds` (or the
-  configured interval); pending polls never consume the failure budget.
+- `pending` reschedules the next poll after the configured interval, or
+  after `pollAfterSeconds` when the product asks for longer (a hint never
+  shortens it); pending polls never consume the failure budget.
 - `retry` backs off from 15 seconds to 30 minutes; a product's
   `retryAfterSeconds` is always honored as a minimum.
 - The fulfillment deadline (acceptance plus the listing's declared
   `fulfillmentSeconds`) is an overdue threshold, not proof of failure. A job
   that never recorded a start fails as `provider_job_not_started`; started,
   ambiguous, or invalid-result work stays `working`, starts nothing new, and
-  keeps reading the original job at the overdue cadence. A late valid report
-  completes it once. The gateway may report its own deadline failure until it
-  is explicitly revived; nothing refunds, renews payment, or reopens a
-  terminal task.
+  keeps reading the original job no more often than the overdue interval
+  (five minutes by default). A late valid report completes it once. The
+  gateway may report its own deadline failure until it is explicitly
+  revived; nothing refunds, renews payment, or reopens a terminal task.
 - `requestReadiness` runs at quote time only. Mutable availability after
   payment delays the funded job; it is never a second purchase gate.
 
@@ -159,7 +160,8 @@ production readiness on its own.
 - An invalid terminal report is never signed and never restarts the job; a
   repaired mapper recovers the same report.
 - A completion after the deadline completes the task once.
-- Every product state maps exactly; timeouts, 429, and 5xx are `retry`.
+- Every product state maps exactly. Timeouts, 429, and 5xx are `retry`
+  from `poll`, `ambiguous` from `start`, and `unknown` from `recoverStart`.
 - A restart in each phase, a deployment while a job is pending, and a
   compatible upgrade keep one job: retain the old adapter in
   `previousExternalJobAdapters` when the reference format changes, and keep

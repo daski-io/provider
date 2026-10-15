@@ -25,8 +25,8 @@ Use this repository for fixed-price, fully automated operations in one of two
 modes: synchronous (a terminal result within the 50-second synchronous
 budget) or external job (the product already runs the paid work as its own
 job; core admits it durably, starts it under a stable key, recovers a lost
-start by that key and polls it until its report, within the declared
-fulfillment window). Use
+start by that key and polls it until its report, sized to the declared
+fulfillment window and past it as overdue work). Use
 [provider-full](https://github.com/daski-io/provider-full) for dynamic
 pricing, provider-owned multi-step workflows, later input, cancellation,
 assets/actions, human review, email, admin, direct A2A, or multi-replica
@@ -172,8 +172,8 @@ Through the Daski gateway, test at least:
    live call;
 10. readiness failure/recovery for database, identity, rail, and product;
     and
-11. for an external job: the funded dispatch answered `submitted` before any
-    product call, a restart while the job is pending (no second start), a
+11. for an external job: the funded dispatch answered `submitted` without
+    the dispatch handler calling the product, a restart while the job is pending (no second start), a
     lost start answer recovered by the order key, and the report read
     through status and artifact after it completes.
 
@@ -272,8 +272,13 @@ turns it on. To sell an external-job service after the cutover:
 4. Check that `/health/ready` reports `admission` open, then quote through
    the Daski Testnet gateway.
 
-`--deactivate` stops new external-job sales only; admitted jobs keep being
-serviced and read.
+`--deactivate` stops new external-job quotes, and it also refuses (before
+admission, retryably) a funded external-job dispatch that was not admitted
+yet: the gateway re-dispatches such an order until its fulfillment horizon,
+so it is admitted only if the switch is back on by then. Admitted jobs keep
+being serviced and read. To stop selling without stranding a paid order,
+ask Daski to pause the listings first and deactivate only once the open
+quotes (120 seconds) and their first dispatches have settled.
 
 ### Later compatible upgrades
 

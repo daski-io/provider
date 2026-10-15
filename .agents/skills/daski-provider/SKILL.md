@@ -81,14 +81,14 @@ implementation.
 ## Map the product before writing code
 
 Read [Integration brief](references/integration-brief.md) and produce its
-operation mapping: buyer-visible outcome, fixed or dynamic price, closed input
-and result bounds, one reviewed operation per skill, payment mapping,
-runtime and fulfillment duration, idempotency and retention, authoritative
-lookup, job states and polling, report retention, and the data boundary.
-Research the product's safe documentation first and ask only for facts it
-does not answer. Continue with a fake client while live facts stay listed as
-missing. Never invent a paid endpoint's idempotency contract, treat a lost
-response as a refusal, or test either by spending without authorization.
+operation mapping: outcome, price, closed input and result bounds, one
+reviewed operation per skill, payment mapping, runtime and fulfillment
+duration, idempotency and retention, authoritative lookup, job states and
+polling, report retention, and the data boundary. Research safe product
+documentation first, ask only for facts it does not answer, and continue
+with a fake client while live facts stay listed as missing. Never invent a
+paid endpoint's idempotency contract, treat a lost response as a refusal, or
+test either by spending without authorization.
 
 One Daski skill maps to one reviewed product operation. Never expose an
 arbitrary buyer-selected URL, HTTP method, path, header, MCP server, transport,
@@ -112,7 +112,8 @@ read-only `recoverStart`, read-only `poll`, an optional read-only
 `requestReadiness`, docs, and service tests. Use the `ServiceAdapter` union;
 never rename or replace `FulfillmentAdapter`. The runtime supplies
 persistence, the stable operation key, leases, polling, restart recovery,
-retained adapter versions, and signed status and artifact reads. Any start
+resumption by the admitting adapter version (the service keeps old ones in
+`previousExternalJobAdapters`), and signed status and artifact reads. Any start
 exception is ambiguous and reconciled by the same key, pending polls never
 spend the failure budget, and an expired deadline does not prove the product
 failed. Never build a private polling server, hold an HTTP request open for
@@ -132,13 +133,11 @@ importer or external-job worker into full.
 
 ## Diagnose and verify
 
-Use scripts declared by the selected repository rather than recreating their
-logic. Start with the offline examples and read-only `doctor`, then run
-targeted service tests and the documented typecheck, test-typecheck, lint,
-architecture, documentation, unit, coverage, readiness, audit, and build
-gates. Run `skill:validate` in `provider`. `npm run doctor -- --database`
-reads the configured database read-only; run it only against a database the
-user has authorized you to connect to.
+Use the selected repository's own scripts. Start with the offline examples
+and read-only `doctor`, then targeted service tests and the documented gates
+(types, lint, architecture, docs, skill, unit, coverage, audit, build).
+`npm run doctor -- --database` reads the configured database read-only; run
+it only against a database the user authorized you to connect to.
 
 Database smoke or migration checks must target an explicitly identified
 disposable database. Report stable doctor codes and missing variable names,

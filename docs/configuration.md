@@ -185,7 +185,7 @@ activation module). Only the operator command changes it:
 ```bash
 npm run daski:async-admission                    # report the switch and its checks (read-only)
 npm run daski:async-admission -- --activate      # enable it if every check passes
-npm run daski:async-admission -- --deactivate    # turn it off; admitted work is still serviced
+npm run daski:async-admission -- --deactivate    # turn it off (see docs/onboarding.md before using it)
 ```
 
 Activation locks the switch and, in the same transaction, requires the
@@ -199,7 +199,9 @@ running instance declaring every external-job adapter version new sales (of
 this build or of any running instance) or unfinished jobs need
 (`external_job_services`). It records the checks as evidence. Every process
 of this build runs the worker, so stop older processes before activating.
-The command never migrates. While the switch is on, boot also refuses a build
+The command never migrates. Deactivation stops new external-job quotes and
+also refuses, retryably, funded external-job dispatches not admitted yet;
+admitted jobs continue (`docs/onboarding.md`). While the switch is on, boot also refuses a build
 that cannot resume an adapter version a running instance still sells, so jobs
 admitted during a rolling upgrade never outlive every process that can resume
 them. Give every replica the same active key: a process without one claims no
@@ -214,7 +216,7 @@ external job.
 | `EXTERNAL_JOB_LEASE_RENEW_MS` | `20000` (1,000 to 600,000): how often a held lease is renewed. |
 | `EXTERNAL_JOB_MAX_CONCURRENT_CALLS` | `4` (1 to 64): database-fenced calls in flight across every process sharing the database. |
 | `EXTERNAL_JOB_POLL_INTERVAL_SECONDS` | `60` (5 to 86,400): the ordinary wait between polls of a pending job, unless the product asks for more. |
-| `EXTERNAL_JOB_OVERDUE_POLL_SECONDS` | `300` (60 to 86,400): the slowest cadence for work past its fulfillment deadline. |
+| `EXTERNAL_JOB_OVERDUE_POLL_SECONDS` | `300` (60 to 86,400): the minimum delay between calls for work past its fulfillment deadline, so overdue work is polled at most this often (less often when the product asks or backoff is longer). |
 
 These are worker defaults, not signed protocol constants. Transient failures
 back off from 15 seconds, doubling to at most 30 minutes, with a 10% random

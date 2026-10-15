@@ -6,8 +6,8 @@ import type { Config } from "../config.js";
  * under a database lease of `leaseSeconds`, renewed every `leaseRenewMs`
  * and released between calls. At most `maxConcurrentCalls` database-fenced
  * calls run at once across every process sharing the database. A pending
- * job is polled every `pollIntervalSeconds` (or the product's hint), an
- * overdue one at least every `overduePollSeconds`. Transient failures back
+ * job is polled every `pollIntervalSeconds` (or the product's longer hint),
+ * an overdue one no more often than every `overduePollSeconds`. Transient failures back
  * off exponentially from `backoffBaseSeconds` to `backoffMaxSeconds`, with
  * `jitterRatio` of random spread on core's own delays (never on a product's
  * minimum retry delay).

@@ -153,9 +153,10 @@ request-charged rate limit, and no product-readiness gate.
 ## Call time and fulfillment time
 
 Every call into the provider is short: a quote is read-only, a dispatch
-answers once its claim commits (an external job, `submitted`, before any
-product call) or after the synchronous call (at most 50 seconds), and status
-and lifecycle reads are one indexed read. Fulfillment time is separate: the
+answers once its claim commits (an external job, `submitted` or a later
+state the worker already persisted; the dispatch handler never calls the
+product) or after the synchronous call (at most 50 seconds), and status and
+lifecycle reads are one indexed read. Fulfillment time is separate: the
 listing's `deadlines.fulfillmentSeconds`, counted by the provider from durable
 acceptance (its overdue threshold) and by the gateway from dispatch
 resolution (its deadline). Polls pause neither clock. Past the threshold, a

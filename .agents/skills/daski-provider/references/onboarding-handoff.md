@@ -111,7 +111,9 @@ Distinguish the two kinds of upgrade and say which one applies:
 - **Later compatible upgrade** (same schema epoch): may overlap the running
   build briefly. Retain every adapter version unfinished jobs need, every
   encryption key id stored jobs name, previous wallet keys for orders signed
-  with them, and old routed URLs and audiences. The new build's read-only
+  with them, and old routed URLs and audiences. While async admission is
+  on, boot also refuses a build that cannot resume an adapter version a
+  running instance still sells. The new build's read-only
   `doctor -- --database` run must pass `RETAINED_OBLIGATIONS`. A release that
   raises the schema epoch is another stop-and-drain cutover.
 

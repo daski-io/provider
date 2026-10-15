@@ -11,7 +11,7 @@ that product. It should not replace or publicly proxy the product.
 | Fixed price known before purchase | Required | Required | Supported |
 | Automated synchronous terminal response in at most 50 seconds | Required | Not needed | Supported |
 | Product runs the paid work as its own job (start, lookup by order key, poll) | Not applicable | Required | Supported through its own jobs |
-| Product job continues after the HTTP response | Not supported | Supported: core polls it for the fulfillment window | Supported |
+| Product job continues after the HTTP response | Not supported | Supported: core polls it until the product reports, past the deadline as overdue work | Supported |
 | One-shot JSON/text/public artifact | Supported | Supported (the report) | Supported |
 | Dynamic price depends on buyer input/product lookup | Not supported | Not supported | Supported |
 | Later buyer input, approval, or cancellation | Not supported | Not supported | Supported |

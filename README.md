@@ -42,7 +42,7 @@ canonical home of the portable Daski provider agent skill.
 | Daski-issued runtime listing catalog and fixed payment bindings | One fixed API or MCP operation per skill |
 | PostgreSQL replay/idempotency ledger and terminal results | Product credentials and response mapping |
 | Provider terminal attestations and status lookup | Product-specific tests and safe error codes |
-| External-job worker: persistence, stable operation keys, leases, polling, restart recovery, retained adapter versions, encrypted job state | For a product job: start, read-only recovery lookup, poll and report mapping |
+| External-job worker: persistence, stable operation keys, leases, polling, restart recovery, resuming each job with the adapter version that admitted it, encrypted job state | For a product job: start, read-only recovery lookup, poll and report mapping, and keeping old adapter versions while their jobs run |
 | HTTP limits, rate limits, outbound-network controls, health, and logging | Product dependency readiness and operations |
 
 This is not a buyer SDK, generic API proxy, MCP gateway, payment simulator, or
@@ -118,10 +118,11 @@ bindings during onboarding.
 5. Synchronous mode: your adapter maps the skill to one reviewed API
    endpoint or MCP tool and returns `completed` or `failed` within the
    50-second synchronous budget. External-job mode: core commits the funded
-   order as one queued job and answers `submitted` at once; its worker then
-   calls your adapter's `start`, `recoverStart` and `poll` hooks in short,
-   bounded calls until the product reports, for hours if the declared
-   fulfillment window allows.
+   order as one queued job and answers `submitted` (or a later state the
+   worker already persisted); the dispatch handler never calls the product.
+   Its worker then calls your adapter's `start`, `recoverStart` and `poll`
+   hooks in short, bounded calls until the product reports, for hours if
+   need be, and past the declared fulfillment window as overdue work.
 6. Core validates the result against the listing's admitted result schema,
    freezes it with its hash, and returns a provider-signed snapshot with a
    terminal attestation. Exact replays and status reads receive the same

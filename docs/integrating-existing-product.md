@@ -9,7 +9,7 @@ that product. It should not replace or publicly proxy the product.
 | Product behavior | `provider`, synchronous | `provider`, external job | `provider-full` |
 | --- | --- | --- | --- |
 | Fixed price known before purchase | Required | Required | Supported |
-| Automated terminal response in at most 50 seconds | Required | Not needed | Supported |
+| Automated synchronous terminal response in at most 50 seconds | Required | Not needed | Supported |
 | Product runs the paid work as its own job (start, lookup by order key, poll) | Not applicable | Required | Supported through its own jobs |
 | Product job continues after the HTTP response | Not supported | Supported: core polls it for the fulfillment window | Supported |
 | One-shot JSON/text/public artifact | Supported | Supported (the report) | Supported |
@@ -138,8 +138,9 @@ timeout comfortably below the core deadline. `boundedFetch` composes the two:
 either one ends the request, the response-body read included, on the plain
 and the IP-pinned path alike. An abort only stops waiting; it never proves
 the product did not apply the request, so a mutating call reconciles through
-its idempotency key rather than retrying. Do not rely on the 50-second outer
-timeout to clean up an unbounded socket or SDK call.
+its idempotency key rather than retrying. Do not rely on core's outer limit
+(the 50-second synchronous budget, or one external-job call's limit) to clean
+up an unbounded socket or SDK call.
 
 ### API rules
 

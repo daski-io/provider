@@ -53,10 +53,19 @@ gateway, the product or the chain.
 
 ## Verification internals
 
-- `scripts/docs-check.mjs` verifies local Markdown links and documented npm
-  commands.
+- `scripts/docs-check.mjs` verifies local Markdown links, documented npm
+  commands, and the consistency rules below in the repository's guides.
 - `scripts/validate-skill.mjs` validates portable skill frontmatter, version,
-  size, CRLF handling, and routes.
+  size, CRLF handling, routes, the three-path table, the install command, the
+  consistency rules, and that the package links only Daski's public
+  repositories and channels.
+- `scripts/skill-rules.mjs` holds the shared consistency rules: no statement
+  may contradict the three integration paths (a 50-second limit not scoped to
+  the synchronous mode, duration as a reason for `provider-full`, defaulting
+  to full when unsure, claims of capabilities lite lacks), and code-like
+  references must name adapter members, modes, outcome kinds, bases and
+  call-issue codes that `src/core/serviceRegistry/adapterTypes.ts` and
+  `serviceModule.ts` declare.
 - `scripts/security/static-gates.mjs` enforces the minimal architecture,
   dependency, migration, entrypoint, and container boundary.
 - `scripts/security/pii-scan.mjs` scans built artifacts for likely protected

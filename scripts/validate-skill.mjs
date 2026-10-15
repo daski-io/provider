@@ -1,4 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
+import {
+  findRoutingContradictions,
+  findUnknownAdapterReferences,
+  readAdapterApi,
+} from "./skill-rules.mjs";
 
 const path = ".agents/skills/daski-provider/SKILL.md";
 const source = readFileSync(path, "utf8")
@@ -60,6 +65,29 @@ for (const required of [
 }
 for (const forbidden of ["TODO", "TBD", "Documentation unavailable"]) {
   if (source.includes(forbidden)) failures.push(`skill contains unfinished marker: ${forbidden}`);
+}
+
+// One routing rule (the three paths), stated in the entrypoint and never
+// contradicted anywhere in the package; examples name only adapter members
+// and outcomes the checked-out source declares; no live endpoint.
+for (const path of ["Lite synchronous", "Lite external job", "Full"]) {
+  if (!new RegExp(`^\\| ${path} \\(`, "m").test(source)) failures.push(`SKILL.md path table is missing: ${path}`);
+}
+if (!packagedSource.includes("npx skills add https://github.com/daski-io/provider --skill daski-provider")) {
+  failures.push("skill package must document the published install command");
+}
+const api = readAdapterApi(process.cwd());
+const packaged = [path, ...requiredReferences.map((reference) => `.agents/skills/daski-provider/${reference}`)]
+  .filter((file) => existsSync(file));
+for (const file of packaged) {
+  const text = readFileSync(file, "utf8").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  for (const problem of findRoutingContradictions(text)) failures.push(`${file}: contradictory routing: ${problem}`);
+  for (const problem of findUnknownAdapterReferences(text, api)) failures.push(`${file}: ${problem}`);
+  for (const match of text.matchAll(/https?:\/\/[^\s)`>"']+/g)) {
+    if (!/^https:\/\/(?:github\.com\/daski-io\/|discord\.gg\/|daski\.io\b|<)/.test(match[0])) {
+      failures.push(`${file}: links outside Daski's public repositories and channels: ${match[0]}`);
+    }
+  }
 }
 if (failures.length) {
   process.stderr.write(`${failures.join("\n")}\n`);

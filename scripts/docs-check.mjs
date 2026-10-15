@@ -1,5 +1,10 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import {
+  findRoutingContradictions,
+  findUnknownAdapterReferences,
+  readAdapterApi,
+} from "./skill-rules.mjs";
 
 const root = process.cwd();
 const failures = [];
@@ -55,6 +60,19 @@ for (const file of markdown) {
       failures.push(`${relative(root, file)}: unknown npm script ${match[1]}`);
     }
   }
+}
+
+// The repository's own guides follow the same routing rule and adapter API
+// as the skill; vendored fixtures are another repository's text.
+const api = readAdapterApi(root);
+for (const file of markdown) {
+  const path = relative(root, file).replaceAll("\\", "/");
+  if (path.startsWith("test/fixtures/")) continue;
+  const source = readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+  for (const problem of findRoutingContradictions(source)) {
+    failures.push(`${path}: contradictory routing: ${problem}`);
+  }
+  for (const problem of findUnknownAdapterReferences(source, api)) failures.push(`${path}: ${problem}`);
 }
 
 const genericityFiles = [

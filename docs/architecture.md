@@ -267,7 +267,7 @@ job. Core admits the funded order (above), then the worker in
 The runtime performs the product operation inline. Each claim records the
 process instance executing it, a fencing token and an expiring lease
 (migration 006): 30 seconds, renewed every 10 seconds while the at most
-50-second call runs and its result is persisted. Only the token holder can
+50-second synchronous call runs and its result is persisted. Only the token holder can
 renew or finalize, and only before expiry. A holder whose renewal finds the
 lease lost aborts the call's signal and answers ambiguously; a holder that
 finishes late writes nothing.

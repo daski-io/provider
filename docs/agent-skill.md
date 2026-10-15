@@ -129,9 +129,15 @@ npm run docs:check
 ```
 
 The validator normalizes LF/CRLF, checks required frontmatter, reference routes,
-and package contents, keeps the entrypoint concise, and requires its version to
-match `package.json`. Release CI archives the entire skill directory so
-partners receive the references without copying the provider runtime.
+and package contents, keeps the entrypoint concise (at most 180 lines), and
+requires its version to match `package.json`. It also requires the three-path
+table and the published install command, refuses routing statements that
+contradict the three paths and code-like references to adapter members or
+outcomes the checked-out source does not declare (the same rules
+`docs:check` applies to the repository guides), and allows links only to
+Daski's public repositories and channels. Release CI archives the entire
+skill directory so partners receive the references without copying the
+provider runtime.
 
 When the repository evolves, update authoritative docs first and change the
 skill only when its routing, decision boundary, or hard stops change.

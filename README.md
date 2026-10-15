@@ -237,8 +237,10 @@ operator's explicit `npm run daski:async-admission -- --activate`; no
 migration, import or boot turns that switch on. Later compatible upgrades
 keep the old listing versions, URLs, signing and encryption keys and adapter
 versions that unfinished orders need. This release requires the companion
-gateway revision recorded in
-[docs/releasing.md](docs/releasing.md#gateway-compatibility).
+gateway revision described in
+[docs/releasing.md](docs/releasing.md#gateway-compatibility); the tested
+`daski-io/gateway` commit is recorded in
+`test/fixtures/provider-wire.source.json`.
 
 The importer verifies signatures, domains, provider intent, the exact local
 skill-contract hashes and prices, runtime commitments, and splitter provenance

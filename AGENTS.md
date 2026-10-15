@@ -185,7 +185,9 @@ cutover in `docs/onboarding.md` (`npm run daski:cutover`); later compatible
 releases may overlap while each keeps the adapter versions, keys and URLs
 unfinished orders need. `/health/ready` is the routing signal (read
 serviceability); its `admission` part reports new-sale readiness. This
-release requires the companion gateway revision in `docs/releasing.md`.
+release requires the companion gateway revision described in
+`docs/releasing.md`; the tested gateway commit is recorded in
+`test/fixtures/provider-wire.source.json`.
 
 Testnet is the normal first target. Mainnet requires production configuration,
 canonical reviewed contracts, separate runtime/migration database roles,

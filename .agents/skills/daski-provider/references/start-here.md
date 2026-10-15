@@ -61,8 +61,10 @@ Before proposing an API, confirm the checked-out revision has it:
 - Compare this skill's `metadata.version` with the checkout's
   `package.json` version. A mismatch means one of them is stale: refresh the
   skill, or name the starter release the plan needs.
-- The checkout's `docs/releasing.md` names the gateway revision it was
-  qualified against; record it.
+- The checkout records the `daski-io/gateway` commit it was qualified
+  against in `test/fixtures/provider-wire.source.json` (`docs/releasing.md`
+  explains that record and the companion gateway changes); record that
+  commit.
 
 If the selected path needs a capability the checkout lacks, select a
 compatible released revision or report the upgrade requirement. Never invent

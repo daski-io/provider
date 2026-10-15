@@ -6,13 +6,47 @@ product that may require its capabilities. Then read the checked-out
 
 Repository: `https://github.com/daski-io/provider-full`
 
-## Why the full starter exists
+## When the full starter is necessary
 
-Use it for any dynamic quote, durable job, later buyer input, cancellation,
-asset lifecycle, owner action, human review, email, admin operation, direct A2A
-flow, protected-data workflow, multi-replica execution, or ambiguity that must
-reconcile after restart. These are durability and authorization requirements,
-not optional conveniences to copy into the minimal starter.
+Select it for a specific capability the product contract requires, and name
+that capability:
+
+| Capability | Why lite cannot carry it |
+| --- | --- |
+| Dynamic pricing | Lite signs only a listing's fixed price; full validates and binds a bounded quote and its supplier-cost ceiling. |
+| Provider-owned multi-step workflows | Lite's worker drives one product job through start, recovery, and polling; it is not a workflow engine. |
+| Later buyer input, corrections, or cancellation | Lite answers these lifecycle actions as unsupported. |
+| Durable owned resources, assets, and owner actions | Ownership, standard actions, and delayed second authorization exist only in full. |
+| Human or operator review, email, admin | Full's review, email, and audited admin subsystems. |
+| Richer protected data and private documents | Full's protected-data workflow and private artifact delivery. |
+| Direct A2A | Full's A2A routes. |
+| Intentional multi-replica operation | Full's durable jobs and reconcilers are built for it; lite supports one active replica with safe overlaps. |
+
+A long runtime alone is not on this list. A provider whose only extra need is
+to poll its own fixed-price product job belongs in lite external-job mode
+once its checkout has that mode. A full provider may still wrap such a
+product alongside richer services, using full's own durable jobs, supplier
+journal, service workers, and readiness declarations rather than lite's
+scheduler. Choosing full never supplies a product guarantee the integration
+lacks, such as recovering a lost start.
+
+## Not available in this release
+
+These are deferred feature groups of the full starter. Do not promise them,
+and route a requirement to them only after verifying that the checked-out
+revision implements it:
+
+- recovery after a provider-terminal paid failure (reopening or re-running a
+  failed paid order);
+- owner-transfer administration;
+- rich buyer input and private documents beyond the existing routes;
+- rich support replies and admin/email experiences beyond the basic support
+  receipt; and
+- product-specific prerequisite waits.
+
+Overdue but still-nonterminal work and late report retrieval are not
+recovery after failure; both starters keep such work open and deliver a
+late result once.
 
 ## Map product behavior to service facets
 
@@ -48,8 +82,9 @@ other.
    keys, bounded retries, circuit breaking, and authoritative reconciliation.
    Never infer success from a timeout or blindly repeat a purchase.
 5. Persist jobs and lifecycle changes with database locks, leases,
-   idempotency, and fencing. Do not add process-local money, task, worker, or
-   ownership guards.
+   idempotency, and fencing in full's service workers. Do not add
+   process-local money, task, worker, or ownership guards, and do not import
+   lite's external-job scheduler as a second queue system.
 6. Derive ownership from the verified payer. Use admitted standard actions for
    consequential asset mutations. Destructive actions require the delayed
    second authorization and mismatch/replay tests; never invent a service-local
@@ -74,7 +109,8 @@ Retirement is a separate externally mutating operation. Do not run either
 merely because implementation or local verification was requested. Require
 explicit authority for the exact environment, gateway, wallet, service set,
 transaction cost, and action; verify configuration and the intended service set
-before execution.
+before execution. Where the checkout offers a read-only forecast of the
+registration, prefer it before any signing run.
 
 Do not copy the minimal starter's Daski-assisted runtime-bundle importer into
 `provider-full`, and do not hand-edit its catalog or registration state.

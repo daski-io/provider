@@ -6,12 +6,30 @@ The repository ships one portable, harness-agnostic skill package:
 .agents/skills/daski-provider/SKILL.md
 ```
 
-Its entrypoint helps a coding agent choose the correct starter, inspect an
-existing API or MCP product, implement a service, run gates, and prepare the
+Its entrypoint helps a coding agent choose the correct path (lite
+synchronous, lite external job, or `provider-full`), inspect an existing API,
+MCP, or job-running product, implement a service, run gates, and prepare the
 Testnet handoff. Focused references make the released package useful before a
 repository is cloned. After checkout, `README.md`, `AGENTS.md`, and `docs/`
 remain authoritative; the skill deliberately does not duplicate their full
 manuals.
+
+## Install or refresh it
+
+```bash
+npx skills add https://github.com/daski-io/provider --skill daski-provider
+```
+
+This is the command the Daski providers page publishes; harness-specific
+variants add an agent flag such as `-a claude-code` or `-a codex`. An
+installed skill is a copy and does not change when this repository changes:
+re-run the command to refresh an older installation. The skill's
+`metadata.version` equals this repository's `package.json` version (the
+validator enforces it), so an agent can tell a stale skill or an older
+checkout apart: version 0.2.0 introduced external-job mode, which a 0.1.x
+checkout does not have. The skill instructs agents to check the checkout's
+actual capabilities before proposing an API, and to name a compatible
+release rather than invent one.
 
 ## Package contents
 
@@ -22,22 +40,29 @@ manuals.
     daski-primer.md
     start-here.md
     integration-brief.md
+    external-jobs.md
     provider-full.md
     onboarding-handoff.md
 ```
 
-`SKILL.md` contains shared routing, the minimal-versus-full boundary, authority
-rules, and hard stops. An agent reads a reference only when that phase or
-starter applies:
+`SKILL.md` contains shared routing, the capability check, the three-path
+selection rule, authority rules, and hard stops. An agent reads a reference
+only when that phase or path applies:
 
 - `daski-primer.md` gives a zero-context agent the marketplace, transaction,
-  trust-boundary, and vocabulary model;
-- `start-here.md` selects and acquires a repository;
-- `integration-brief.md` produces a safe product-to-skill mapping;
-- `provider-full.md` restores the full starter's durability, ownership, and
-  registration workflow; and
-- `onboarding-handoff.md` separates local, Testnet, Mainnet, and operator
-  responsibilities.
+  call-time versus fulfillment-time, trust-boundary, and vocabulary model;
+- `start-here.md` checks the checkout's capabilities, selects the path, and
+  acquires a repository;
+- `integration-brief.md` produces a safe product-to-skill mapping, including
+  payment mapping, idempotency, job, deadline, and retention facts;
+- `external-jobs.md` walks through the synthetic external-job example, the
+  typed call outcomes, the idempotency horizon, pending and overdue polling,
+  result mapping, and the restart and upgrade tests;
+- `provider-full.md` explains when the full starter is necessary, its
+  worker and registrar workflow, and the feature groups not yet available;
+  and
+- `onboarding-handoff.md` separates local, Testnet, Mainnet, upgrade, and
+  operator responsibilities.
 
 ## Use it with any coding agent
 
@@ -57,7 +82,7 @@ This skill is canonical only in
 [provider](https://github.com/daski-io/provider). The
 [provider-full](https://github.com/daski-io/provider-full) repository links to
 it but does not publish a duplicate package. The first decision in the skill is
-whether the product actually fits the minimal starter.
+which path the product's facts support; duration alone never decides it.
 
 ## Recommended agent prompt
 
@@ -81,11 +106,13 @@ responses in an agent prompt.
 
 1. If necessary, select and acquire the correct repository using the packaged
    start reference.
-2. Read repository instructions and the routed docs.
-3. Apply the minimal-versus-full fit test and switch before implementation if
-   the wrong starter was selected.
+2. Read repository instructions and the routed docs, and check that the
+   checkout has the capability the path needs.
+3. Apply the three-path fit test and switch before implementation if the
+   wrong starter or mode was selected.
 4. Produce the packaged integration brief covering exact product operation,
-   input/output, auth, environment, idempotency, ambiguity, and data boundaries.
+   input/output, auth, payment mapping, environment, idempotency, ambiguity,
+   job, deadline, retention, and data boundaries.
 5. Implement the service in its own folder with a fixed operation map.
 6. Update composition, published contract, environment names, docs, and tests.
 7. Run local gates without contacting live systems.

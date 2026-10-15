@@ -12,11 +12,14 @@ discover and purchase clearly defined service outcomes from independent
 providers. A provider connects an existing API, MCP server, SDK, or internal
 product to Daski through a controlled service adapter.
 
-Daski is not a generic proxy to arbitrary APIs or MCP tools. The provider
-publishes a small, reviewed contract for each operation: what the buyer may
-send, what completed result is returned, how it is priced, and how it is
-fulfilled. Daski coordinates discovery, admission, payment, dispatch, and
-evidence around that contract.
+Daski is not a generic proxy to arbitrary APIs or MCP tools, and it does not
+list arbitrary x402 endpoints. The provider publishes a small, reviewed
+contract for each operation: what the buyer may send, what completed result
+is returned, how it is priced, and how it is fulfilled. Daski coordinates
+discovery, admission, managed payment, dispatch, and evidence around that
+contract. A product that also sells through its own x402 endpoint still
+needs a way to start work for an order Daski already admitted; the buyer is
+never charged twice.
 
 ## Participants and responsibilities
 
@@ -62,13 +65,27 @@ In more detail:
 5. Provider core verifies those bindings and atomically claims replay state
    before any product operation runs.
 6. Only then does the service adapter call its one configured API endpoint,
-   MCP tool, SDK method, or internal operation.
+   MCP tool, SDK method, or internal operation: inside the dispatch for a
+   synchronous service, or, for an external-job service, from core's durable
+   worker after the order was committed and answered `submitted`.
 7. Provider core persists status and the bounded result, emits the required
    terminal attestation/evidence, and returns the reviewed outcome. Replays
    must return the same durable result or fail closed on a mismatch.
 
 The service adapter never decides whether payment is valid. It receives
 already admitted context and owns only product validation and fulfillment.
+
+## Call time versus fulfillment time
+
+Every HTTP call between the gateway and a provider is short and bounded.
+Fulfillment time is a separate, declared property of each skill: a
+synchronous service finishes within one call (the minimal starter's budget is
+50 seconds), while an asynchronous managed service, such as a product that
+runs each paid audit for hours, is admitted durably, keeps its job running in
+the product, and is observed through repeated signed status reads until the
+report exists. Nobody holds a request open for hours. Past its declared
+fulfillment window, started work is overdue, not failed: a late valid result
+is still delivered once.
 
 ## Core versus service code
 
@@ -79,9 +96,11 @@ these rules for each product.
 
 Each service owns its buyer-visible manifest and docs, closed input/result
 schemas, product configuration and credentials, explicit operation mapping,
-adapter, readiness, public error mapping, and service-specific tests. The full
-starter also lets the service declare jobs, assets/actions, workers, protected
-data, email/admin extensions, and supplier reconciliation.
+adapter, readiness, public error mapping, and service-specific tests. In the
+minimal starter's external-job mode the service also maps the product job's
+start, recovery lookup, and poll; core owns its scheduling and recovery. The
+full starter also lets the service declare jobs, assets/actions, workers,
+protected data, email/admin extensions, and supplier reconciliation.
 
 ## Essential vocabulary
 
@@ -104,21 +123,29 @@ Ownership is derived from the verified wallet-authorized payer. Buyer input,
 order ids, task ids, asset identifiers, and caller metadata are never proof of
 identity or ownership.
 
-## Which starter fits
+## Which path fits
 
-Minimal example: an existing text-analysis API accepts a bounded document,
-returns a completed structured classification within 20 seconds, has one fixed
-price, creates no later object, and can safely deduplicate or reconcile a
-mutation before the request ends. Map it to one fixed skill in `provider`.
+Lite synchronous example: an existing text-analysis API accepts a bounded
+document, returns a completed structured classification within 20 seconds,
+has one fixed price, creates no later object, and can safely deduplicate or
+reconcile a mutation before the request ends. Map it to one fixed skill in
+`provider`.
+
+Lite external-job example: an audit product takes a description, starts an
+eight-hour audit as its own job, can find that job again by the order key if
+the start answer is lost, and serves a bounded report when it is done. One
+fixed price, no later buyer step. Map it to `provider`'s external-job mode;
+core keeps the order durable and polls the product.
 
 Full example: a media-rendering product creates a job, reports progress over
 several minutes, stores a private downloadable result, accepts cancellation,
 and later allows the owner to delete it. It requires `provider-full` for
-durable jobs, asset ownership, lifecycle, actions, and restart recovery.
+asset ownership, cancellation, lifecycle, and owner actions; the duration is
+not what decides it.
 
-Never make an asynchronous operation appear minimal by returning `completed`
-while product work continues. Never bolt full-starter durability into the
-minimal core.
+Never make an asynchronous operation appear synchronous by returning
+`completed` while product work continues. Never bolt full-starter subsystems
+into the minimal core.
 
 ## Environments and admission
 
@@ -138,7 +165,8 @@ doctor result, or successful Testnet payment grants Mainnet admission.
 Before editing code, an unfamiliar agent should produce:
 
 1. a plain-language statement of the purchased outcome;
-2. the minimal-versus-full decision and supporting product facts;
+2. the selected path (lite synchronous, lite external job, or full) and the
+   supporting product facts;
 3. one service and focused skills mapped to fixed product operations;
 4. missing provider, product, and Daski inputs;
 5. assumptions that require human review; and

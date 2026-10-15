@@ -29,6 +29,7 @@ const requiredReferences = [
   "references/daski-primer.md",
   "references/start-here.md",
   "references/integration-brief.md",
+  "references/external-jobs.md",
   "references/provider-full.md",
   "references/onboarding-handoff.md",
 ];

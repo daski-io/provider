@@ -19,30 +19,45 @@ Do not create a generic `call-api`, `call-tool`, or arbitrary proxy skill. One
 skill maps to one reviewed product operation. A product may expose several
 focused skills when their contracts and outcomes are genuinely distinct.
 
+## How to collect the facts
+
+Research the product's safe documentation, SDK reference, and schemas first.
+Ask the user only for facts those sources do not answer, and say why each
+one changes the path or the implementation. While live integration facts are
+missing, continue independent local work against a fake client and keep the
+gaps listed in the brief. Never invent a paid endpoint's idempotency
+contract, treat a lost response as a definitive refusal, or test either
+assumption by spending without authorization.
+
 ## Required operation mapping
 
 Record this for every proposed skill:
 
 | Field | Required decision |
 | --- | --- |
-| Buyer outcome | What is definitively complete when fulfillment returns? |
+| Buyer outcome | What is definitively complete when fulfillment finishes? |
 | Input | Closed fields, types, required/optional status, bounds, and conditional rules |
-| Result | Bounded terminal schema, artifacts, and stable public failures |
+| Result | Bounded schema of the complete completed result, permitted artifact delivery, and stable public failures |
 | Price | Fixed atomic USDC or bounded dynamic quote; identify every input to pricing |
-| Product operation | One fixed API method/path, MCP server/transport/tool, SDK method, or internal command |
-| Authentication | Provider-held credential source and environment; never buyer supplied |
-| Timing | Product timeout, total fulfillment deadline, cancellation, and later work |
-| Idempotency | Stable key derived from verified order/task context |
-| Ambiguity | Authoritative read/reconciliation that proves happened or did not happen |
+| Product operation | One fixed API method/path, MCP server/transport/tool, SDK method, or internal command, with its service-owned authentication and endpoint configuration |
+| Payment mapping | Whether Daski's verified payment starts an already-paid provider-owned job, or a separately funded upstream purchase would be required (then onboarding is incomplete) |
+| Timing | Normal and maximum runtime, per-call budget, declared fulfillment duration, and capacity |
+| Idempotency | Stable key derived from verified order/task context; the product's guarantee, its minimum key-retention window, and the replay margin kept before it ends |
+| Recovery | Authoritative lookup that finds the original job or proves it never started, after a timeout, crash, or key expiry |
+| Job | Stable job reference, exact product states, poll scheduling and rate limits, and overdue handling |
+| Report | Where the report lives and how long the product keeps it; the gateway does not retain it for the provider |
 | Side effects | Records, charges, messages, filings, purchases, or other external mutations |
+| Later workflow | Required buyer input, cancellation, protected data, assets, operator intervention, and the deployment model |
 | Data | Fields sent upstream, sensitivity, retention, redaction, and support evidence |
-| Readiness | Bounded read-only signal proving the product can accept work |
+| Readiness | Bounded read-only signal proving the product can accept work; per-request checks that run before a quote |
 | Environments | Fake, sandbox, Testnet, and live separation plus possible Testnet cost |
-| Operations | Capacity, concurrency, rate limits, outage behavior, and support owner |
+| Operations | Concurrency, rate limits, outage behavior, and support owner |
 
-If a missing answer changes starter selection, payment, ownership, execution,
-or data risk, stop and obtain it. Otherwise make a conservative local
-assumption, label it, and keep it easy to revise.
+For a synchronous skill the job, recovery-after-crash, and report rows may be
+"not applicable", but its ambiguity must still resolve within the call. If a
+missing answer changes the path, payment, ownership, execution, or data risk,
+stop and obtain it. Otherwise make a conservative local assumption, label it,
+and keep it easy to revise.
 
 ## API boundary
 
@@ -56,7 +71,8 @@ public codes without logging raw payloads.
 Never allow buyer input to choose a hostname, port, method, path, redirect,
 header, credential, or product account. Private-network targets require a
 deliberate reviewed boundary; disabling SSRF checks globally is not an
-integration technique.
+integration technique. A URL a product returns (a job or report location) is
+validated against the reviewed origin and path before the service follows it.
 
 ## MCP boundary
 
@@ -69,7 +85,8 @@ provider task signal.
 Do not pass through buyer-selected server URLs, transports, tool names,
 schemas, environment variables, shell fragments, or protocol metadata. Do not
 let MCP discovery silently create marketplace operations. A tool that launches
-a job, needs later elicitation/sampling, or outlives the dispatch requires
+a job which can be found again by an order key and polled fits lite
+external-job mode; one that needs later elicitation or sampling requires
 `provider-full`.
 
 ## Mutation and ownership decision
@@ -79,11 +96,15 @@ For every mutation, distinguish:
 - naturally idempotent or convergent operations;
 - non-convergent operations with a product idempotency key;
 - ambiguous operations with an authoritative reconciliation read; and
-- operations whose ambiguity can survive the current process/request.
+- operations whose ambiguity can outlive the current process or request.
 
-The minimal starter permits only the first three when reconciliation can finish
-inside its synchronous execution window. Anything that must resume, retry, or
-reconcile after restart requires the full starter and durable workers/journals.
+Lite synchronous mode permits only the first three, and only when
+reconciliation finishes inside its synchronous call. A product job whose
+start may outlive the call fits lite external-job mode: core journals the
+start under a stable key and reconciles it through the adapter's read-only
+`recoverStart` after any restart. Provider-owned multi-step workflows with
+their own durable state require `provider-full`. If no lookup or replay
+guarantee exists, no starter can make the start safe; record the gap.
 
 Durable private results, re-downloadable objects, mutable resources, and
 owner-only operations are assets in `provider-full`. Ownership comes from the
@@ -95,18 +116,23 @@ caller metadata.
 Produce a safe brief before code:
 
 ```markdown
-Starter: provider | provider-full
+Path: lite synchronous | lite external job | provider-full
+Facts supporting the path:
+Checkout revision and capability check:
 Service: <slug and buyer-visible purpose>
 
 Skill: <id>
-- Completed outcome:
-- Closed input/result bounds:
+- Completed outcome and complete result schema:
+- Closed input bounds:
 - Price behavior:
-- Fixed product operation:
-- Authentication owner/environment:
-- Timeout/cancellation:
+- Fixed product operation and its authentication/endpoint configuration:
+- Payment mapping (already-paid start or upstream gap):
+- Runtime (normal, maximum), per-call budget, fulfillment window, capacity:
+- Idempotency guarantee, key retention, replay margin:
+- Recovery lookup after timeout, crash, or key expiry:
+- Job reference, product states, polling and rate limits, overdue handling:
+- Report location and retention:
 - Side effects and Testnet cost:
-- Idempotency and ambiguity reconciliation:
 - Data sent/retained/redacted:
 - Readiness and outage behavior:
 - Tests required:
@@ -126,5 +152,8 @@ Cover field limits and unknown fields, exact skill-to-operation mapping,
 buyer-controlled endpoint/tool/credential rejection, timeout and abort,
 response shape and size, public error redaction, duplicate execution,
 definitive versus ambiguous failure, mutation reconciliation, ownership when
-applicable, and terminal artifact bounds. Unit tests use fake clients; live
+applicable, and terminal artifact bounds. An external job adds a lost start
+response, an expired idempotency horizon, an invalid terminal report, a late
+completion, and the exact upstream-state mapping
+([External jobs](external-jobs.md)). Unit tests use fake clients; live
 product and paid Testnet journeys are separate explicitly authorized stages.

@@ -196,16 +196,16 @@ included), at least one running instance with every running instance (fresh
 heartbeat in `provider_runtime_instances`) a compatible external-job worker,
 an active `PROVIDER_DATA_ENCRYPTION_KEY` (`encryption_keys`), and every
 running instance declaring every external-job adapter version new sales (of
-this build or of any running instance) or unfinished jobs need
-(`external_job_services`). It records the checks as evidence. Every process
-of this build runs the worker, so stop older processes before activating.
-The command never migrates. Deactivation stops new external-job quotes and
-also refuses, retryably, funded external-job dispatches not admitted yet;
-admitted jobs continue (`docs/onboarding.md`). While the switch is on, boot also refuses a build
-that cannot resume an adapter version a running instance still sells, so jobs
-admitted during a rolling upgrade never outlive every process that can resume
-them. Give every replica the same active key: a process without one claims no
-external job.
+this build or of any running instance), quotes that may still be dispatched or
+unfinished jobs need (`external_job_services`). It records the checks as
+evidence. Every process of this build runs the worker, so stop older processes
+before activating. The command never migrates. Deactivation stops new
+external-job quotes and also refuses, retryably, funded external-job
+dispatches not admitted yet; admitted jobs continue (`docs/onboarding.md`).
+While the switch is on, boot also refuses a build that cannot resume an
+adapter version a running instance still sells, so jobs admitted during a
+rolling upgrade never outlive every process that can resume them. Give every
+replica the same active key: a process without one claims no external job.
 
 ### External-job worker
 
@@ -245,7 +245,9 @@ audience its checkout snapshot named, so:
 - keep, while any unfinished external job needs them, the adapter version
   that admitted it (as the current adapter or in
   `previousExternalJobAdapters`) and every encryption key id its stored
-  state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation).
+  state names (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS` after a rotation),
+  and, while a quote may still be dispatched, the adapter version that sold
+  it: each quote records it, and its order runs with exactly that version.
 
 Boot and the importer verify this for every obligation (claims of any state,
 quotes that may still be dispatched, and unfinished external jobs) and refuse

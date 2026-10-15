@@ -75,12 +75,14 @@ commitment hash (re-verified against its content) with the definition it was
 admitted with: schemas, price, deadlines, the fulfillment window (the
 gateway's 30-day default when a contract declares none) and the handler. A
 funded order paid against a superseded version is served exactly as it was
-sold. Answers about an order are signed with the provider wallet its version
-recorded, from a retained previous key after a rotation, and servicing calls
-may name a retained previous provider audience (`docs/configuration.md`).
-Boot and the importer refuse a build that cannot service every obligation:
-claims need their version's signing key, and versions whose quotes may still
-be dispatched also need their definition and handler.
+sold, an external job by the adapter version that sold its quote. Answers
+about an order are signed with the provider wallet its version recorded, from
+a retained previous key after a rotation, and servicing calls may name a
+retained previous provider audience (`docs/configuration.md`). Boot and the
+importer refuse a build that cannot service every obligation: claims need
+their version's signing key, and versions whose quotes may still be dispatched
+also need their definition, handler and the external-job adapter version that
+sold each quote.
 
 ## Dispatch state machine
 
@@ -112,14 +114,18 @@ executing (public "working") -- adapter result --> completed | failed
              failed(provider_execution_abandoned), by any process
 ```
 
-An external-job service's dispatch follows the same verification, but
-instead of executing it claims the order in the pending state `external_job`
-and, in the same transaction, inserts its queued job: the input sealed to
-the job row, a stable idempotency key and an overdue threshold of durable
-acceptance plus the dispatched version's admitted fulfillment window. The
-answer is `submitted`, or a later state the worker already persisted; no
-product call happens in the dispatch handler. Admission requires the
-database async-admission switch on and an active encryption key, both
+An external-job service's dispatch follows the same verification, but instead
+of executing it claims the order in the pending state `external_job` and, in
+the same transaction, inserts its queued job: the input sealed to the job row,
+a stable idempotency key and an overdue threshold of durable acceptance plus
+the dispatched version's admitted fulfillment window. The job's adapter
+version is the one recorded with its quote, the version that sold the order,
+even after new sales moved to another version or mode (a build without it
+refuses before admission); a quote that recorded none (a synchronous sale, or
+one issued before migration 010) is admitted under the service's current
+adapter. The answer is `submitted`, or a later state the worker already
+persisted; no product call happens in the dispatch handler. Admission requires
+the database async-admission switch on and an active encryption key, both
 checked before admission (a definite, retryable refusal otherwise), and
 deliberately not product readiness: a funded job waits for the product.
 
@@ -253,14 +259,16 @@ job. Core admits the funded order (above), then the worker in
   by the database), the result contract its listing version was admitted
   with, and the key its stored state names. Boot, the importer and
   activation refuse a build that cannot resume every unfinished job (its
-  version's definition, its adapter version, its encryption keys), so an
-  incompatible build cannot take one over. Each process declares the adapter
-  versions it resumes and the one it sells in its heartbeat. Activation
-  requires every running instance to resume every version new sales (of any
-  running instance) or unfinished jobs need, and while async admission is on,
-  boot refuses a build that cannot resume a version a running instance still
-  sells, so compatible R1 processes may overlap while the fences keep each
-  call single.
+  version's definition, its adapter version, its encryption keys) or run
+  the order of every quote that may still be dispatched (the adapter version
+  recorded with the quote), so an incompatible build cannot take one over.
+  Each process declares the adapter versions it resumes and the one it sells
+  in its heartbeat. Activation requires every running instance to resume
+  every version new sales (of any running instance), open quotes or
+  unfinished jobs need, and while async admission is on, boot refuses a
+  build that cannot resume a version a running instance still sells, so
+  compatible R1 processes may overlap while the fences keep each call
+  single.
 
 ## Execution ownership and why one replica
 
@@ -333,12 +341,13 @@ A provider quote can back a dispatch long after it expires, because the
 gateway re-dispatches a timely-paid order until its first release observation
 plus the snapshot's fulfillment window. Each quote therefore records
 `retain_until` (its `validBefore` plus its listing version's fulfillment
-window plus 30 days), and every claim records the provider quote it was
-admitted against. Boot prunes, as the schema owner and in bounded batches,
-only quotes past that retention, older than every installed version's window
-plus the margin, and named by no claim; a trigger refuses any other quote
-deletion, whoever attempts it. Claims, terminal results and their reads are
-never pruned.
+window plus 30 days) and the external-job adapter version that sold it
+(migration 010; it never changes), and every claim records the provider quote
+it was admitted against. Boot prunes, as the schema owner and in bounded
+batches, only quotes past that retention, older than every installed version's
+window plus the margin, and named by no claim; a trigger refuses any other
+quote deletion, whoever attempts it. Claims, terminal results and their reads
+are never pruned.
 
 ## Upgrade compatibility barrier
 

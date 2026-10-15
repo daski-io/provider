@@ -129,6 +129,52 @@ describePostgres("database-backed async-admission switch", () => {
     }
   });
 
+  it("requires the adapter version that sold a quote still open for dispatch, on this build and every instance", async () => {
+    const registry = await import("../src/core/serviceRegistry/registry.js");
+    const fixture = await import("./externalJobFixture.js");
+    const listing = [...config.servicing.keys()][0]!.slice(2);
+    registry.clearServicesForTests();
+    const v5 = fixture.scriptedAdapter("v5");
+    registry.registerService(fixture.jobService(fixture.scriptedAdapter("v7"), { previousExternalJobAdapters: { v5 } }));
+    // v5 sold this quote before new sales moved to v7; it may still be dispatched.
+    await owner.query(
+      `INSERT INTO provider_quotes
+         (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,issued_at,valid_before,
+          retain_until,adapter_version)
+       VALUES (decode(repeat('5a',32),'hex'),'echo',decode($1,'hex'),decode(repeat('5b',32),'hex'),'10000',NULL,
+         1000,1120,now() + interval '1 day','v5')`,
+      [listing],
+    );
+    try {
+      await worker("00000000-0000-4000-8000-0000000000f1", {
+        syncExecutionLeases: true, externalJobWorker: true, externalJobAdapters: { dummy: ["v7"] },
+      });
+      const refused = await activate();
+      expect([refused.enabled, failed(refused.checks)]).toEqual([false, ["external_job_services"]]);
+      await owner.query("UPDATE provider_runtime_instances SET stopped_at=now() WHERE stopped_at IS NULL");
+      await worker("00000000-0000-4000-8000-0000000000f2", {
+        syncExecutionLeases: true, externalJobWorker: true, externalJobAdapters: { dummy: ["v5", "v7"] },
+      });
+      const accepted = await activate();
+      expect(accepted.enabled).toBe(true);
+      expect(accepted.checks.find((check) => check.name === "external_job_services"))
+        .toMatchObject({ ok: true, detail: "2 adapter versions on every instance" });
+      await modules.activation.deactivateAsyncAdmission(modules.pool.migrationPool);
+      // A build that dropped v5 cannot take the open quote over.
+      registry.clearServicesForTests();
+      registry.registerService(fixture.jobService(fixture.scriptedAdapter("v7")));
+      const dropped = await activate();
+      expect(failed(dropped.checks)).toEqual(["retained_obligations"]);
+      expect(dropped.checks.find((check) => check.name === "retained_obligations")?.detail)
+        .toMatch(/\(external-job adapter dummy@v5 not installed\)/);
+    } finally {
+      registry.clearServicesForTests();
+      await owner.query(
+        "UPDATE provider_quotes SET retain_until=now() - interval '1 second' WHERE quote_hash=decode(repeat('5a',32),'hex')",
+      );
+    }
+  });
+
   it("refuses without an active encryption key to seal new jobs", async () => {
     await worker("00000000-0000-4000-8000-0000000000d1", { syncExecutionLeases: true, externalJobWorker: true });
     const result = await activate({ activeKeyId: null, keys: new Map() });

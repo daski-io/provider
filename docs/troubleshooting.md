@@ -105,7 +105,7 @@ order it would take over (see `docs/configuration.md`):
 | `skill_not_installed` | Its quotes may still be dispatched but the build no longer installs the service or skill; restore it until the window passes. |
 | `definition_invalid`, `schema_invalid` | The version no longer materializes against this build's global policy or schema compiler; do not edit the catalog, restore the matching configuration. |
 | `listing version not installed` | A claim or quote names a version absent from the catalog; reinstall its bundle rather than deleting rows. |
-| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under an adapter version this build no longer has; keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish. |
+| `external-job adapter <service>@<version> not installed` | An unfinished external job was admitted under, or a quote that may still be dispatched was sold by, an adapter version this build no longer has (the order of such a quote runs with that version); keep it as the current adapter or in `previousExternalJobAdapters` until its jobs finish and its quotes can no longer be dispatched. |
 | `encryption key <id> not configured` | An unfinished job's stored state names a key this build lacks; restore it (after a rotation, in `PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`). |
 | `no active encryption key for unfinished external jobs` | Unfinished jobs may still need a job reference or result candidate sealed, but `PROVIDER_DATA_ENCRYPTION_KEY` is not set; configure an active key (a previous key alone only reads). |
 
@@ -174,7 +174,7 @@ off unless every check in its JSON report passes:
 | `retained_obligations` | This build cannot service an obligation (see the boot refusal below). |
 | `compatible_workers` | No running instance runs the external-job worker, or an older process (without the worker, or at another schema epoch) still runs. Stop it, start this build, retry. |
 | `encryption_keys` | `PROVIDER_DATA_ENCRYPTION_KEY` is not configured for the command; external jobs cannot be sealed without it. |
-| `external_job_services` | A running instance does not declare an external-job adapter version that new sales or an unfinished job need (an older build); stop it and run this build. |
+| `external_job_services` | A running instance does not declare an external-job adapter version that new sales, a quote that may still be dispatched or an unfinished job need (an older build); stop it and run this build. |
 
 ## Startup refuses the database schema
 
@@ -304,7 +304,8 @@ is a reviewed code:
   chain, clock, an envelope that expired before its claim could commit, or a
   malformed request;
 - `outcome_policy`/`self_purchase`: the listing version is not installed (or
-  its service or skill is not), or the payer is a provider wallet;
+  its service or skill is not, or the external-job adapter version that sold
+  the order's quote), or the payer is a provider wallet;
 - `quote_window`/`price`: the forwarded `QuoteV1` or the persisted provider
   quote it names does not bind this order (unknown or zero quote hash,
   different request, payer or window), or the amount differs;

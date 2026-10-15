@@ -88,7 +88,7 @@ export function assertProviderQuoteBinding(
   quote: SignedEnvelope<QuoteV1>,
   dispatch: StandardRailDispatchV2,
   outcome: ProviderOutcomeConfig,
-): void {
+): asserts providerQuote is ProviderQuotePayload {
   if (
     !providerQuote
     || providerQuote.outcomeId !== outcome.outcomeId

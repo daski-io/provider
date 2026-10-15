@@ -112,13 +112,13 @@ read-only `recoverStart`, read-only `poll`, an optional read-only
 `requestReadiness`, docs, and service tests. Use the `ServiceAdapter` union;
 never rename or replace `FulfillmentAdapter`. The runtime supplies
 persistence, the stable operation key, leases, polling, restart recovery,
-resumption by the admitting adapter version (the service keeps old ones in
-`previousExternalJobAdapters`), and signed status and artifact reads. Any start
-exception is ambiguous and reconciled by the same key, pending polls never
-spend the failure budget, and an expired deadline does not prove the product
-failed. Never build a private polling server, hold an HTTP request open for
-the job, raise the synchronous timeout, or copy full's operator or asset
-subsystems into lite.
+running each order with the adapter version that sold it (the service keeps
+old ones in `previousExternalJobAdapters`), and signed status and artifact
+reads. Any start exception is ambiguous and reconciled by the same key,
+pending polls never spend the failure budget, and an expired deadline does not
+prove the product failed. Never build a private polling server, hold an HTTP
+request open for the job, raise the synchronous timeout, or copy full's
+operator or asset subsystems into lite.
 
 Both lite modes: register the service only in `src/providerServices.ts`, test
 with a fake client in `src/services/<slug>/tests/`, make no product-specific

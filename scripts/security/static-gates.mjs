@@ -80,6 +80,7 @@ const REVIEWED_MIGRATIONS = [
   ["007_quote_retention.sql", []],
   ["008_async_admission.sql", ["provider_async_admission", "provider_runtime_instances"]],
   ["009_external_jobs.sql", ["provider_external_jobs"]],
+  ["010_quote_adapter_version.sql", []],
 ];
 const migrationFiles = readdirSync(join(root, "src/core/db/migrations"))
   .filter((name) => name.endsWith(".sql")).sort();

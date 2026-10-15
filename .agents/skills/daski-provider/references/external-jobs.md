@@ -16,7 +16,7 @@ before relying on anything here, and follow its `docs/adding-a-service.md`.
 | Records the start intent and the replay horizon before the first call | `poll`: read-only look at the original job |
 | Leases, fencing, scheduling, backoff, restart recovery, overdue handling | Maps product states and the report to typed outcomes |
 | Validates and freezes the result; signs status and artifact reads | Pins the product endpoints and validates any URL it stores |
-| Resumes each job with the adapter version, keys, and contract that admitted it | Declares its `version` and replay retention, and keeps old adapters in `previousExternalJobAdapters` while their jobs run |
+| Runs each order with the adapter version that sold its quote, and resumes its job with that version, the keys, and the contract that admitted it | Declares its `version` and replay retention, and keeps old adapters in `previousExternalJobAdapters` while their jobs run or the quotes they sold may still be dispatched |
 
 Never build a private polling server, hold an HTTP request open for the job,
 raise the 50-second synchronous budget, sleep inside an adapter call, or copy
@@ -113,12 +113,14 @@ eight-hour job.
 `resultSchema` describes the complete completed `ServiceResult` (`status`,
 optional `message`, `artifacts`), which the artifact read returns exactly.
 Failures carry only a code from the module's `failureCodes`; their messages
-are dropped. A terminal report that fails the admitted schema or size bounds
-is an integration error, not a product failure: the job stays `working`,
-nothing is signed `completed`, no second job starts, and new quotes for that
-mapping stop until a repaired mapper retrieves the same report. Keep the
-adapter `version` when the reference format is unchanged. A report too large
-for the schema needs a stable permitted location; never publish a
+are dropped. That one list judges every installed adapter version, so keep a
+code listed while a retained previous version can still return it. A terminal
+report that fails the admitted schema or size bounds is an integration error,
+not a product failure: the job stays `working`, nothing is signed `completed`,
+no second job starts, and new quotes for that mapping stop until a repaired
+mapper retrieves the same report. Keep the adapter `version` for a mapper fix
+that changes neither the reference format nor the result contract. A report
+too large for the schema needs a stable permitted location; never publish a
 short-lived bearer URL as a permanent result.
 
 ## Synthetic walkthrough
@@ -163,9 +165,14 @@ production readiness on its own.
 - Every product state maps exactly. Timeouts, 429, and 5xx are `retry`
   from `poll`, `ambiguous` from `start`, and `unknown` from `recoverStart`.
 - A restart in each phase, a deployment while a job is pending, and a
-  compatible upgrade keep one job: retain the old adapter in
-  `previousExternalJobAdapters` when the reference format changes, and keep
-  every encryption key id stored jobs name.
+  compatible upgrade keep one job, run by the adapter version that sold the
+  order (core records it with each quote, even when the order is first
+  dispatched after the upgrade): retain the old adapter in
+  `previousExternalJobAdapters` when the reference format or the result
+  contract it maps to changes, while its jobs run or its quotes may still be
+  dispatched, and keep every encryption key id stored jobs name. A quote
+  without a recorded version (sold synchronously, or before migration 010)
+  runs with the current adapter.
 
 Core's PostgreSQL suites cover the scheduler; service tests use the fake.
 

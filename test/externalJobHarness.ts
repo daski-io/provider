@@ -17,6 +17,7 @@ import { jobKeys, jobRuntime, jobService, scriptedAdapter, setAsyncAdmission, ty
 import { dispatchOrder, quoteOrder } from "./gatewayOrderFixture.js";
 import { gatewayLifecycleCall, LIFECYCLE_HEADERS } from "./gatewayLifecycleWire.js";
 import type { ProviderAnswer } from "./gatewayWire.js";
+import type { railConfig } from "./standardRailServiceFixture.js";
 
 export const jobPayerKey = `0x${"7c".repeat(32)}` as Hex;
 export const jobPayer = privateKeyToAccount(jobPayerKey).address;
@@ -81,6 +82,8 @@ export async function startJobHarness(options: {
   settings?: Partial<ExternalJobWorkerSettings>;
   service?: Partial<ServiceModule>;
   retention?: number;
+  /** Superseded listing versions this build still services. */
+  retained?: Parameters<typeof railConfig>[1];
 } = {}): Promise<JobHarness> {
   const adapter = scriptedAdapter(options.version ?? `t${randomUUID().slice(0, 8)}`, {
     ...(options.retention === undefined ? {} : { idempotencyRetentionSeconds: options.retention }),
@@ -94,6 +97,7 @@ export async function startJobHarness(options: {
       maxOpenOrders: 1_000,
       ...options.outcome,
     },
+    retained: options.retained,
   });
   await setAsyncAdmission(pool, true);
   const newWorker = (settings: Partial<ExternalJobWorkerSettings> = {}) => new ExternalJobWorker({

@@ -111,7 +111,14 @@ Keep files near 250 lines where practical and split by cohesive responsibility.
   original key, never retried blindly. Only core schedules a start.
 - `resultSchema` describes the complete completed `ServiceResult`; core
   validates results against the admitted schema before freezing them. Failure
-  evidence is only a code listed in the module's `failureCodes`.
+  evidence is only a code listed in the module's `failureCodes`, one list for
+  every installed adapter version (keep a code while a retained version can
+  return it).
+- Core records the external-job adapter version selling each quote and runs
+  the order with exactly that version, even after new sales move on; keep
+  earlier versions in `previousExternalJobAdapters` while their jobs run or
+  their quotes may still be dispatched. A quote without one (a synchronous
+  sale, or one from before migration 010) runs with the current adapter.
 - A terminal task's state, result, result hash and completion time are frozen
   in one write and never change; legacy rows are never reshaped.
 - Lifecycle calls verify the gateway's `ProviderLifecycleGrantV1` before

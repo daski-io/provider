@@ -85,7 +85,8 @@ describePostgres("external jobs across upgrades against PostgreSQL", () => {
     await harness.round(worker(harness));
     expect(await harness.claim(old.taskId)).toMatchObject({ state: "completed", result: echoCompleted });
     expect(v1.calls.map((entry) => entry.method)).toEqual(["start", "poll"]);
-    const fresh = await harness.admit();
+    // A new sale (not the same quote again within the second) records v2.
+    const fresh = await harness.admit({ message: "after the upgrade" });
     expect((await harness.job(fresh.taskId)).adapter_version).toBe("v2");
     await harness.round(worker(harness));
     expect(v2.calls.map((entry) => [entry.method, entry.context.taskId])).toEqual([["start", fresh.taskId]]);

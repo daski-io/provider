@@ -286,10 +286,11 @@ After the cutover, compatible releases at the same schema epoch may overlap
 the running one briefly; leases and fences keep each call single and a
 restart resubmits nothing. Before rolling one out:
 
-- keep every adapter version an unfinished job needs, as the current adapter
-  or in `previousExternalJobAdapters` (while async admission is on, boot
-  also refuses a build that cannot resume a version a running instance
-  sells);
+- keep every adapter version an unfinished job or a quote that may still be
+  dispatched needs (a quote's order runs with the version that sold it), as
+  the current adapter or in `previousExternalJobAdapters` (while async
+  admission is on, boot also refuses a build that cannot resume a version a
+  running instance sells);
 - keep every encryption key id stored jobs name
   (`PROVIDER_DATA_ENCRYPTION_PREVIOUS_KEYS`), every previous wallet key
   orders were signed with (`PROVIDER_RETAINED_WALLET_PRIVATE_KEYS`) and every

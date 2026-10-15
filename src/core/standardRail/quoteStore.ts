@@ -26,6 +26,17 @@ export interface ProviderQuotePayload {
   validBefore: number;
 }
 
+/** A persisted quote: the signed fields and the adapter version that sold it. */
+export interface PersistedProviderQuote extends ProviderQuotePayload {
+  /**
+   * The external-job adapter version that sold the quote, recorded when it
+   * was issued (local metadata, never signed). Null when a synchronous
+   * adapter sold it or it predates migration 010: its order then runs with
+   * the service's current adapter.
+   */
+  adapterVersion: string | null;
+}
+
 export const providerQuoteHash = (payload: ProviderQuotePayload): Hex => canonicalHash({
   outcomeId: payload.outcomeId,
   listingManifestHash: payload.listingManifestHash,
@@ -39,23 +50,28 @@ export const providerQuoteHash = (payload: ProviderQuotePayload): Hex => canonic
 /**
  * Persist a quote before it is signed so a later dispatch can bind to it,
  * retained until its window plus its version's fulfillment window plus the
- * margin has passed (and forever once a claim names it).
+ * margin has passed (and forever once a claim names it), with the
+ * external-job adapter version that sells it (null for a synchronous one).
+ * The same signed quote issued again (same payer, request and second) keeps
+ * the row, and the version, that recorded it first: that version sold it.
  */
 export async function persistProviderQuote(
   payload: ProviderQuotePayload,
   fulfillmentSeconds: number,
+  adapterVersion: string | null,
 ): Promise<Hex> {
   const quoteHash = providerQuoteHash(payload);
   await pool.query(
     `INSERT INTO provider_quotes
        (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
-        issued_at,valid_before,retain_until)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,to_timestamp($8::bigint + $9::bigint))
+        issued_at,valid_before,retain_until,adapter_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,to_timestamp($8::bigint + $9::bigint),$10)
      ON CONFLICT (quote_hash) DO NOTHING`,
     [
       bytes(quoteHash), payload.outcomeId, bytes(payload.listingManifestHash),
       bytes(payload.requestHash), payload.grossAmount, payload.payer,
       payload.issuedAt, payload.validBefore, fulfillmentSeconds + QUOTE_DISPATCH_MARGIN_SECONDS,
+      adapterVersion,
     ],
   );
   return quoteHash;
@@ -93,9 +109,9 @@ export async function pruneSettledQuotes(
 
 /**
  * Load a persisted quote by the hash the gateway carried in QuoteV1. The row
- * is accepted only when its content reproduces that hash.
+ * is accepted only when its signed content reproduces that hash.
  */
-export async function loadProviderQuote(quoteHash: Hex): Promise<ProviderQuotePayload | null> {
+export async function loadProviderQuote(quoteHash: Hex): Promise<PersistedProviderQuote | null> {
   const result = await pool.query<{
     outcome_id: string;
     listing_manifest_hash: Buffer;
@@ -104,15 +120,16 @@ export async function loadProviderQuote(quoteHash: Hex): Promise<ProviderQuotePa
     payer: Hex | null;
     issued_at: string;
     valid_before: string;
+    adapter_version: string | null;
   }>(
     `SELECT outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
-            issued_at::text,valid_before::text
+            issued_at::text,valid_before::text,adapter_version
        FROM provider_quotes WHERE quote_hash=$1`,
     [bytes(quoteHash)],
   );
   const row = result.rows[0];
   if (!row) return null;
-  const payload: ProviderQuotePayload = {
+  const quote: PersistedProviderQuote = {
     outcomeId: row.outcome_id,
     listingManifestHash: hex(row.listing_manifest_hash),
     requestHash: hex(row.request_hash),
@@ -120,11 +137,12 @@ export async function loadProviderQuote(quoteHash: Hex): Promise<ProviderQuotePa
     payer: row.payer,
     issuedAt: Number(row.issued_at),
     validBefore: Number(row.valid_before),
+    adapterVersion: row.adapter_version ?? null,
   };
-  if (providerQuoteHash(payload) !== quoteHash.toLowerCase()) {
+  if (providerQuoteHash(quote) !== quoteHash.toLowerCase()) {
     throw new Error("Persisted provider quote does not reproduce its hash");
   }
-  return payload;
+  return quote;
 }
 
 /**

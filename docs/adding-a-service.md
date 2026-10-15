@@ -65,19 +65,31 @@ running worker in the process; otherwise they answer `503 quote_unavailable`
 (`external_jobs_unavailable`). The worker then calls the adapter as
 `docs/architecture.md` describes.
 
-A job is always resumed by the adapter version that admitted it. When a new
-version changes how job references are interpreted, give it a new `version`
-and keep the old adapter in `previousExternalJobAdapters` (keyed by its own
-version) until its jobs finish and no older instance still sells it; boot
-refuses a build that dropped a version an unfinished job needs or, while
+An order is run by the adapter version that sold it. Each quote records the
+external-job adapter version selling it, a funded dispatch is admitted under
+exactly that version (the current adapter or a retained one) even when it
+arrives after new sales moved to another version or listing version, and its
+job is always resumed by it, while the result is held to the contract of the
+listing version the order was paid under. When a new version changes how job
+references are read, or maps reports to a new listing version's result
+contract, give it a new `version` and keep the old adapter in
+`previousExternalJobAdapters` (keyed by its own version) until its jobs
+finish, the quotes it sold can no longer be dispatched (their window, the
+version's fulfillment window and 30 days) and no older instance still sells
+it. A dispatch whose selling version this build lacks is refused before
+admission (`outcome_policy`), and boot, the importer and activation refuse a
+build that dropped a version an unfinished job or such a quote needs or, while
 async admission is on, one a running instance still sells. A mapper fix that
-keeps the reference format keeps its version.
+keeps the reference format and the result contract keeps its version. A quote
+that recorded no version (a synchronous adapter sold it, or it was issued
+before migration 010) is admitted under the service's current adapter, as
+every order was before versions were recorded.
 
 The mode is a property of the installed service, not of its listing
-versions: a funded order of an earlier version is executed in the service's
-current mode. Never switch an installed service between synchronous and
-external-job while orders of its earlier versions may still be dispatched;
-publish the other mode as a new service instead.
+versions: an order sold by a synchronous adapter records no version and runs
+in the service's current mode. Never switch an installed service between
+synchronous and external-job while orders of its earlier versions may still
+be dispatched; publish the other mode as a new service instead.
 
 The adapter contract is intentionally terminal:
 
@@ -212,7 +224,11 @@ and `_`). Core attests a failure as exactly `{status: "failed", errorCode}`:
 the adapter's `message` is dropped, and an unlisted code becomes
 `service_execution_failed`, so failure evidence never carries free text.
 Unexpected exceptions and timeouts are also converted to
-`service_execution_failed`.
+`service_execution_failed`. The list is the service's, not one adapter
+version's: every installed version, retained previous external-job adapters
+included, is judged against it. When a new version changes its codes, keep
+each code a retained version can still return until that version is
+removed.
 
 Before freezing a completed result, core holds the whole object to the
 artifact rules above, the response JSON budget, the gateway's passive-output
@@ -313,9 +329,10 @@ signed status and artifact reads; the service supplies:
    requests before payment (a later product outage delays the admitted job;
    it never refuses a funded one), the bounded `readiness` probe, and the
    reviewed `failureCodes`;
-6. previous adapters in `previousExternalJobAdapters` while jobs they
-   admitted are unfinished (a new `version` whenever the reference format
-   changes); and
+6. previous adapters in `previousExternalJobAdapters` while jobs they admitted
+   are unfinished or quotes they sold may still be dispatched (a new `version`
+   whenever the reference format or the result contract it maps to changes),
+   with their failure codes kept in `failureCodes`; and
 7. docs and co-located tests with a fake product.
 
 Map every product state exactly: a pending job is `pending` (it never spends

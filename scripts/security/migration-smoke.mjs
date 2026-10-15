@@ -186,6 +186,24 @@ try {
     if (!await rejects(deleteQuote(byte))) throw new Error(`a retained provider quote was deleted: ${byte}`);
   }
   await client.query(deleteQuote("e3"));
+  // The adapter version that sold a quote (010): a reviewed version or none,
+  // never changed once recorded, not even on a quote that recorded none.
+  const sold = (byte, version) => `INSERT INTO provider_quotes
+      (quote_hash,outcome_id,listing_manifest_hash,request_hash,gross_amount,payer,
+       issued_at,valid_before,retain_until,adapter_version)
+    VALUES (decode(repeat('${byte}',32),'hex'),'echo',decode(repeat('44',32),'hex'),
+      decode(repeat('55',32),'hex'),'10000',NULL,1000,1120,now() + interval '1 day',${version})`;
+  await client.query(sold("f1", "'v1.2_b-3'"));
+  for (const version of ["''", "'-v1'", "'v 1'", `'${"v".repeat(65)}'`]) {
+    if (!await rejects(sold("f2", version))) throw new Error(`an invalid quote adapter version was recorded: ${version}`);
+  }
+  for (const [byte, version] of [["f1", "'v2'"], ["f1", "NULL"], ["e1", "'v1'"]]) {
+    const change = await client.query(`UPDATE provider_quotes SET adapter_version=${version}
+        WHERE quote_hash=decode(repeat('${byte}',32),'hex')`).then(() => "changed", (error) => error.message);
+    if (change !== "a provider quote keeps the adapter version that sold it") {
+      throw new Error(`a quote's recorded adapter version changed: ${byte} to ${version}`);
+    }
+  }
 
   // External jobs: a claim in its own pending state commits only with its
   // job; phases follow the reviewed transitions; a queued job fails only
@@ -279,6 +297,7 @@ try {
        VALUES ('legacy',1,now(),now())`,
     "UPDATE provider_runtime_listing_versions SET superseded_at=now() WHERE false",
     "UPDATE provider_quotes SET gross_amount='1' WHERE false",
+    "UPDATE provider_quotes SET adapter_version='v1' WHERE false",
     "UPDATE supplier_operations SET attempts=attempts WHERE false",
     "UPDATE standard_evidence_admissions SET order_id=order_id WHERE false",
     "UPDATE provider_schema_epoch SET epoch=1",

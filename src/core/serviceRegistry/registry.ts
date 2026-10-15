@@ -113,6 +113,18 @@ export function getExternalJobAdapter(serviceSlug: string, version: string): Ext
   return Object.hasOwn(previous, version) ? previous[version]! : null;
 }
 
+/**
+ * The adapter a funded order is admitted under: exactly the external-job
+ * version its quote recorded (current or retained, even after new sales
+ * moved to another version or mode), or, for a quote that recorded none
+ * (sold by a synchronous adapter, or before versions were recorded), the
+ * service's current adapter. Null when this build lacks that version.
+ */
+export function getAdmittingAdapter(serviceSlug: string, quotedVersion: string | null): ServiceAdapter | null {
+  if (quotedVersion === null) return getService(serviceSlug)?.adapter ?? null;
+  return getExternalJobAdapter(serviceSlug, quotedVersion);
+}
+
 export function clearServicesForTests(): void {
   services.clear();
 }

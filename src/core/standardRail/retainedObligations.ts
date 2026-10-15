@@ -31,7 +31,10 @@ export interface ListingObligation {
   openQuotes: number;
   /** Unfinished external jobs; each needs its version's definition. */
   externalJobs: number;
-  /** The adapter versions those jobs were admitted under, per service. */
+  /**
+   * Per service, the adapter versions those jobs were admitted under and
+   * those that sold the open quotes (which run their orders when dispatched).
+   */
   adapterVersions: Map<string, Set<string>>;
   /** The key ids their encrypted input, reference or candidate name. */
   encryptionKeyIds: Set<string>;
@@ -41,12 +44,13 @@ const hex = (value: Buffer) => `0x${value.toString("hex")}` as Hex;
 
 /**
  * Obligations by listing version: claims of this gateway audience, quotes
- * that may still back a first dispatch, and unfinished external jobs with
- * the adapter versions and keys they need. A quote's recorded retention
- * (`retain_until`, set when it was issued) decides; a quote from before
- * retention was recorded is held to its window plus its version's
- * fulfillment window and the margin, and to the longest window the gateway
- * admits when this build cannot materialize the version.
+ * that may still back a first dispatch with the adapter versions that sold
+ * them, and unfinished external jobs with the adapter versions and keys they
+ * need. A quote's recorded retention (`retain_until`, set when it was
+ * issued) decides; a quote from before retention was recorded is held to
+ * its window plus its version's fulfillment window and the margin, and to
+ * the longest window the gateway admits when this build cannot materialize
+ * the version.
  */
 export async function loadListingObligations(
   db: Queryable,
@@ -60,6 +64,9 @@ export async function loadListingObligations(
     };
     obligations.set(hash, current);
     return current;
+  };
+  const needs = (owed: ListingObligation, slug: string, versions: readonly string[]) => {
+    for (const version of versions) owed.adapterVersions.set(slug, (owed.adapterVersions.get(slug) ?? new Set()).add(version));
   };
   const claims = await db.query<{ listing: Buffer; count: number }>(
     `SELECT listing_manifest_hash AS listing, count(*)::int AS count
@@ -83,26 +90,38 @@ export async function loadListingObligations(
   for (const row of jobs.rows) {
     const owed = entry(hex(row.listing));
     owed.externalJobs += row.count;
-    owed.adapterVersions.set(row.slug, (owed.adapterVersions.get(row.slug) ?? new Set()).add(row.version));
+    needs(owed, row.slug, [row.version]);
     for (const keyId of row.key_ids) owed.encryptionKeyIds.add(keyId);
   }
   const quotes = await db.query<{
     listing: Buffer; retained: number; unrecorded: number; latest: string | null; now: string;
+    retained_versions: string[]; unrecorded_versions: string[];
   }>(
     `SELECT listing_manifest_hash AS listing,
             count(*) FILTER (WHERE retain_until > now())::int AS retained,
             count(*) FILTER (WHERE retain_until IS NULL)::int AS unrecorded,
             (max(valid_before) FILTER (WHERE retain_until IS NULL))::text AS latest,
-            floor(extract(epoch FROM now()))::bigint::text AS now
+            floor(extract(epoch FROM now()))::bigint::text AS now,
+            COALESCE(array_agg(DISTINCT adapter_version)
+              FILTER (WHERE retain_until > now() AND adapter_version IS NOT NULL), '{}') AS retained_versions,
+            COALESCE(array_agg(DISTINCT adapter_version)
+              FILTER (WHERE retain_until IS NULL AND adapter_version IS NOT NULL), '{}') AS unrecorded_versions
        FROM provider_quotes GROUP BY 1`,
   );
   for (const row of quotes.rows) {
     const hash = hex(row.listing);
-    const window = catalog.servicing.get(hash)?.fulfillmentSeconds ?? MAX_FULFILLMENT_SECONDS;
+    const outcome = catalog.servicing.get(hash);
+    const window = outcome?.fulfillmentSeconds ?? MAX_FULFILLMENT_SECONDS;
     const unrecordedOpen = row.unrecorded > 0 && row.latest !== null
       && Number(row.latest) + window + QUOTE_DISPATCH_MARGIN_SECONDS > Number(row.now);
     const open = row.retained + (unrecordedOpen ? row.unrecorded : 0);
-    if (open > 0) entry(hash).openQuotes = open;
+    if (open === 0) continue;
+    const owed = entry(hash);
+    owed.openQuotes = open;
+    // A version this build cannot materialize is refused for its definition;
+    // otherwise each open quote's order needs the adapter version that sold it.
+    const sold = [...row.retained_versions, ...(unrecordedOpen ? row.unrecorded_versions : [])];
+    if (outcome) needs(owed, outcome.serviceSlug, sold);
   }
   return obligations;
 }
@@ -115,9 +134,10 @@ const label = (hash: Hex) => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
  * can service every obligation: each version with claims needs the signing
  * key its orders' snapshots name; each version whose quotes may still be
  * dispatched, or with unfinished external jobs, also needs its admitted
- * definition (the jobs' result contract); and each unfinished job needs its
- * own adapter version, every encryption key its stored state names and an
- * active key to seal the reference or candidate it may still produce.
+ * definition (the jobs' result contract); each open quote needs the adapter
+ * version that sold it, which will run its order; and each unfinished job
+ * needs its own adapter version, every encryption key its stored state names
+ * and an active key to seal the reference or candidate it may still produce.
  * Diagnostics name versions by hash prefix, adapter versions and key ids,
  * never key material.
  */

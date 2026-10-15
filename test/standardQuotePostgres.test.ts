@@ -64,6 +64,8 @@ describePostgres("provider quotes in PostgreSQL", () => {
       payer,
       issuedAt: accepted.issuedAt,
       validBefore: accepted.validBefore,
+      // A synchronous adapter sold it: no external-job version to record.
+      adapterVersion: null,
     });
     const unbound = await service.quote(await gatewayQuoteRequest({ listing, request, payer: null }));
     const unboundHash = (await acceptQuoteAsGateway({ listing, body: unbound, request, payer: null }))

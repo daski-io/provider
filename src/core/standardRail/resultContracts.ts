@@ -21,7 +21,11 @@ export class ResultContracts {
     }
   }
 
-  /** The contract for one version's orders, with the service's reviewed failure codes; null when unknown. */
+  /**
+   * The contract for one version's orders, with the service's reviewed
+   * failure codes (one list for every installed adapter version, retained
+   * ones included); null when unknown.
+   */
   forListing(listingManifestHash: Hex, serviceSlug: string): ResultContract | null {
     const validate = this.validators.get(listingManifestHash.toLowerCase());
     const service = getService(serviceSlug);

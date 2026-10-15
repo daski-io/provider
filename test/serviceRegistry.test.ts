@@ -8,6 +8,7 @@ import {
 import {
   clearServicesForTests,
   getAdapter,
+  getAdmittingAdapter,
   getAllServices,
   getExternalJobAdapter,
   getSkill,
@@ -109,6 +110,26 @@ describe("minimal service registry", () => {
     registerService({ ...dummyService, previousExternalJobAdapters: { v1 } });
     expect(getSyncAdapter("dummy")).toBe(dummyService.adapter);
     expect(getExternalJobAdapter("dummy", "v1")).toBe(v1);
+  });
+
+  // A funded order is admitted under the adapter version that sold its quote.
+  it("selects the adapter that sold a quote, or the current one for a quote that recorded none", () => {
+    const v1 = jobAdapter("v1");
+    registerService(jobService({ previousExternalJobAdapters: { v1 } }));
+    const current = getAllServices()[0]!.adapter;
+    expect(getAdmittingAdapter("dummy", "v1")).toBe(v1);
+    expect(getAdmittingAdapter("dummy", "v2")).toBe(current);
+    // Sold by a synchronous adapter, or recorded before versions were: today's adapter.
+    expect(getAdmittingAdapter("dummy", null)).toBe(current);
+    // A version this build lacks admits nothing, never the current adapter in its place.
+    expect(getAdmittingAdapter("dummy", "v0")).toBeNull();
+    expect(getAdmittingAdapter("dummy", "__proto__")).toBeNull();
+    expect(getAdmittingAdapter("other", null)).toBeNull();
+    clearServicesForTests();
+    // New sales moved to the synchronous mode: an order sold by v1 still runs as v1's job.
+    registerService({ ...dummyService, previousExternalJobAdapters: { v1 } });
+    expect(getAdmittingAdapter("dummy", "v1")).toBe(v1);
+    expect(getAdmittingAdapter("dummy", null)).toBe(dummyService.adapter);
   });
 
   it("refuses an adapter outside the reviewed modes or an ambiguous version set", () => {

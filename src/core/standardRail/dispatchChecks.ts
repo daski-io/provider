@@ -7,7 +7,7 @@ import {
 } from "../externalJobs/admission.js";
 import type { ExternalJobRuntime } from "../externalJobs/runtime.js";
 import { logWarn } from "../logger.js";
-import { getService, getSkill } from "../serviceRegistry/registry.js";
+import { getAdmittingAdapter, getSkill } from "../serviceRegistry/registry.js";
 import type { ExternalJobAdapter } from "../serviceRegistry/types.js";
 import { assertExactKeys } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
@@ -144,15 +144,17 @@ export async function verifyNewDispatch(
     await withDispatchRejection("validator", () => validateProviderRequest(validate, parts.request));
     // The handler must be installed. The price is the version's admitted
     // one, which the provider quote binding has already enforced, even when
-    // the build now sells at another price (contract drift).
-    const service = getService(outcome.serviceSlug);
-    if (!service || !getSkill(outcome.serviceSlug, outcome.skillId)) {
+    // the build now sells at another price (contract drift). The adapter
+    // version that sold the quote runs the order, even when new sales have
+    // moved to another version or mode; a build without it cannot admit it.
+    const adapter = getAdmittingAdapter(outcome.serviceSlug, providerQuote.adapterVersion);
+    if (!adapter || !getSkill(outcome.serviceSlug, outcome.skillId)) {
       throw new DispatchRejectedError("outcome_policy");
     }
     const contract = resultContract(checks, outcome);
     let plan: AdmissionPlan;
-    if (service.adapter.mode === "external-job") {
-      plan = await externalJobPlan(checks, service.adapter, outcome, dispatch, parts.request);
+    if (adapter.mode === "external-job") {
+      plan = await externalJobPlan(checks, adapter, outcome, dispatch, parts.request);
     } else {
       // Synchronous execution during an outage would sign a terminal
       // failure; refusing before admission lets the gateway retry.

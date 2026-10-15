@@ -98,13 +98,14 @@ taskId, dispatchHash, signature, state, operations
 terminalAttestation   (completed and failed only)
 ```
 
-A new claim is verified against the listing version the dispatch names,
-looked up among every installed version by its runtime commitment hash: an
-order paid against a version that has since been superseded is admitted with
-that version's schemas, price and deadlines. Every answer about an order is
-signed with the provider wallet its version recorded (a retained previous
-key after a rotation), and servicing calls may name a retained previous
-provider audience.
+A new claim is verified against the listing version the dispatch names, looked
+up among every installed version by its runtime commitment hash: an order paid
+against a version that has since been superseded is admitted with that
+version's schemas, price and deadlines, and an external-job order under the
+adapter version recorded with its provider quote (the one that sold it). Every
+answer about an order is signed with the provider wallet its version recorded
+(a retained previous key after a rotation), and servicing calls may name a
+retained previous provider audience.
 
 `state` is `working` while a synchronous execution runs (stored as
 `executing`), then `completed` or `failed`; there is no inline `result`. An

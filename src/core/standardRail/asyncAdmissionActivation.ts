@@ -7,7 +7,7 @@ import type { FieldEncryptionKeyRing } from "../security/fieldEncryption.js";
 import { getAllServices } from "../serviceRegistry/registry.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { countLegacyExecutions } from "./legacyCutover.js";
-import { verifyRetainedObligations } from "./retainedObligations.js";
+import { loadListingObligations, verifyRetainedObligations } from "./retainedObligations.js";
 
 export interface ActivationCheck {
   name: "compatibility_barrier" | "legacy_executions" | "retained_obligations" | "compatible_workers"
@@ -29,10 +29,10 @@ const outcome = async (name: ActivationCheck["name"], work: () => Promise<string
  * barrier is installed at this build's epoch (so no pre-R1 process can run),
  * no pre-R1 execution awaits the cutover, this build can service every
  * retained obligation with its handlers and keys (unfinished external jobs
- * included), every running instance is a compatible external-job worker (at
- * least one) that declares every adapter version new sales (this build's or
- * any running instance's) or unfinished jobs need, and an active key can
- * seal new jobs' input.
+ * and open quotes included), every running instance is a compatible
+ * external-job worker (at least one) that declares every adapter version new
+ * sales (this build's or any running instance's), open quotes or unfinished
+ * jobs need, and an active key can seal new jobs' input.
  */
 export async function asyncActivationChecks(
   db: Queryable,
@@ -69,7 +69,7 @@ export async function asyncActivationChecks(
     }),
     await outcome("external_job_services", async () => {
       const live = await liveRuntimeInstances(db);
-      const required = await requiredAdapterVersions(db, config.gatewayAudience, live);
+      const required = await requiredAdapterVersions(db, config, live);
       const lacking = live.filter((instance) => [...required].some(([slug, versions]) =>
         [...versions].some((version) => !declaredVersions(instance, slug).includes(version))));
       if (lacking.length > 0) {
@@ -83,12 +83,13 @@ export async function asyncActivationChecks(
 
 /**
  * The external-job adapter versions new sales use (this build's and every
- * running instance's declared ones) and those unfinished jobs of this
+ * running instance's declared ones), those that sold quotes that may still
+ * be dispatched (they run those orders), and those unfinished jobs of this
  * gateway audience were admitted under.
  */
 async function requiredAdapterVersions(
   db: Queryable,
-  gatewayAudience: string,
+  config: ProviderStandardRailConfig,
   live: readonly LiveRuntimeInstance[],
 ): Promise<Map<string, Set<string>>> {
   const required = new Map<string, Set<string>>();
@@ -103,13 +104,9 @@ async function requiredAdapterVersions(
       if (typeof version === "string") add(slug, version);
     }
   }
-  const open = await db.query<{ slug: string; version: string }>(
-    `SELECT DISTINCT t.service_slug AS slug, j.adapter_version AS version
-       FROM provider_external_jobs j JOIN provider_transactions t ON t.id=j.task_id
-      WHERE j.phase IN ('queued','starting','reconciling','polling') AND t.gateway_audience=$1`,
-    [gatewayAudience],
-  );
-  for (const row of open.rows) add(row.slug, row.version);
+  for (const owed of (await loadListingObligations(db, config.gatewayAudience, config)).values()) {
+    for (const [slug, versions] of owed.adapterVersions) for (const version of versions) add(slug, version);
+  }
   return required;
 }
 

@@ -325,6 +325,10 @@ describePostgres("dispatch recovery and fresh observations against PostgreSQL", 
       expect((await rail.post("/standard-rail/dispatch/status", valid)).status).toBe(200);
     }
     const forged = { query: { ...valid.query, signature: `0x${"11".repeat(65)}` } };
+    // Earlier cases charge this same loopback source (a forged and an
+    // oversized poll), so begin from a full budget instead of whatever their
+    // timing left behind.
+    await pool.query("DELETE FROM rate_limit_buckets WHERE bucket_key LIKE 'servicing-failures:%'");
     let refused = 0;
     for (let attempt = 0; attempt < 400; attempt += 1) {
       const answer = await rail.post("/standard-rail/dispatch/status", forged);

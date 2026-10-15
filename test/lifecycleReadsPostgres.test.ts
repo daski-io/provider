@@ -201,6 +201,9 @@ describePostgres("lifecycle reads against PostgreSQL", () => {
     // Forged grants are unauthenticated: they exhaust lifecycle's own bucket only.
     const forged = { ...(await call(orderId, taskId, "status", "read")) };
     forged.grant = { ...forged.grant, signature: `0x${"11".repeat(64)}1b` as Hex };
+    // Begin from a full lifecycle budget, whatever earlier cases' forged
+    // grants and their timing left in this loopback source's bucket.
+    await pool.query("DELETE FROM rate_limit_buckets WHERE bucket_key LIKE 'servicing-failures:lifecycle:%'");
     let refused = 0;
     for (let attempt = 0; attempt < 400; attempt += 1) {
       const answer = await read(rail, forged);

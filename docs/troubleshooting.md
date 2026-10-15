@@ -8,13 +8,14 @@ npm run doctor -- --stage=testnet --json
 npm run doctor -- --stage=testnet --database --json
 ```
 
-Doctor performs no mutations and no network calls. By default it is offline
-and reports `DATABASE_DIAGNOSTICS` as `skip`: database checks were not
-performed, which is never a pass. With `--database` it also connects with
-`DATABASE_URL` and runs this build's checks in one `READ ONLY` snapshot that
-is rolled back; it never migrates, imports a bundle, activates async
-admission or writes a row, and it reports counts and opaque references
-(task and instance ids), never inputs, job references, URLs or key values.
+Doctor performs no mutations and calls no product, chain or gateway. By
+default it is offline and reports `DATABASE_DIAGNOSTICS` as `skip`: database
+checks were not performed, which is never a pass. With `--database` it also
+connects to PostgreSQL with `DATABASE_URL` (its only network use) and runs
+this build's checks in one `READ ONLY` snapshot that is rolled back; it never
+migrates, imports a bundle, activates async admission or writes a row, and it
+reports counts and opaque references (task and instance ids), never inputs,
+job references, URLs or key values.
 The JSON report (`schemaVersion: 2`) carries `database`: `not_performed`,
 `performed` or `unavailable`, and each check's status is `pass`, `warn`,
 `fail` or `skip`. The database checks judge the database against the
@@ -44,7 +45,7 @@ to support.
 | `RUNTIME_INSTANCES` | A running instance is at another schema epoch or has no external-job worker, or its worker heartbeat is older than 60 seconds. | Stop older processes; restart a stalled one. |
 | `LEGACY_EXECUTIONS` | Pre-R1 executions are still `executing` without a lease (task ids listed). | Reconcile their product mutations, then `npm run daski:cutover -- --resolve-legacy --old-processes-stopped`. |
 | `SYNC_EXECUTION_LEASES` | Synchronous executions hold expired leases (`warn`); a running process fails them as `provider_execution_abandoned`. | Start a compatible process if none runs; reconcile before retrying a mutation. |
-| `SUPPLIER_OPERATIONS` | Supplier-journal entries are still `intent` or `ambiguous`. | Reconcile against the product's authoritative state; never repeat a mutation blindly. |
+| `SUPPLIER_OPERATIONS` | Supplier-journal entries are still `intent` or `ambiguous` (core's own external-job start entries are excluded: core reconciles them, and `EXTERNAL_JOBS` reports their start ambiguity). | Reconcile against the product's authoritative state; never repeat a mutation blindly. |
 | `EXTERNAL_JOBS` | Unfinished external jobs raise the servicing codes below (`fail` for a missing handler or key or an invalid result, `warn` otherwise); without a heartbeating worker they also raise `external_job_worker_stopped`. | See "External-job servicing health". |
 | `RUNTIME_CATALOG` | An installed paid skill has no promoted runtime listing yet (`warn`), or the catalog or standard-rail configuration does not load (`fail`). | Install the Daski-issued bundle; never edit catalog rows. |
 | `RETAINED_OBLIGATIONS` | This build could not service an obligation it would take over (same reasons as the boot refusal below), or the check was not performed for missing standard-rail values (`skip`). | See the reasons table below; never delete claims or quotes. |

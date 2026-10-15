@@ -240,7 +240,7 @@ whenever it boots. Hand this sequence to the operator:
    legacy-process barrier (from then on no pre-R1 process can boot or change a
    row), and prints the inventory as JSON: schema epoch, pre-R1 executions
    left `executing` (opaque task ids), leased R1 executions, and unresolved
-   supplier operations.
+   supplier operations (core's own external-job start entries excluded).
 5. For each listed pre-R1 execution, reconcile any supplier mutation it may
    have made with the product (authoritative lookup; never repeat it blindly).
    Then run `npm run daski:cutover -- --resolve-legacy --old-processes-stopped`

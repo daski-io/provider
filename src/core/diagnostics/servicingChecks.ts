@@ -121,7 +121,13 @@ const FAILING_CODES = new Set(["external_job_handler_missing", "external_job_key
  */
 export async function externalJobsCheck(
   db: Queryable,
-  args: { servicing: ExternalJobServicing; leaseSeconds: number; gatewayAudience: string; liveWorkers: number },
+  args: {
+    servicing: ExternalJobServicing;
+    leaseSeconds: number;
+    gatewayAudience: string;
+    /** Null when the instances could not be read: then no worker code is raised. */
+    liveWorkers: number | null;
+  },
 ): Promise<DiagnosticCheck> {
   const inspection = await inspectExternalJobs(db, args.servicing, args.leaseSeconds, args.gatewayAudience);
   const codes: string[] = externalJobHealthCodes(inspection, true);

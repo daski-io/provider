@@ -55,6 +55,18 @@ describe("doctor database mode without a usable database", () => {
     }
   });
 
+  it("builds the key ring as boot does, refusing an encryption key that is a retained wallet key", () => {
+    const retained = `0x${"5e".repeat(32)}`;
+    const { report, diagnostics } = doctor({
+      ...environment,
+      PROVIDER_RETAINED_WALLET_PRIVATE_KEYS: retained,
+      PROVIDER_DATA_ENCRYPTION_KEY: retained,
+    });
+    expect(report.database).toBe("unavailable");
+    expect(diagnostics?.message).toContain("must not reuse a signing key");
+    expect(JSON.stringify(report)).not.toContain(retained.slice(2));
+  });
+
   it("names invalid configuration variables, never their values", () => {
     const invalidKey = "0xnot-a-wallet-key-but-still-never-printed";
     const { report, diagnostics } = doctor({ ...environment, PROVIDER_WALLET_PRIVATE_KEY: invalidKey });

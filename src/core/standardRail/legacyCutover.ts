@@ -7,6 +7,12 @@ import { failureEvidence, PROVIDER_RESTARTED_DURING_EXECUTION } from "./serviceR
 /** Listed task ids are opaque references, bounded so the report stays small. */
 const MAX_LISTED_TASKS = 100;
 /**
+ * Core's own external-job start journal (START_JOURNAL_KIND in
+ * externalJobs/journalHandoff.ts): core reconciles those entries itself
+ * through recoverStart, so they are not operator work.
+ */
+export const CORE_START_JOURNAL_KIND = "external-job.start";
+/**
  * A pre-R1 row younger than the synchronous budget plus this margin may still
  * belong to a call an old process is finishing; resolution leaves it alone.
  */
@@ -21,7 +27,10 @@ export interface CutoverInventory {
   legacyExecutions: { count: number; oldestAgeSeconds: number | null; taskIds: string[] };
   /** R1 synchronous executions by lease state. */
   leasedExecutions: { live: number; expired: number };
-  /** Supplier mutations whose outcome is still intent or ambiguous. */
+  /**
+   * Supplier mutations whose outcome is still intent or ambiguous, other
+   * than core's external-job starts (reported with the external jobs).
+   */
   unresolvedSupplierOperations: { intent: number; ambiguous: number };
 }
 
@@ -42,7 +51,8 @@ export async function cutoverInventory(db: Queryable): Promise<CutoverInventory>
   const journal = await db.query<{ intent: number; ambiguous: number }>(
     `SELECT count(*) FILTER (WHERE state='intent')::int AS intent,
             count(*) FILTER (WHERE state='ambiguous')::int AS ambiguous
-       FROM supplier_operations`,
+       FROM supplier_operations WHERE kind <> $1`,
+    [CORE_START_JOURNAL_KIND],
   );
   return {
     schemaEpoch: await readDatabaseSchemaEpoch(db),

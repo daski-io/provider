@@ -29,9 +29,17 @@ export const check = (
   details?: Record<string, unknown>,
 ): DiagnosticCheck => ({ code, status, message, ...(remedy ? { remedy } : {}), ...(details ? { details } : {}) });
 
-/** A thrown message a diagnostic may show: this build's own wording, redacted and bounded. */
-export const safeMessage = (error: unknown): string =>
-  redactSensitiveText(error instanceof Error ? error.message : "check failed").slice(0, 500);
+/**
+ * A thrown message a diagnostic may show. A database or network error is
+ * named by its code only (a driver message can quote values, hosts or
+ * URLs); this build's own wording is redacted, credentials in any URL
+ * scheme included, and bounded.
+ */
+export function safeMessage(error: unknown): string {
+  if (databaseErrorCode(error) !== "unknown") return `the database could not be read (${databaseErrorCode(error)})`;
+  const text = error instanceof Error ? error.message : "check failed";
+  return redactSensitiveText(text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1<redacted>@")).slice(0, 500);
+}
 
 /** "1 job", "2 jobs". */
 export const counted = (count: number, singular: string, plural = `${singular}s`): string =>

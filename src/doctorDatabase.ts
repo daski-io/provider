@@ -77,6 +77,7 @@ async function compose() {
     { loadProviderStandardRailConfig, resolveGatewayIdentity },
     { deriveProviderLaunchPolicy },
     { loadRuntimeListingVersions },
+    { parseRetainedSigningKeys },
   ] = await Promise.all([
     import("./providerServices.js"),
     import("./core/serviceRegistry/registry.js"),
@@ -88,6 +89,7 @@ async function compose() {
     import("./core/standardRail/config.js"),
     import("./core/standardRail/launchPolicy.js"),
     import("./core/gatewayRegistration/runtimeCatalog.js"),
+    import("./core/standardRail/retainedConfig.js"),
   ]);
   const services = configuredServices(config.CHAIN_ID);
   for (const service of services) registerService(service);
@@ -102,7 +104,12 @@ async function compose() {
     },
     input: {
       migrations: buildMigrations(),
-      servicing: externalJobServicing(services, externalJobKeyRing(config)),
+      // The key ring exactly as boot builds it: no encryption key may equal a
+      // signing key, current or retained.
+      servicing: externalJobServicing(services, externalJobKeyRing(
+        config,
+        parseRetainedSigningKeys(process.env, config.PROVIDER_WALLET_PRIVATE_KEY as `0x${string}`).values(),
+      )),
       externalJobServices: services
         .filter((service) => service.adapter.mode === "external-job")
         .map((service) => service.manifest.slug),

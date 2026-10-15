@@ -118,7 +118,7 @@ export async function runDatabaseDiagnostics(db: Queryable, input: DatabaseDiagn
   }
   checks.push(...await guarded(["ASYNC_ADMISSION"], async () =>
     [await inSavepoint(db, () => asyncAdmissionCheck(db, input.externalJobServices))]));
-  let liveWorkers = 0;
+  let liveWorkers: number | null = null;
   checks.push(...await guarded(["RUNTIME_INSTANCES"], async () => {
     const instances = await inSavepoint(db, () => runtimeInstancesCheck(db));
     liveWorkers = instances.liveWorkers;

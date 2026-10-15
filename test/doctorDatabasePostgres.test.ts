@@ -131,7 +131,8 @@ describePostgres("doctor database mode against PostgreSQL", () => {
           now() - interval '2 hours', now() - interval '1 hour')`, [`daski:v1:${INPUT_MARKER}`]);
       await client.query("COMMIT");
       await client.query(`INSERT INTO supplier_operations (service_id,op_key,kind,state)
-        VALUES ('dummy','op-ambiguous','example.mutation','ambiguous')`);
+        VALUES ('dummy','op-ambiguous','example.mutation','ambiguous'),
+               ('dummy','00000000-0000-8000-8000-0000000000d1','external-job.start','ambiguous')`);
       // A process that heartbeats while its worker went silent.
       await client.query(`INSERT INTO provider_runtime_instances
           (instance_id,runtime_epoch,revision,capabilities,started_at,heartbeat_at,worker_heartbeat_at)
@@ -167,6 +168,7 @@ describePostgres("doctor database mode against PostgreSQL", () => {
       details: { running: 1, liveWorkers: 0, stoppedWorkers: ["00000000-0000-4000-8000-0000000000aa"] },
     });
     expect(checks.LEGACY_EXECUTIONS).toMatchObject({ status: "fail", details: { count: 1, taskIds: ["task-pre-r1"] } });
+    // Core reconciles its own external-job start journal; only the service's entry is operator work.
     expect(checks.SUPPLIER_OPERATIONS).toMatchObject({ status: "warn", details: { intent: 0, ambiguous: 1 } });
     expect(checks.EXTERNAL_JOBS).toMatchObject({
       status: "fail",

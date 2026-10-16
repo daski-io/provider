@@ -124,7 +124,7 @@
           "a durable buyer-owned resource with an owner action (deletion)"
         ],
         "plan": [
-          "read the full-provider reference and the provider-full repository's AGENTS.md",
+          "read the full-provider reference and the provider-full repository's README.md",
           "model the workspace as an asset with standard actions"
         ],
         "mustNot": [

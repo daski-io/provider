@@ -60,7 +60,7 @@ for (const reference of requiredReferences) {
   }
 }
 for (const required of [
-  "AGENTS.md", "docs/getting-started.md", "docs/integrating-existing-product.md",
+  "README.md", "docs/getting-started.md", "docs/integrating-existing-product.md",
   "docs/adding-a-service.md", "docs/onboarding.md", "provider-full",
 ]) {
   if (!packagedSource.includes(required)) failures.push(`skill package is missing route: ${required}`);

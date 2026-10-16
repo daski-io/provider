@@ -1,3 +1,17 @@
+---
+title: "Daski provider agent skill"
+status: canonical
+authority: current repository implementation and approved maintainer workflow
+owner: repository maintainers
+effective-date: 2026-10-16
+last-verified: 2026-10-16 (documentation placement; no live release verification)
+supersedes: repository-wide agent files as the home of general repository guidance
+superseded-by: none
+sensitivity: public-safe
+related-repositories: daski-io/provider
+review-trigger: setup, architecture, interface or workflow change
+---
+
 # Daski provider agent skill
 
 The repository ships one portable, harness-agnostic skill package:
@@ -10,7 +24,7 @@ Its entrypoint helps a coding agent choose the correct path (lite
 synchronous, lite external job, or `provider-full`), inspect an existing API,
 MCP, or job-running product, implement a service, run gates, and prepare the
 Testnet handoff. Focused references make the released package useful before a
-repository is cloned. After checkout, `README.md`, `AGENTS.md`, and `docs/`
+repository is cloned. After checkout, `README.md` and `docs/`
 remain authoritative; the skill deliberately does not duplicate their full
 manuals.
 
@@ -91,7 +105,7 @@ say:
 
 ```text
 Use the installed daski-provider skill. If no provider checkout exists, select
-the correct starter before acquiring it. After checkout, read AGENTS.md and the
+the correct starter before acquiring it. After checkout, read README.md and the
 repository guides routed by the skill. Map only this reviewed API/MCP
 operation: <operation>. Do not call a live product, deploy, sign, register,
 spend funds, or change a Daski-issued artifact. Implement with fake-client

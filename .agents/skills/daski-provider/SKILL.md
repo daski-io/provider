@@ -30,7 +30,7 @@ Read only the references needed for the current task, completely when selected:
 - Preparing Testnet, Mainnet, an upgrade, a review packet, or a human
   handoff: [Onboarding and handoff](references/onboarding-handoff.md).
 
-After checkout, read that repository's `AGENTS.md` completely before acting.
+After checkout, read that repository's `README.md` completely before acting.
 Its `README.md`, `SECURITY.md`, and `docs/` are authoritative for the checked-out
 revision; do not substitute this summary or remembered Daski behavior for the
 actual contracts. An installed copy never updates itself; refresh it with
@@ -129,7 +129,7 @@ runtime bundle. An order that pays a supplier may spend at most the price
 check each spend with `checkSupplierSpend(context.supplierCostCeiling, ...)`.
 
 Full: read [Full-provider workflow](references/provider-full.md), then follow
-that repository's `AGENTS.md` and service guides. Do not apply lite contracts
+that repository's `README.md` and service guides. Do not apply lite contracts
 to full jobs, assets, or lifecycle work, and do not copy lite's runtime-bundle
 importer or external-job worker into full.
 

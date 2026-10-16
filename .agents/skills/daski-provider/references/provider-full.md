@@ -1,8 +1,22 @@
+---
+title: "Full-provider workflow"
+status: canonical
+authority: current repository implementation and approved maintainer workflow
+owner: repository maintainers
+effective-date: 2026-10-16
+last-verified: 2026-10-16 (documentation placement; no live release verification)
+supersedes: repository-wide agent files as the home of general repository guidance
+superseded-by: none
+sensitivity: public-safe
+related-repositories: daski-io/provider
+review-trigger: setup, architecture, interface or workflow change
+---
+
 # Full-provider workflow
 
 Read this reference only after `provider-full` is selected or when evaluating a
 product that may require its capabilities. Then read the checked-out
-`provider-full/AGENTS.md` and current documentation; they are authoritative.
+`provider-full/README.md` and current documentation; they are authoritative.
 
 Repository: `https://github.com/daski-io/provider-full`
 

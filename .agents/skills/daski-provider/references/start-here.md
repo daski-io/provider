@@ -1,3 +1,17 @@
+---
+title: "Start here: select a path and acquire a starter"
+status: canonical
+authority: current repository implementation and approved maintainer workflow
+owner: repository maintainers
+effective-date: 2026-10-16
+last-verified: 2026-10-16 (documentation placement; no live release verification)
+supersedes: repository-wide agent files as the home of general repository guidance
+superseded-by: none
+sensitivity: public-safe
+related-repositories: daski-io/provider
+review-trigger: setup, architecture, interface or workflow change
+---
+
 # Start here: select a path and acquire a starter
 
 Read this reference when there is no checkout yet, the user has not chosen a
@@ -9,7 +23,7 @@ repository may not fit the product.
 Determine which of these applies:
 
 1. **Existing provider fork:** work in the supplied repository. Inspect its
-   remotes, branch, status, `AGENTS.md`, package metadata, and documentation.
+   remotes, branch, status, `README.md`, package metadata, and documentation.
    Do not replace it with a fresh clone or discard local work without explicit
    direction.
 2. **Starter checkout:** verify whether it is `provider` or `provider-full`,
@@ -117,8 +131,8 @@ confirm its `metadata.version`.
 
 After checkout:
 
-1. Read `AGENTS.md` completely.
-2. Inspect `README.md`, `package.json`, `.env.example`, and the working tree.
+1. Read `README.md` completely.
+2. Inspect `package.json`, `.env.example`, and the working tree.
 3. Route to the repository's current guides:
 
    - setup: `docs/getting-started.md` and `docs/configuration.md`;

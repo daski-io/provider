@@ -18,7 +18,7 @@ describe("repository tooling contract", () => {
     // A copy of what the validator reads, with the entrypoint padded to size.
     const root = mkdtempSync(join(tmpdir(), "daski-skill-cap-"));
     try {
-      for (const path of [".agents", "package.json", "AGENTS.md", "docs", "src/core/serviceRegistry", "src/core/security"]) {
+      for (const path of [".agents", "package.json", "README.md", "docs", "src/core/serviceRegistry", "src/core/security"]) {
         cpSync(path, join(root, path), { recursive: true });
       }
       const skill = join(root, ".agents/skills/daski-provider/SKILL.md");
@@ -57,7 +57,7 @@ describe("repository tooling contract", () => {
     expect(startHere).toContain(`against in \`${record}\``);
     // docs/releasing.md explains the record; it does not name a commit itself.
     expect(startHere).not.toMatch(/`docs\/releasing\.md` names the gateway revision/);
-    for (const guide of ["docs/releasing.md", "README.md", "AGENTS.md"]) {
+    for (const guide of ["docs/releasing.md", "README.md"]) {
       expect(readFileSync(guide, "utf8"), guide).toContain(record);
     }
   });

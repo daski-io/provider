@@ -32,7 +32,7 @@ function walkPublicSources(path) {
 }
 
 for (const required of [
-  "README.md", "AGENTS.md", "SECURITY.md", "docs/getting-started.md",
+  "README.md", "SECURITY.md", "docs/getting-started.md",
   "docs/integrating-existing-product.md", "docs/adding-a-service.md",
   "docs/configuration.md", "docs/onboarding.md", "docs/troubleshooting.md",
   "docs/architecture.md", "docs/protocol-cheatsheet.md", "docs/agent-skill.md",

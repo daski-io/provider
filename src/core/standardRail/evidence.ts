@@ -12,7 +12,7 @@ import {
   type Hex,
 } from "viem";
 import { logWarn } from "../logger.js";
-import { assertExactKeys, canonicalHash, recipeNonce } from "./canonical.js";
+import { assertExactKeys, canonicalHash, recipeNonce, recipeNonceV2 } from "./canonical.js";
 import { assertActivationCheckpoint } from "./evidenceCheckpoint.js";
 import { selectReleaseAtPosition } from "./evidencePosition.js";
 import { hasRequiredConfirmations } from "./finality.js";
@@ -314,7 +314,22 @@ export class ProviderEvidenceVerifier {
             canonicalRequestHash: args.dispatch.canonicalRequestHash,
             orderNonce: args.dispatch.orderNonce,
           })
-        : null;
+        : args.dispatch.bindingProfile === "recipe-bound-v2"
+          // Option A slot layout: the two deal-document slots carry the
+          // runtime listing commitment hash and the provider intent hash.
+          ? recipeNonceV2({
+              chainId: args.dispatch.chainId,
+              canonicalToken: getAddress(args.outcome.token),
+              payer: getAddress(args.dispatch.payer),
+              splitter: getAddress(args.outcome.splitter),
+              grossAmount: BigInt(args.dispatch.grossAmount),
+              runtimeCommitmentHash: args.dispatch.listingManifestHash,
+              providerIntentHash: args.dispatch.providerOfferHash,
+              quoteHash: args.dispatch.quoteHash,
+              canonicalRequestHash: args.dispatch.canonicalRequestHash,
+              orderNonce: args.dispatch.orderNonce,
+            })
+          : null;
       const authorizationNonce = selectDepositAuthorization(usedByPayer, {
         depositLogIndex: args.dispatch.depositLogIndex,
         expectedNonce,

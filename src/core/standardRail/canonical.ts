@@ -67,6 +67,41 @@ export function recipeNonce(input: {
   ));
 }
 
+/**
+ * V2 order binding for dynamic-catalog listings: identical slot layout to
+ * V1 with the listing manifest hash replaced by the runtime listing
+ * commitment hash and the provider offer hash replaced by the provider
+ * intent hash. Verifiers must additionally check the intent hash equals the
+ * one embedded in the runtime commitment.
+ */
+export function recipeNonceV2(input: {
+  chainId: number;
+  canonicalToken: Address;
+  payer: Address;
+  splitter: Address;
+  grossAmount: bigint;
+  runtimeCommitmentHash: Hex;
+  providerIntentHash: Hex;
+  quoteHash: Hex;
+  canonicalRequestHash: Hex;
+  orderNonce: Hex;
+}): Hex {
+  return keccak256(encodeAbiParameters(
+    [
+      { type: "bytes32" }, { type: "uint256" }, { type: "address" },
+      { type: "address" }, { type: "address" }, { type: "uint256" },
+      { type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" },
+      { type: "bytes32" }, { type: "bytes32" },
+    ],
+    [
+      keccak256(stringToHex("DaskiStandardExactOrderV2")), BigInt(input.chainId),
+      input.canonicalToken, input.payer, input.splitter, input.grossAmount,
+      input.runtimeCommitmentHash, input.providerIntentHash, input.quoteHash,
+      input.canonicalRequestHash, input.orderNonce,
+    ],
+  ));
+}
+
 export function assertExactKeys(value: unknown, expected: readonly string[], label: string): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);

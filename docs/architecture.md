@@ -1,3 +1,17 @@
+---
+title: "Architecture"
+status: canonical
+authority: current repository implementation and approved maintainer workflow
+owner: repository maintainers
+effective-date: 2026-10-21 (payout interval evidence); other sections unchanged
+last-verified: 2026-10-21 (payout interval against releaseInterval.ts and evidence.ts; no live release verification)
+supersedes: none
+superseded-by: none
+sensitivity: public-safe
+related-repositories: daski-io/provider; daski-io/provider-full; daski-io/gateway; daski-io/contracts
+review-trigger: setup, architecture, interface or workflow change
+---
+
 # Architecture
 
 ## Scope
@@ -162,6 +176,19 @@ new claim only past the protocol's first-dispatch bound: a dispatch issued
 more than 30 days (`MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS`) after the
 forwarded QuoteV1's `validBefore`, which the gateway never sends, is refused
 as `quote_window`, judged on those two signed values.
+
+Deposit/release ordering is proved from a bounded slice of the splitter's
+history. The splitter's reviewed code pays out its whole balance on each
+release, moves the token at no other time and numbers releases one by one, so
+core reads its token balance and release sequence at the end of the block
+before the deposit, then only the token credits from the deposit block to the
+dispatched release N. A sequence of N - 1 there means no release came between
+them, and accounting starts with that balance; a lower one puts release N - 1
+in the deposit block or later, where it must appear exactly once and
+accounting starts at zero strictly after it; any other sequence is refused. A
+dispatch therefore costs two state reads and usually one log request however
+old its listing, and the evidence RPCs must answer state at the deposit block
+and the block before it.
 
 The verified payer is supplied to the adapter as context. It is not inferred
 from input. The request body is not persisted. A terminal result is persisted

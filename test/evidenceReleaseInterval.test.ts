@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getAddress, keccak256, padHex, type Address, type Hex } from "viem";
+import { encodeAbiParameters, getAddress, keccak256, padHex, type Address, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
-import { canonicalHash, recipeNonce } from "../src/core/standardRail/canonical.js";
+import { canonicalHash, recipeNonce, recipeNonceV2 } from "../src/core/standardRail/canonical.js";
 import type { ProviderStandardRailConfig } from "../src/core/standardRail/config.js";
 import { ProviderEvidenceVerifier } from "../src/core/standardRail/evidence.js";
 import type {
@@ -59,7 +59,10 @@ const quote: SignedEnvelope<QuoteV1> = {
   },
 };
 
-function dispatchFor(releaseSequence: bigint): StandardRailDispatchV2 {
+function dispatchFor(
+  releaseSequence: bigint,
+  bindingProfile: StandardRailDispatchV2["bindingProfile"] = "recipe-bound-v1",
+): StandardRailDispatchV2 {
   return {
     environment: "testnet", chainId: 84532, gatewayAudience: "https://gateway.example",
     providerAudience: "https://provider.example", providerControlProfileHash: outcome.providerControlProfileHash,
@@ -67,7 +70,7 @@ function dispatchFor(releaseSequence: bigint): StandardRailDispatchV2 {
     reputationEligible: false, reputationContract: "0x4545454545454545454545454545454545454545",
     outcomeSchemaUid: hash("2"), dispatchNonce: hash("3"), payer,
     listingManifestHash: outcome.listingManifestHash, providerOfferHash: outcome.providerOfferHash,
-    quoteHash: canonicalHash(quote), bindingProfile: "recipe-bound-v1", canonicalRequestHash: hash("5"),
+    quoteHash: canonicalHash(quote), bindingProfile, canonicalRequestHash: hash("5"),
     orderNonce: hash("6"), buyerIdentityProofHash: hash("0"), activeRailProfileHash: outcome.activeRailProfileHash,
     facilitatorConfirmationHash: hash("7"),
     settlementTxHash: hash("a"), depositBlockNumber: DEPOSIT_BLOCK.toString(), depositBlockHash: hash("b"),
@@ -98,13 +101,30 @@ function bundleFor(dispatch: StandardRailDispatchV2): StandardEvidenceBundleV2 {
   };
 }
 
+/** The authorization nonce the buyer signs for `dispatch` under its binding profile. */
+function signedNonce(dispatch: StandardRailDispatchV2): Hex {
+  const order = {
+    chainId: dispatch.chainId, canonicalToken: outcome.token, payer, splitter: outcome.splitter,
+    grossAmount: BigInt(dispatch.grossAmount), quoteHash: dispatch.quoteHash,
+    canonicalRequestHash: dispatch.canonicalRequestHash, orderNonce: dispatch.orderNonce,
+  };
+  return dispatch.bindingProfile === "recipe-bound-v2"
+    ? recipeNonceV2({
+        ...order, runtimeCommitmentHash: dispatch.listingManifestHash, providerIntentHash: dispatch.providerOfferHash,
+      })
+    : recipeNonce({
+        ...order, listingManifestHash: dispatch.listingManifestHash, providerOfferHash: dispatch.providerOfferHash,
+      });
+}
+
 /**
  * A chain on which the dispatch's deposit and release are final, the token
  * and splitter code is unchanged, and the splitter had `checkpoint` at the end
- * of the block before the deposit. Released-event searches find `previous`.
+ * of the block before the deposit. Released-event searches find `previous`;
+ * the payer's authorization carries `authorizationNonce`.
  */
 function chain(dispatch: StandardRailDispatchV2, checkpoint: { balance: bigint; releaseSequence: bigint },
-  previous: unknown[] = []) {
+  previous: unknown[] = [], authorizationNonce: Hex = signedNonce(dispatch)) {
   h.getBlockNumber.mockResolvedValue(RELEASE_BLOCK + 10n);
   h.getBlock.mockResolvedValue({ hash: dispatch.depositBlockHash, timestamp: BigInt(DEPOSIT_TIME) });
   h.getCode.mockResolvedValue(runtime);
@@ -126,12 +146,7 @@ function chain(dispatch: StandardRailDispatchV2, checkpoint: { balance: bigint; 
   h.parsedLogs.mockImplementation(({ eventName, logs }: { eventName: string; logs: string[] }) => {
     if (eventName === "AuthorizationUsed") return [{
       address: outcome.token, logIndex: dispatch.depositLogIndex - 1,
-      args: { authorizer: payer, nonce: recipeNonce({
-        chainId: dispatch.chainId, canonicalToken: outcome.token, payer, splitter: outcome.splitter,
-        grossAmount: BigInt(dispatch.grossAmount), listingManifestHash: dispatch.listingManifestHash,
-        providerOfferHash: dispatch.providerOfferHash, quoteHash: dispatch.quoteHash,
-        canonicalRequestHash: dispatch.canonicalRequestHash, orderNonce: dispatch.orderNonce,
-      }) },
+      args: { authorizer: payer, nonce: authorizationNonce },
     }];
     if (eventName === "Released") return [{
       address: outcome.splitter, blockNumber: RELEASE_BLOCK, transactionIndex: dispatch.releaseTransactionIndex,
@@ -205,5 +220,45 @@ describe("paid-dispatch evidence payout interval", () => {
     }));
     expect(h.getLogs).not.toHaveBeenCalled();
     expect(h.coverage).not.toHaveBeenCalled();
+  });
+});
+
+describe("paid-dispatch evidence payment authorization", () => {
+  const authorizationKey = (dispatch: StandardRailDispatchV2) => keccak256(encodeAbiParameters(
+    [{ type: "uint256" }, { type: "address" }, { type: "address" }, { type: "bytes32" }],
+    [BigInt(dispatch.chainId), getAddress(outcome.token), getAddress(payer), signedNonce(dispatch)],
+  ));
+
+  /** The verifier stops at the payer's authorization: the payout is never read. */
+  async function refused(dispatch: StandardRailDispatchV2, authorizationNonce: Hex) {
+    vi.useFakeTimers();
+    chain(dispatch, { balance: 0n, releaseSequence: 0n }, [], authorizationNonce);
+    const rejected = expect(verify(dispatch)).rejects.toThrow("RPC observation failed");
+    await vi.advanceTimersByTimeAsync(6_001);
+    await rejected;
+    expect(h.parsedLogs).toHaveBeenCalledWith(expect.objectContaining({ eventName: "AuthorizationUsed" }));
+    expect(h.parsedLogs).not.toHaveBeenCalledWith(expect.objectContaining({ eventName: "Released" }));
+    expect(h.coverage).not.toHaveBeenCalled();
+  }
+
+  it("admits a recipe-bound-v2 payment whose authorization commits to this order", async () => {
+    const dispatch = dispatchFor(1n, "recipe-bound-v2");
+    chain(dispatch, { balance: 0n, releaseSequence: 0n });
+    await expect(verify(dispatch)).resolves.toEqual({ authorizationKey: authorizationKey(dispatch) });
+  });
+
+  it.each<[string, (dispatch: StandardRailDispatchV2) => Hex]>([
+    ["another order", (dispatch) => signedNonce({ ...dispatch, orderNonce: hash("e") })],
+    ["another request", (dispatch) => signedNonce({ ...dispatch, canonicalRequestHash: hash("f") })],
+    ["another quote", (dispatch) => signedNonce({ ...dispatch, quoteHash: hash("8") })],
+    ["the same order under the v1 recipe", (dispatch) => signedNonce({ ...dispatch, bindingProfile: "recipe-bound-v1" })],
+  ])("refuses a recipe-bound-v2 payment whose authorization commits to %s", async (_label, nonceFor) => {
+    const dispatch = dispatchFor(1n, "recipe-bound-v2");
+    await refused(dispatch, nonceFor(dispatch));
+  });
+
+  it("still requires the recipe-bound-v1 nonce for a v1 payment", async () => {
+    const dispatch = dispatchFor(1n);
+    await refused(dispatch, signedNonce({ ...dispatch, bindingProfile: "recipe-bound-v2" }));
   });
 });

@@ -2,8 +2,9 @@
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
 FROM ${NODE_IMAGE} AS base
 # Debian security updates for PCRE2, Perl and APT that the pinned Node image
-# predates. Pinned versions keep the build reproducible; move them forward
-# with the base image digest.
+# predates. The versions are pinned, and Debian's security archive keeps only
+# the latest, so the build fails rather than drifting once a newer update
+# ships: bump them then, or with the base image digest.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
     libpcre2-8-0=10.42-1+deb12u2 perl-base=5.36.0-7+deb12u4 \

@@ -8,7 +8,8 @@ import {
 import { DispatchRejectedError } from "../src/core/standardRail/dispatchErrors.js";
 import { verifyQuoteEnvelope } from "../src/core/standardRail/quoteBinding.js";
 import type { QuoteV1, StandardRailDispatchV2 } from "../src/core/standardRail/types.js";
-import { nowSeconds, signGatewayEnvelope } from "./gatewayWire.js";
+import { privateKeyToAccount } from "viem/accounts";
+import { gatewaySigner, nowSeconds, signGatewayEnvelope } from "./gatewayWire.js";
 import { railConfig, railOutcome } from "./standardRailServiceFixture.js";
 
 describe("standard dispatch contract", () => {
@@ -86,5 +87,18 @@ describe("first-dispatch quote age bound", () => {
       .then(() => null, (error: unknown) => error);
     expect(refused).toBeInstanceOf(DispatchRejectedError);
     expect(refused).toMatchObject({ reason: "quote_window", authenticated: true });
+  });
+
+  it("keeps a quote signed before a gateway key rotation dispatchable while the previous signer is set", async () => {
+    const quoted = await order((validBefore) => validBefore + 60);
+    const rotated = privateKeyToAccount(`0x${"56".repeat(32)}` as Hex).address;
+    const afterRotation = { ...config, gatewayDispatchSigner: rotated, gatewayQuoteSigner: rotated };
+    const refused = await verifyQuoteEnvelope(quoted.quote, quoted.dispatch, outcome, afterRotation, 84532)
+      .then(() => null, (error: unknown) => error);
+    expect(refused).toMatchObject({ reason: "signature" });
+    await expect(verifyQuoteEnvelope(quoted.quote, quoted.dispatch, outcome, {
+      ...afterRotation,
+      gatewayPreviousSigner: gatewaySigner,
+    }, 84532)).resolves.toBeUndefined();
   });
 });

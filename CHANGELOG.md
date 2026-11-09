@@ -4,6 +4,23 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Added
+
+- Gateway key rotation without re-issued artifacts. The provider trusted
+  exactly one gateway address, `STANDARD_RAIL_GATEWAY_SIGNER`, both for
+  short-lived runtime envelopes (quote and intake requests, forwarded quotes,
+  dispatches, status queries, lifecycle grants) and for long-lived artifacts
+  (the global policy envelopes and the runtime bundle's listing
+  preparations). Long-lived artifact hashes cover their signatures and are
+  bound into splitters, so a new gateway key could not be adopted without
+  invalidating every listing. Two optional settings separate the cases:
+  `STANDARD_RAIL_GATEWAY_SIGNER_PREVIOUS` keeps the previous signer accepted
+  for runtime envelopes while the gateway switches keys, and
+  `STANDARD_RAIL_GATEWAY_ARTIFACT_SIGNERS` lists the signers of the carried
+  artifacts. Both default to `STANDARD_RAIL_GATEWAY_SIGNER`, so nothing
+  changes until they are set; `STANDARD_RAIL_GATEWAY_SIGNER` must now be a
+  non-zero address. No wire or schema change.
+
 ### Security
 
 - zod moves from 3.25 to 4.6.7: every zod 3 release is affected by

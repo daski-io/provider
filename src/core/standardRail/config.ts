@@ -10,6 +10,7 @@ import {
   type StandardRailGlobalPolicy,
 } from "./catalogOutcomes.js";
 import type { ProviderOutcomeLaunchPolicy } from "./launchPolicy.js";
+import { parseGatewaySigners } from "./gatewaySigners.js";
 import { validateOutcome } from "./outcomeValidation.js";
 import {
   parseRetainedControlProfiles,
@@ -29,6 +30,10 @@ export interface ProviderStandardRailConfig {
   gatewayQuoteSigner: Address;
   /** Signs ProviderLifecycleGrantV1 as `gateway-lifecycle`. */
   gatewayLifecycleSigner: Address;
+  /** A rotated-out gateway signer still accepted for runtime envelopes. */
+  gatewayPreviousSigner?: Address | null;
+  /** Signers of the release artifacts this deployment carries. */
+  gatewayArtifactSigners?: readonly Address[];
   providerAuthorityKey: Address;
   providerAuthorityPrivateKey: Hex;
   terminalAttestationPrivateKey: Hex;
@@ -135,7 +140,8 @@ export async function loadProviderStandardRailConfig(
   const canonicalToken = getAddress(need(env, "USDC_ADDRESS"));
   const environment =
     env.STANDARD_RAIL_ENVIRONMENT?.trim() || (chainId === 8453 ? "mainnet" : "testnet");
-  const gatewaySigner = getAddress(need(env, "STANDARD_RAIL_GATEWAY_SIGNER"));
+  const gatewaySigners = parseGatewaySigners(env);
+  const gatewaySigner = gatewaySigners.current;
   const { gatewayOrigin, gatewayAudience } = resolveGatewayIdentity(env);
   const reviewedPaidSkills = new Set(launchPolicy.paidSkills.map((skill) =>
     `${skill.serviceSlug}:${skill.skillId}`));
@@ -146,7 +152,7 @@ export async function loadProviderStandardRailConfig(
     environment,
     chainId,
     gatewayAudience,
-    gatewaySigner,
+    gatewaySigners: gatewaySigners.artifacts,
     env,
   });
   const providerControlProfileHash = bytes32(
@@ -213,6 +219,8 @@ export async function loadProviderStandardRailConfig(
     gatewayDispatchSigner: gatewaySigner,
     gatewayQuoteSigner: gatewaySigner,
     gatewayLifecycleSigner: gatewaySigner,
+    gatewayPreviousSigner: gatewaySigners.previous,
+    gatewayArtifactSigners: gatewaySigners.artifacts,
     providerAuthorityKey,
     providerAuthorityPrivateKey,
     terminalAttestationPrivateKey,

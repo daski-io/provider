@@ -1,5 +1,6 @@
 import { concatHex, encodeAbiParameters, getAddress, keccak256, type Address, type Hex } from "viem";
 import { recoverMessageAddress } from "viem";
+import { trustsGatewaySigner } from "./gatewaySigners.js";
 import type { ProviderOutcomeConfig, SignedEnvelope } from "./types.js";
 import {
   SIGNED_ENVELOPE_KEYS,
@@ -88,7 +89,7 @@ async function verifyGlobalEnvelope(args: {
   environment: string;
   chainId: number;
   gatewayAudience: string;
-  gatewaySigner: Address;
+  gatewaySigners: readonly Address[];
 }): Promise<void> {
   assertExactKeys(
     args.envelope as unknown as Record<string, unknown>,
@@ -114,7 +115,7 @@ async function verifyGlobalEnvelope(args: {
   } catch {
     throw new Error(`${args.artifactType} signature is invalid`);
   }
-  if (getAddress(recovered) !== getAddress(args.gatewaySigner)) {
+  if (!trustsGatewaySigner(args.gatewaySigners, recovered)) {
     throw new Error(`${args.artifactType} signature is invalid`);
   }
 }
@@ -123,7 +124,8 @@ export async function loadStandardRailGlobalPolicy(args: {
   environment: string;
   chainId: number;
   gatewayAudience: string;
-  gatewaySigner: Address;
+  /** The release-artifact signers; the policy envelopes are never re-signed. */
+  gatewaySigners: readonly Address[];
   env?: NodeJS.ProcessEnv;
 }): Promise<StandardRailGlobalPolicy> {
   const env = args.env ?? process.env;
@@ -149,7 +151,7 @@ export async function loadStandardRailGlobalPolicy(args: {
     environment: args.environment,
     chainId: args.chainId,
     gatewayAudience: args.gatewayAudience,
-    gatewaySigner: args.gatewaySigner,
+    gatewaySigners: args.gatewaySigners,
   });
   await verifyGlobalEnvelope({
     envelope: parsed.chainEvidencePolicy,
@@ -158,7 +160,7 @@ export async function loadStandardRailGlobalPolicy(args: {
     environment: args.environment,
     chainId: args.chainId,
     gatewayAudience: args.gatewayAudience,
-    gatewaySigner: args.gatewaySigner,
+    gatewaySigners: args.gatewaySigners,
   });
   await verifyGlobalEnvelope({
     envelope: parsed.activeRailProfile,
@@ -167,7 +169,7 @@ export async function loadStandardRailGlobalPolicy(args: {
     environment: args.environment,
     chainId: args.chainId,
     gatewayAudience: args.gatewayAudience,
-    gatewaySigner: args.gatewaySigner,
+    gatewaySigners: args.gatewaySigners,
   });
   if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(parsed.splitterCreationCode)) {
     throw new Error("Global policy splitter creation code is invalid");

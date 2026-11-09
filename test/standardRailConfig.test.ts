@@ -66,6 +66,28 @@ describe("minimal standard-rail configuration", () => {
     expect(config.providerAuthorityKey).toBe(config.terminalAttestationKey);
   });
 
+  it("keeps a global policy signed by an earlier gateway key trusted during a rotation", async () => {
+    const { env, head } = await catalogEnvironment();
+    const rotated = privateKeyToAccount(`0x${"56".repeat(32)}` as Hex).address;
+    env.STANDARD_RAIL_GATEWAY_SIGNER = rotated;
+    const load = () => loadProviderStandardRailConfig(policy, env, { headsOverride: [head] });
+    await expect(load()).rejects.toThrow(/signature is invalid/);
+    env.STANDARD_RAIL_GATEWAY_SIGNER_PREVIOUS = testGatewaySigner;
+    await expect(load()).rejects.toThrow(/signature is invalid/);
+    env.STANDARD_RAIL_GATEWAY_ARTIFACT_SIGNERS = testGatewaySigner;
+    const config = await load();
+    expect(config.gatewayDispatchSigner).toBe(rotated);
+    expect(config.gatewayPreviousSigner).toBe(testGatewaySigner);
+    expect(config.gatewayArtifactSigners).toEqual([testGatewaySigner]);
+  });
+
+  it("defaults the release-artifact signers to the current gateway signer", async () => {
+    const { env, head } = await catalogEnvironment();
+    const config = await loadProviderStandardRailConfig(policy, env, { headsOverride: [head] });
+    expect(config.gatewayPreviousSigner).toBeNull();
+    expect(config.gatewayArtifactSigners).toEqual([testGatewaySigner]);
+  });
+
   it("boots before onboarding with a stable missing-listing warning", async () => {
     const { env } = await catalogEnvironment();
     const warnings: string[] = [];

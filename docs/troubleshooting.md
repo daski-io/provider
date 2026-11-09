@@ -284,8 +284,9 @@ The gateway reports `PROVIDER_QUOTE_REJECTED` for a provider 4xx and
 provider log's `reason`:
 
 - `envelope`/`signature`: environment, chain, provider audience
-  (`STANDARD_RAIL_PROVIDER_AUDIENCE`), `STANDARD_RAIL_GATEWAY_SIGNER`, or a
-  clock more than 30 seconds off;
+  (`STANDARD_RAIL_PROVIDER_AUDIENCE`), `STANDARD_RAIL_GATEWAY_SIGNER` (and,
+  during a gateway key rotation, `STANDARD_RAIL_GATEWAY_SIGNER_PREVIOUS`), or
+  a clock more than 30 seconds off;
 - `outcome_policy`: the gateway quoted a listing version that is not the
   installed runtime-catalog head; install the matching bundle;
 - `request_invalid`: the request fails the published schema or the service's

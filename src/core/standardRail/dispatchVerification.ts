@@ -8,6 +8,7 @@ import {
 } from "./dispatchContract.js";
 import { DispatchRejectedError } from "./dispatchErrors.js";
 import { GATEWAY_DISPATCH_KEY_ID, gatewayEnvelopeSigner } from "./gatewayEnvelope.js";
+import { runtimeGatewaySigners, trustsGatewaySigner } from "./gatewaySigners.js";
 import type {
   ProviderOutcomeConfig,
   SignedEnvelope,
@@ -54,7 +55,9 @@ export async function authenticateDispatchEnvelope(
   } catch {
     throw unauthenticated("signature");
   }
-  if (signer !== config.gatewayDispatchSigner) throw unauthenticated("signature");
+  if (!trustsGatewaySigner(
+    runtimeGatewaySigners(config.gatewayDispatchSigner, config.gatewayPreviousSigner), signer,
+  )) throw unauthenticated("signature");
   const dispatch = envelope.payload;
   if (
     dispatch.gatewayAudience !== config.gatewayAudience

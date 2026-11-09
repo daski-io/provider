@@ -12,6 +12,7 @@ import {
   type ListingSigner,
 } from "./dispatchResponse.js";
 import { GatewayEnvelopeError, verifyGatewayRequestEnvelope } from "./gatewayEnvelope.js";
+import { runtimeGatewaySigners } from "./gatewaySigners.js";
 import { dispatchHashOf, findTransaction } from "./transactionStore.js";
 import type { DispatchStatusQueryV1 } from "./types.js";
 
@@ -40,7 +41,10 @@ export async function answerDispatchStatus(
       environment: context.config.environment,
       chainId: context.chainId,
       audience: context.config.servicingAudiences,
-      signer: context.config.gatewayDispatchSigner,
+      signers: runtimeGatewaySigners(
+        context.config.gatewayDispatchSigner,
+        context.config.gatewayPreviousSigner,
+      ),
     });
     query = envelope.payload;
     if (

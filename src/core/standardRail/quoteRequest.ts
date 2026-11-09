@@ -2,6 +2,7 @@ import type { Hex } from "viem";
 import { canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { GatewayEnvelopeError, verifyGatewayRequestEnvelope } from "./gatewayEnvelope.js";
+import { runtimeGatewaySigners } from "./gatewaySigners.js";
 import { assertBoundedJsonValue, REQUEST_JSON_BUDGET } from "./jsonBounds.js";
 import { QuoteRefusal } from "./quoteErrors.js";
 import type { ProviderOutcomeConfig, SignedEnvelope } from "./types.js";
@@ -24,7 +25,7 @@ export async function authenticateQuotedRequest<T>(args: {
       environment: args.config.environment,
       chainId: args.chainId,
       audience: args.config.providerAudience,
-      signer: args.config.gatewayDispatchSigner,
+      signers: runtimeGatewaySigners(args.config.gatewayDispatchSigner, args.config.gatewayPreviousSigner),
     });
   } catch (error) {
     const signature = error instanceof GatewayEnvelopeError && error.failure === "signature";

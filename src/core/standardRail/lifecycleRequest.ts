@@ -3,6 +3,7 @@ import { assertExactKeys, canonicalHash } from "./canonical.js";
 import type { ProviderStandardRailConfig } from "./config.js";
 import { HASH32_PATTERN, ORDER_ID_PATTERN } from "./dispatchContract.js";
 import { GatewayEnvelopeError, verifyGatewayRequestEnvelope } from "./gatewayEnvelope.js";
+import { runtimeGatewaySigners } from "./gatewaySigners.js";
 import { assertBoundedJsonValue, REQUEST_JSON_BUDGET } from "./jsonBounds.js";
 import { LifecycleRejectedError, LifecycleUnavailableError } from "./lifecycleErrors.js";
 import {
@@ -99,7 +100,7 @@ export async function verifyLifecycleGrant(
       environment: config.environment,
       chainId,
       audience: config.servicingAudiences,
-      signer: config.gatewayLifecycleSigner,
+      signers: runtimeGatewaySigners(config.gatewayLifecycleSigner, config.gatewayPreviousSigner),
       signerKeyId: GATEWAY_LIFECYCLE_KEY_ID,
     });
   } catch (error) {

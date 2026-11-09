@@ -4,6 +4,7 @@ import type { ProviderStandardRailConfig } from "./config.js";
 import { HASH32_PATTERN as HASH32, MAX_FIRST_DISPATCH_QUOTE_AGE_SECONDS } from "./dispatchContract.js";
 import { DispatchRejectedError } from "./dispatchErrors.js";
 import { gatewayEnvelopeSigner } from "./gatewayEnvelope.js";
+import { runtimeGatewaySigners, trustsGatewaySigner } from "./gatewaySigners.js";
 import { assertFixedQuotePolicy } from "./paymentBinding.js";
 import type { ProviderQuotePayload } from "./quoteStore.js";
 import type {
@@ -63,7 +64,9 @@ export async function verifyQuoteEnvelope(
   } catch {
     throw new DispatchRejectedError("signature");
   }
-  if (signer !== config.gatewayQuoteSigner) throw new DispatchRejectedError("signature");
+  if (!trustsGatewaySigner(
+    runtimeGatewaySigners(config.gatewayQuoteSigner, config.gatewayPreviousSigner), signer,
+  )) throw new DispatchRejectedError("signature");
   const quote = envelope.payload;
   if (
     quote.listingManifestHash !== dispatch.listingManifestHash

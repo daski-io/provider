@@ -36,6 +36,11 @@ import {
   loadListingObligations,
 } from "./core/standardRail/retainedObligations.js";
 import { buildServicingCatalog } from "./core/standardRail/servicingCatalog.js";
+import {
+  parseGatewaySigners,
+  registrationGatewaySigners,
+  trustsGatewaySigner,
+} from "./core/standardRail/gatewaySigners.js";
 import { externalJobKeyRing } from "./core/externalJobs/keyRing.js";
 import { externalJobServicing } from "./core/externalJobs/servicing.js";
 import type { SignedEnvelope } from "./core/standardRail/types.js";
@@ -76,7 +81,8 @@ async function verifyEnvelope(
   envelope: SignedEnvelope<unknown>,
   expected: {
     artifactType: string;
-    signer: Address;
+    /** Every signer this artifact may carry: earlier gateway keys stay trusted. */
+    signers: readonly Address[];
     environment: string;
     chainId: number;
     audience: string;
@@ -108,7 +114,7 @@ async function verifyEnvelope(
   } catch {
     throw new Error(`${expected.artifactType} signature is invalid`);
   }
-  if (getAddress(recovered) !== getAddress(expected.signer)) {
+  if (!trustsGatewaySigner(expected.signers, recovered)) {
     throw new Error(`${expected.artifactType} signature is invalid`);
   }
 }
@@ -157,9 +163,7 @@ export async function validateRuntimeBundleSet(value: unknown): Promise<{
   if (expectedPaid.size === 0) throw new Error("runtime bundle service has no paid skills");
   const expectedServiceContractHash = serviceContractHash(extension);
   const covered = new Set<string>();
-  const gatewaySigner = getAddress(
-    process.env.STANDARD_RAIL_GATEWAY_SIGNER ?? "",
-  );
+  const gatewaySigners = parseGatewaySigners(process.env);
   const environment = process.env.STANDARD_RAIL_ENVIRONMENT?.trim() ||
     (config.CHAIN_ID === 8453 ? "mainnet" : "testnet");
   const audience = process.env.STANDARD_RAIL_GATEWAY_AUDIENCE?.trim() || gatewayOrigin;
@@ -170,7 +174,7 @@ export async function validateRuntimeBundleSet(value: unknown): Promise<{
     environment,
     chainId: config.CHAIN_ID,
     gatewayAudience: audience,
-    gatewaySigner,
+    gatewaySigners: gatewaySigners.artifacts,
   });
   const providerControlProfileHash = bytes32(
     process.env.STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH ?? "",
@@ -255,7 +259,7 @@ export async function validateRuntimeBundleSet(value: unknown): Promise<{
     ], `runtime listing ${version.skillId} gateway preparation`);
     await verifyEnvelope(intent, {
       artifactType: "ProviderServiceRegistrationIntentV1",
-      signer: providerSigner,
+      signers: [providerSigner],
       environment,
       chainId: config.CHAIN_ID,
       audience,
@@ -263,7 +267,7 @@ export async function validateRuntimeBundleSet(value: unknown): Promise<{
     });
     await verifyEnvelope(preparation, {
       artifactType: "GatewayListingPreparationV1",
-      signer: gatewaySigner,
+      signers: registrationGatewaySigners(gatewaySigners),
       environment,
       chainId: config.CHAIN_ID,
       audience,

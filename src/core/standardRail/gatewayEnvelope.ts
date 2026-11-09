@@ -1,5 +1,6 @@
 import { getAddress, recoverMessageAddress, type Address, type Hex } from "viem";
 import { assertExactKeys, SIGNED_ENVELOPE_KEYS, unsignedEnvelopeHash } from "./canonical.js";
+import { trustsGatewaySigner } from "./gatewaySigners.js";
 import type { SignedEnvelope } from "./types.js";
 
 /** Key id the gateway uses for quote, intake, dispatch and status requests. */
@@ -63,7 +64,8 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
   chainId: number;
   /** The exact provider audience, or the accepted set for servicing calls. */
   audience: string | ReadonlySet<string>;
-  signer: Address;
+  /** The trusted signers: the role's current one, and the previous one during a rotation. */
+  signers: readonly Address[];
   /** Defaults to `gateway-dispatch`; lifecycle grants use `gateway-lifecycle`. */
   signerKeyId?: string;
 }): Promise<SignedEnvelope<T>> {
@@ -98,7 +100,7 @@ export async function verifyGatewayRequestEnvelope<T>(value: unknown, expected: 
   } catch {
     throw new GatewayEnvelopeError("envelope", `${label} payload fields are invalid`);
   }
-  if (await gatewayEnvelopeSigner(envelope) !== getAddress(expected.signer)) {
+  if (!trustsGatewaySigner(expected.signers, await gatewayEnvelopeSigner(envelope))) {
     throw new GatewayEnvelopeError("signature", `${label} signature is invalid`);
   }
   return envelope;

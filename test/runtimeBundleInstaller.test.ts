@@ -3,6 +3,7 @@ import {
   encodeAbiParameters,
   getCreate2Address,
   keccak256,
+  type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
@@ -172,6 +173,19 @@ describe("Daski-assisted runtime bundle installation", () => {
       USDC: { type: "one-time", fixed_amount: "10001" },
     };
     await expect(validateRuntimeBundleSet(drifted)).rejects.toThrow(/provider build/);
+  });
+
+  it("keeps artifacts signed before a gateway key rotation installable", async () => {
+    const artifact = await validRuntimeBundle();
+    process.env.STANDARD_RAIL_GATEWAY_SIGNER = privateKeyToAccount(`0x${"56".repeat(32)}` as Hex).address;
+    try {
+      await expect(validateRuntimeBundleSet(artifact)).rejects.toThrow(/signature is invalid/);
+      process.env.STANDARD_RAIL_GATEWAY_ARTIFACT_SIGNERS = testGatewaySigner;
+      await expect(validateRuntimeBundleSet(artifact)).resolves.toMatchObject({ gatewayOrigin });
+    } finally {
+      delete process.env.STANDARD_RAIL_GATEWAY_ARTIFACT_SIGNERS;
+      process.env.STANDARD_RAIL_GATEWAY_SIGNER = testGatewaySigner;
+    }
   });
 
   it("rejects unsigned shape extensions before persistence", async () => {

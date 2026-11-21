@@ -4,6 +4,19 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Changed
+
+- The global rail policy (`STANDARD_RAIL_GLOBAL_POLICY_JSON`) no longer stops
+  the provider at its envelopes' `validBefore`. The policy is long-lived: its
+  envelope hashes feed every listing's `policyVersionHash`, which its splitter
+  pins on chain, so it cannot be re-signed with new dates without breaking
+  every listing. The provider now checks the policy's signer, network and
+  hashes and treats its dates as informational, so the same value keeps
+  working after them; before this change a provider refused to start once
+  they passed. Short-lived envelopes (quote and intake requests, quotes,
+  dispatches, status queries, lifecycle grants) keep their expiry. No wire,
+  schema or configuration change.
+
 ### Added
 
 - Gateway key rotation without re-issued artifacts. The provider trusted

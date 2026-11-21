@@ -135,7 +135,7 @@ unavailable there. Read-capability reads never need the RPC.
 | `STANDARD_RAIL_GATEWAY_AUDIENCE` | Exact signed gateway audience; normally the gateway origin. |
 | `STANDARD_RAIL_PROVIDER_AUDIENCE` | Exact signed provider audience; normally `BASE_URL`. |
 | `STANDARD_RAIL_RETAINED_PROVIDER_AUDIENCES` | Optional comma-separated previous provider audiences that dispatch, status and lifecycle calls for older orders may still name. Quotes and intake use only the current audience. |
-| `STANDARD_RAIL_GLOBAL_POLICY_JSON` | Daski-issued JSON containing the signed chain-evidence, active-rail, and capability envelopes plus reviewed global code hashes. Preserve exactly. |
+| `STANDARD_RAIL_GLOBAL_POLICY_JSON` | Daski-issued JSON containing the signed chain-evidence, active-rail, and capability envelopes plus reviewed global code hashes. Preserve exactly. The envelopes' `validBefore` dates are informational: the provider checks their signer, network and hashes, not their dates, so the same value keeps working after them. |
 | `STANDARD_RAIL_PROVIDER_CONTROL_PROFILE_HASH` | Reviewed bytes32 provider endpoint/control profile binding. |
 | `STANDARD_RAIL_RETAINED_CONTROL_PROFILE_HASHES` | Optional comma-separated previous control-profile hashes (at most 16) that first dispatches of orders quoted under them may still carry. Never the current one, never repeated. |
 | `STANDARD_RAIL_FINALITY_CONFIRMATIONS` | Positive evidence-finality requirement; default 12, coordinated with Daski. |
